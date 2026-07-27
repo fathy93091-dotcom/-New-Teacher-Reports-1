@@ -1,0 +1,167 @@
+{
+  "entities": {
+    "Student": {
+      "title": "Student",
+      "description": "Student profile managed by Islamic teacher",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "teacherId": { "type": "string", "maxLength": 128 },
+        "fullName": { "type": "string", "maxLength": 150 },
+        "preferredName": { "type": "string", "maxLength": 100 },
+        "gender": { "type": "string", "enum": ["Male", "Female"] },
+        "dateOfBirth": { "type": "string", "maxLength": 50 },
+        "age": { "type": "number" },
+        "nationality": { "type": "string", "maxLength": 100 },
+        "country": { "type": "string", "maxLength": 100 },
+        "timeZone": { "type": "string", "maxLength": 100 },
+        "parentName": { "type": "string", "maxLength": 150 },
+        "parentContact": { "type": "string", "maxLength": 100 },
+        "currentLevel": { "type": "string", "maxLength": 100 },
+        "subjects": { "type": "array" },
+        "status": { "type": "string", "enum": ["Active", "Archived"] },
+        "notes": { "type": "string", "maxLength": 2000 },
+        "createdAt": { "type": "string", "maxLength": 50 },
+        "lastActiveDate": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "fullName", "parentName", "gender", "status"]
+    },
+    "Session": {
+      "title": "Session",
+      "description": "Teaching session record for a student",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "sessionNumber": { "type": "number" },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "teacherId": { "type": "string", "maxLength": 128 },
+        "date": { "type": "string", "maxLength": 50 },
+        "time": { "type": "string", "maxLength": 50 },
+        "durationMinutes": { "type": "number" },
+        "subjectRecords": { "type": "array" },
+        "status": { "type": "string", "enum": ["completed", "in_progress", "cancelled"] },
+        "reportStatus": { "type": "string", "enum": ["none", "draft", "pending_approval", "approved"] },
+        "reportId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "studentId", "sessionNumber", "date", "status"]
+    },
+    "DailyReport": {
+      "title": "DailyReport",
+      "description": "Daily teaching evaluation report generated for parents",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "sessionId": { "type": "string", "maxLength": 128 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "studentName": { "type": "string", "maxLength": 150 },
+        "teacherId": { "type": "string", "maxLength": 128 },
+        "teacherName": { "type": "string", "maxLength": 150 },
+        "reportType": { "type": "string", "enum": ["daily"] },
+        "title": { "type": "string", "maxLength": 200 },
+        "date": { "type": "string", "maxLength": 50 },
+        "sessionNumber": { "type": "number" },
+        "durationMinutes": { "type": "number" },
+        "subjectsCovered": { "type": "array" },
+        "overallPerformanceSummary": { "type": "string", "maxLength": 4000 },
+        "homeworkSummary": { "type": "array" },
+        "teacherRemarks": { "type": "string", "maxLength": 4000 },
+        "closingMessage": { "type": "string", "maxLength": 1000 },
+        "contentEnglish": { "type": "string", "maxLength": 10000 },
+        "contentArabic": { "type": "string", "maxLength": 10000 },
+        "isApproved": { "type": "boolean" },
+        "isDraft": { "type": "boolean" },
+        "createdAt": { "type": "string", "maxLength": 50 },
+        "lastModified": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "studentId", "sessionId", "isApproved"]
+    },
+    "MonthlyReport": {
+      "title": "MonthlyReport",
+      "description": "Monthly comprehensive academic progress report",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "studentName": { "type": "string", "maxLength": 150 },
+        "teacherId": { "type": "string", "maxLength": 128 },
+        "month": { "type": "string", "maxLength": 50 },
+        "year": { "type": "number" },
+        "reportType": { "type": "string", "enum": ["monthly"] },
+        "title": { "type": "string", "maxLength": 200 },
+        "overallProgress": { "type": "string", "maxLength": 4000 },
+        "totalSessionsCompleted": { "type": "number" },
+        "attendanceDays": { "type": "number" },
+        "homeworkCompletionRate": { "type": "number" },
+        "learningDevelopment": { "type": "string", "maxLength": 4000 },
+        "strengths": { "type": "array" },
+        "areasForImprovement": { "type": "array" },
+        "teacherRecommendations": { "type": "string", "maxLength": 4000 },
+        "closingMessage": { "type": "string", "maxLength": 1000 },
+        "contentEnglish": { "type": "string", "maxLength": 10000 },
+        "contentArabic": { "type": "string", "maxLength": 10000 },
+        "isApproved": { "type": "boolean" },
+        "createdAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "studentId", "month", "year", "isApproved"]
+    },
+    "StudentMemory": {
+      "title": "StudentMemory",
+      "description": "Long-term educational memory tracking for student progress",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "educationalHistory": { "type": "array" },
+        "homeworkHistory": { "type": "array" },
+        "strengths": { "type": "array" },
+        "areasForImprovement": { "type": "array" },
+        "recurringMistakes": { "type": "array" },
+        "teacherNotes": { "type": "array" },
+        "progressSummary": { "type": "string", "maxLength": 4000 },
+        "lastUpdated": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "studentId"]
+    },
+    "AppSettings": {
+      "title": "AppSettings",
+      "description": "Teacher app preferences and permanent AI rules",
+      "type": "object",
+      "properties": {
+        "preferredLanguage": { "type": "string", "enum": ["en", "ar"] },
+        "reportStyle": { "type": "string", "enum": ["detailed", "bulleted", "concise"] },
+        "defaultClosingMessage": { "type": "string", "maxLength": 1000 },
+        "writingTone": { "type": "string", "enum": ["encouraging", "formal", "academic"] },
+        "aiRules": { "type": "array" },
+        "notificationPreferences": { "type": "object" }
+      },
+      "required": ["preferredLanguage", "reportStyle"]
+    }
+  },
+  "firestore": {
+    "/students/{studentId}": {
+      "schema": { "$ref": "#/entities/Student" },
+      "description": "Student records collection"
+    },
+    "/sessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/Session" },
+      "description": "Teaching sessions collection"
+    },
+    "/dailyReports/{reportId}": {
+      "schema": { "$ref": "#/entities/DailyReport" },
+      "description": "Daily reports collection"
+    },
+    "/monthlyReports/{monthlyReportId}": {
+      "schema": { "$ref": "#/entities/MonthlyReport" },
+      "description": "Monthly reports collection"
+    },
+    "/studentMemories/{studentMemoryId}": {
+      "schema": { "$ref": "#/entities/StudentMemory" },
+      "description": "Student educational memory records"
+    },
+    "/settings/{settingsId}": {
+      "schema": { "$ref": "#/entities/AppSettings" },
+      "description": "App settings and AI rules"
+    }
+  }
+}

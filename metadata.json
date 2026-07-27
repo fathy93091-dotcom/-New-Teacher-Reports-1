@@ -1,0 +1,6 @@
+{
+  "name": "Daily Islamic Teacher Assistant (DITA)",
+  "description": "AI-powered educational assistant for Quran, Tajweed, Arabic, and Islamic Studies teachers to document lessons, manage students, generate professional parent reports, and track student progress.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
