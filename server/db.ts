@@ -1,3 +1,5 @@
+import fs from "fs";
+import path from "path";
 import {
   UserProfile,
   Student,
@@ -11,6 +13,8 @@ import {
   EducationalMemoryRecord,
   SubjectName
 } from "../src/types";
+
+const DB_FILE_PATH = path.join(process.cwd(), "server_db_store.json");
 
 // In-Memory Database Store seeded with realistic DITA records
 
@@ -502,15 +506,44 @@ const initialSettings: AppSettings = {
 };
 
 export class DatabaseService {
-  private store: DBStore = {
-    user: initialUser,
-    students: initialStudents,
-    sessions: initialSessions,
-    reports: initialDailyReports,
-    monthlyReports: initialMonthlyReports,
-    memories: initialMemories,
-    settings: initialSettings
-  };
+  private store: DBStore;
+
+  constructor() {
+    this.store = this.loadStore();
+  }
+
+  private loadStore(): DBStore {
+    try {
+      if (fs.existsSync(DB_FILE_PATH)) {
+        const raw = fs.readFileSync(DB_FILE_PATH, "utf-8");
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === "object" && Array.isArray(parsed.students)) {
+            return parsed;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to load server_db_store.json:", err);
+    }
+    return {
+      user: initialUser,
+      students: initialStudents,
+      sessions: initialSessions,
+      reports: initialDailyReports,
+      monthlyReports: initialMonthlyReports,
+      memories: initialMemories,
+      settings: initialSettings
+    };
+  }
+
+  private persist() {
+    try {
+      fs.writeFileSync(DB_FILE_PATH, JSON.stringify(this.store, null, 2), "utf-8");
+    } catch (err) {
+      console.warn("Failed to persist server_db_store.json:", err);
+    }
+  }
 
   // User
   getUser(): UserProfile {
@@ -519,6 +552,7 @@ export class DatabaseService {
 
   updateUser(updates: Partial<UserProfile>): UserProfile {
     this.store.user = { ...this.store.user, ...updates };
+    this.persist();
     return this.store.user;
   }
 
@@ -556,6 +590,7 @@ export class DatabaseService {
       lastUpdated: new Date().toISOString()
     };
 
+    this.persist();
     return newStudent;
   }
 
@@ -563,7 +598,17 @@ export class DatabaseService {
     const idx = this.store.students.findIndex(s => s.id === id);
     if (idx === -1) return undefined;
     this.store.students[idx] = { ...this.store.students[idx], ...updates };
+    this.persist();
     return this.store.students[idx];
+  }
+
+  deleteStudent(id: string): boolean {
+    const idx = this.store.students.findIndex(s => s.id === id);
+    if (idx === -1) return false;
+    this.store.students.splice(idx, 1);
+    delete this.store.memories[id];
+    this.persist();
+    return true;
   }
 
   archiveStudent(id: string): Student | undefined {
@@ -600,6 +645,7 @@ export class DatabaseService {
       lastActiveDate: newSession.date
     });
 
+    this.persist();
     return newSession;
   }
 
@@ -607,6 +653,7 @@ export class DatabaseService {
     const idx = this.store.sessions.findIndex(s => s.id === id);
     if (idx === -1) return undefined;
     this.store.sessions[idx] = { ...this.store.sessions[idx], ...updates };
+    this.persist();
     return this.store.sessions[idx];
   }
 
@@ -644,6 +691,7 @@ export class DatabaseService {
       this.updateStudentMemoryFromApprovedReport(reportData);
     }
 
+    this.persist();
     return reportData;
   }
 
@@ -657,6 +705,7 @@ export class DatabaseService {
     if (rep.sessionId) {
       this.updateSession(rep.sessionId, { reportStatus: "none", reportId: undefined });
     }
+    this.persist();
     return true;
   }
 
@@ -675,6 +724,7 @@ export class DatabaseService {
     } else {
       this.store.monthlyReports.unshift(monthlyData);
     }
+    this.persist();
     return monthlyData;
   }
 
@@ -693,6 +743,7 @@ export class DatabaseService {
         progressSummary: "No memory history recorded yet.",
         lastUpdated: new Date().toISOString()
       };
+      this.persist();
     }
     return this.store.memories[studentId];
   }
@@ -705,6 +756,7 @@ export class DatabaseService {
       lastUpdated: new Date().toISOString()
     };
     this.store.memories[studentId] = updated;
+    this.persist();
     return updated;
   }
 
@@ -744,6 +796,7 @@ export class DatabaseService {
     };
 
     this.store.memories[report.studentId] = updatedMemory;
+    this.persist();
   }
 
   // Settings & AI Rules
@@ -753,6 +806,7 @@ export class DatabaseService {
 
   updateSettings(updates: Partial<AppSettings>): AppSettings {
     this.store.settings = { ...this.store.settings, ...updates };
+    this.persist();
     return this.store.settings;
   }
 
@@ -766,6 +820,7 @@ export class DatabaseService {
       id: `rule_${Date.now()}`
     };
     this.store.settings.aiRules.push(newRule);
+    this.persist();
     return newRule;
   }
 
@@ -773,6 +828,7 @@ export class DatabaseService {
     const idx = this.store.settings.aiRules.findIndex(r => r.id === id);
     if (idx === -1) return undefined;
     this.store.settings.aiRules[idx] = { ...this.store.settings.aiRules[idx], ...updates };
+    this.persist();
     return this.store.settings.aiRules[idx];
   }
 
@@ -780,6 +836,7 @@ export class DatabaseService {
     const idx = this.store.settings.aiRules.findIndex(r => r.id === id);
     if (idx === -1) return false;
     this.store.settings.aiRules.splice(idx, 1);
+    this.persist();
     return true;
   }
 }

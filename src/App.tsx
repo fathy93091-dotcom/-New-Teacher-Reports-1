@@ -40,19 +40,54 @@ import {
 } from "./types";
 import { CheckCircle2, AlertCircle, Info, Sparkles } from "lucide-react";
 
+function getStoredState<T>(key: string, fallback: T): T {
+  try {
+    const saved = localStorage.getItem(key);
+    if (saved) return JSON.parse(saved);
+  } catch (err) {
+    console.warn(`Error reading localStorage key ${key}:`, err);
+  }
+  return fallback;
+}
+
 export function App() {
 
   const [activeTab, setActiveTab] = useState<ActiveTab>("dashboard");
 
-  // Domain State seeded with rich initial defaults
-  const [students, setStudents] = useState<Student[]>(initialStudents);
-  const [sessions, setSessions] = useState<Session[]>(initialSessions);
-  const [dailyReports, setDailyReports] = useState<DailyReport[]>(initialDailyReports);
-  const [monthlyReports, setMonthlyReports] = useState<MonthlyReport[]>(initialMonthlyReports);
-  const [memories, setMemories] = useState<Record<string, StudentMemory>>(initialMemories);
-  const [settings, setSettings] = useState<AppSettings>(initialSettings);
+  // Domain State seeded with rich initial defaults & localStorage fallback
+  const [students, setStudents] = useState<Student[]>(() => getStoredState("dita_students_store_v2", initialStudents));
+  const [sessions, setSessions] = useState<Session[]>(() => getStoredState("dita_sessions_store_v2", initialSessions));
+  const [dailyReports, setDailyReports] = useState<DailyReport[]>(() => getStoredState("dita_daily_reports_store_v2", initialDailyReports));
+  const [monthlyReports, setMonthlyReports] = useState<MonthlyReport[]>(() => getStoredState("dita_monthly_reports_store_v2", initialMonthlyReports));
+  const [memories, setMemories] = useState<Record<string, StudentMemory>>(() => getStoredState("dita_memories_store_v2", initialMemories));
+  const [settings, setSettings] = useState<AppSettings>(() => getStoredState("dita_settings_store_v2", initialSettings));
 
   const [loading, setLoading] = useState(true);
+
+  // Sync state to localStorage automatically on updates
+  useEffect(() => {
+    try { localStorage.setItem("dita_students_store_v2", JSON.stringify(students)); } catch (e) {}
+  }, [students]);
+
+  useEffect(() => {
+    try { localStorage.setItem("dita_sessions_store_v2", JSON.stringify(sessions)); } catch (e) {}
+  }, [sessions]);
+
+  useEffect(() => {
+    try { localStorage.setItem("dita_daily_reports_store_v2", JSON.stringify(dailyReports)); } catch (e) {}
+  }, [dailyReports]);
+
+  useEffect(() => {
+    try { localStorage.setItem("dita_monthly_reports_store_v2", JSON.stringify(monthlyReports)); } catch (e) {}
+  }, [monthlyReports]);
+
+  useEffect(() => {
+    try { localStorage.setItem("dita_memories_store_v2", JSON.stringify(memories)); } catch (e) {}
+  }, [memories]);
+
+  useEffect(() => {
+    try { localStorage.setItem("dita_settings_store_v2", JSON.stringify(settings)); } catch (e) {}
+  }, [settings]);
 
   // Session Builder & Report Preview Modal state
   const [isSessionBuilderOpen, setIsSessionBuilderOpen] = useState(false);
@@ -71,7 +106,7 @@ export function App() {
     setTimeout(() => setNotification(null), 4000);
   };
 
-  // Initial Data Fetcher
+  // Initial Data Fetcher - Merges Firestore, Express API, and LocalStorage
   const refreshAllData = async () => {
     const safeFetch = async (url: string) => {
       try {
@@ -84,6 +119,10 @@ export function App() {
     };
 
     try {
+      // 1. Fetch from Firestore
+      const fsData = await loadInitialFirestoreData();
+
+      // 2. Fetch from Express API
       const [stRes, seRes, drRes, mrRes, setRes] = await Promise.all([
         safeFetch("/api/students"),
         safeFetch("/api/sessions"),
@@ -92,23 +131,51 @@ export function App() {
         safeFetch("/api/settings")
       ]);
 
-      if (Array.isArray(stRes) && stRes.length > 0) setStudents(stRes);
-      if (Array.isArray(seRes) && seRes.length > 0) setSessions(seRes);
-      if (Array.isArray(drRes) && drRes.length > 0) setDailyReports(drRes);
-      if (Array.isArray(mrRes) && mrRes.length > 0) setMonthlyReports(mrRes);
-      if (setRes && typeof setRes === "object" && !("error" in setRes) && setRes.preferredLanguage) {
-        setSettings(setRes);
+      const mergeItems = <T extends { id: string }>(
+        currentLocal: T[],
+        fsItems: T[],
+        apiItems: T[] | null
+      ): T[] => {
+        const map = new Map<string, T>();
+        if (Array.isArray(apiItems)) {
+          apiItems.forEach(i => map.set(i.id, i));
+        }
+        fsItems.forEach(i => map.set(i.id, i));
+        currentLocal.forEach(i => map.set(i.id, i));
+        return Array.from(map.values());
+      };
+
+      setStudents(prev => {
+        const merged = mergeItems(prev, fsData.students, stRes);
+        return merged.length > 0 ? merged : prev;
+      });
+
+      setSessions(prev => {
+        const merged = mergeItems(prev, fsData.sessions, seRes);
+        return merged.length > 0 ? merged : prev;
+      });
+
+      setDailyReports(prev => {
+        const merged = mergeItems(prev, fsData.dailyReports, drRes);
+        return merged.length > 0 ? merged : prev;
+      });
+
+      setMonthlyReports(prev => {
+        const merged = mergeItems(prev, fsData.monthlyReports, mrRes);
+        return merged.length > 0 ? merged : prev;
+      });
+
+      if (fsData.settings) {
+        setSettings(prev => ({ ...prev, ...fsData.settings }));
+      } else if (setRes && typeof setRes === "object" && !("error" in setRes) && setRes.preferredLanguage) {
+        setSettings(prev => ({ ...prev, ...setRes }));
       }
 
-      // Fetch memory for each active student
-      const memoryMap: Record<string, StudentMemory> = { ...initialMemories };
-      if (Array.isArray(stRes)) {
-        for (const st of stRes) {
-          const mem = await safeFetch(`/api/memory/${st.id}`);
-          if (mem && !("error" in mem)) memoryMap[st.id] = mem;
-        }
-      }
-      setMemories(memoryMap);
+      setMemories(prev => ({
+        ...prev,
+        ...fsData.memories
+      }));
+
     } catch (err) {
       console.error("Error refreshing data:", err);
     } finally {
@@ -133,6 +200,8 @@ export function App() {
     setStudents(prev => [newSt, ...prev]);
     showNotification(settings.preferredLanguage === "ar" ? `تم إضافة الطالب: ${newSt.fullName}` : `Added new student: ${newSt.fullName}`);
 
+    saveStudentToFirestore(newSt);
+
     try {
       const res = await fetch("/api/students", {
         method: "POST",
@@ -142,9 +211,10 @@ export function App() {
       if (res.ok) {
         const created = await res.json();
         setStudents(prev => prev.map(s => s.id === tempId ? created : s));
+        saveStudentToFirestore(created);
       }
     } catch (err) {
-      console.warn("Server sync skipped - student stored in local state:", err);
+      console.warn("Server sync skipped - student stored in local state & Firestore:", err);
     }
   };
 
@@ -225,6 +295,7 @@ export function App() {
       });
       const newSession = await sesRes.json();
       setSessions(prev => [newSession, ...prev]);
+      saveSessionToFirestore(newSession);
 
       // 2. Generate AI Daily Report
       const repRes = await fetch("/api/reports/daily/generate", {
@@ -235,6 +306,7 @@ export function App() {
       const reportData: DailyReport = await repRes.json();
 
       setDailyReports(prev => [reportData, ...prev]);
+      saveDailyReportToFirestore(reportData);
       setSelectedReportForPreview(reportData);
       showNotification(settings.preferredLanguage === "ar" ? "تم توليد التقرير اليومي بالذكاء الاصطناعي بنجاح!" : "AI Daily Report generated successfully!");
     } catch (err) {
@@ -347,6 +419,7 @@ export function App() {
 
   const handleSaveDraftReport = async (updatedReport: DailyReport) => {
     try {
+      saveDailyReportToFirestore(updatedReport);
       await fetch("/api/reports/daily/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -367,6 +440,11 @@ export function App() {
     if (!confirm(settings.preferredLanguage === "ar" ? "هل أنت تأكد من حذف هذا التقرير؟" : "Are you sure you want to delete this report?")) return;
     setDailyReports(prev => prev.filter(r => r.id !== id));
     showNotification(settings.preferredLanguage === "ar" ? "تم حذف التقرير" : "Report removed");
+    try {
+      await fetch(`/api/reports/${id}`, { method: "DELETE" });
+    } catch (err) {
+      console.warn("Delete report sync:", err);
+    }
   };
 
   const handleGenerateMonthlyReport = async (studentId: string, month: string, year: number) => {
@@ -379,6 +457,7 @@ export function App() {
       });
       const monthlyData = await res.json();
       setMonthlyReports(prev => [monthlyData, ...prev]);
+      saveMonthlyReportToFirestore(monthlyData);
       showNotification(settings.preferredLanguage === "ar" ? `تم إنشاء التقرير الشهري للطالب: ${monthlyData.studentName}` : `Monthly Report for ${monthlyData.studentName} created!`);
     } catch (err) {
       showNotification(settings.preferredLanguage === "ar" ? "فشل إنشاء التقرير الشهري" : "Failed to generate monthly report", "error");
@@ -387,10 +466,13 @@ export function App() {
 
   // --- Memory & Settings Actions ---
   const handleUpdateMemory = async (studentId: string, updates: Partial<StudentMemory>) => {
+    const existing = memories[studentId] || { id: `mem_${studentId}`, studentId };
+    const updated = { ...existing, ...updates };
     setMemories(prev => ({
       ...prev,
-      [studentId]: { ...(prev[studentId] || { id: `mem_${studentId}`, studentId }), ...updates }
+      [studentId]: updated
     }));
+    saveStudentMemoryToFirestore(updated as StudentMemory);
     showNotification(settings.preferredLanguage === "ar" ? "تم تحديث ذاكرة الطالب" : "Student memory updated");
     try {
       await fetch(`/api/memory/${studentId}`, {
@@ -399,7 +481,7 @@ export function App() {
         body: JSON.stringify(updates)
       });
     } catch (err) {
-      console.warn("Memory updated locally:", err);
+      console.warn("Memory updated locally & Firestore:", err);
     }
   };
 

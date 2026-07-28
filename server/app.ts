@@ -64,6 +64,12 @@ app.put("/api/students/:id/restore", (req, res) => {
   res.json(updated);
 });
 
+app.delete("/api/students/:id", (req, res) => {
+  const success = db.deleteStudent(req.params.id);
+  if (!success) return res.status(404).json({ error: "Student not found" });
+  res.json({ success: true });
+});
+
 // Sessions
 app.get("/api/sessions", (req, res) => {
   const studentId = req.query.studentId as string | undefined;
