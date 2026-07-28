@@ -7,6 +7,7 @@ import {
   RotateCcw,
   BookOpen,
   Edit2,
+  Trash2,
   X,
   Check,
   Brain,
@@ -22,6 +23,7 @@ interface StudentsViewProps {
   settings: AppSettings;
   onAddStudent: (student: Omit<Student, "id" | "teacherId" | "createdAt">) => void;
   onUpdateStudent: (id: string, updates: Partial<Student>) => void;
+  onDeleteStudent?: (id: string) => void;
   onArchiveStudent: (id: string) => void;
   onRestoreStudent: (id: string) => void;
   onStartSessionForStudent: (studentId: string) => void;
@@ -33,6 +35,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   settings,
   onAddStudent,
   onUpdateStudent,
+  onDeleteStudent,
   onArchiveStudent,
   onRestoreStudent,
   onStartSessionForStudent,
@@ -278,10 +281,23 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                     <button
                       onClick={() => onArchiveStudent(student.id)}
                       className="p-1.5 text-slate-500 hover:text-amber-400 transition"
-                      title="Archive Student"
+                      title={isArabic ? "أرشفة الملف" : "Archive Student"}
                     >
                       <Archive className="w-4 h-4" />
                     </button>
+                    {onDeleteStudent && (
+                      <button
+                        onClick={() => {
+                          if (confirm(isArabic ? `هل أنت متأكد من حذف الطالب "${student.fullName}" نهائياً؟` : `Delete student "${student.fullName}" permanently?`)) {
+                            onDeleteStudent(student.id);
+                          }
+                        }}
+                        className="p-1.5 text-slate-500 hover:text-red-400 transition"
+                        title={isArabic ? "حذف الطالب نهائياً" : "Delete Student Permanently"}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
                   </>
                 ) : (
                   <button

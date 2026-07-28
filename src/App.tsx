@@ -7,6 +7,7 @@ import { ReportsView } from "./components/ReportsView";
 import { ReportPreviewModal } from "./components/ReportPreviewModal";
 import { StudentMemoryView } from "./components/StudentMemoryView";
 import { SettingsView } from "./components/SettingsView";
+import { TemplatesView } from "./components/TemplatesView";
 import { ApiDocsView } from "./components/ApiDocsView";
 import { UnitTestsView } from "./components/UnitTestsView";
 import { MobileBottomNav } from "./components/MobileBottomNav";
@@ -144,6 +145,39 @@ export function App() {
       }
     } catch (err) {
       console.warn("Server sync skipped - student stored in local state:", err);
+    }
+  };
+
+  const handleUpdateStudent = async (id: string, updates: Partial<Student>) => {
+    setStudents(prev => prev.map(s => (s.id === id ? { ...s, ...updates } : s)));
+    showNotification(settings.preferredLanguage === "ar" ? "تم تحديث بيانات الطالب بنجاح" : "Student profile updated successfully");
+    try {
+      await fetch(`/api/students/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates)
+      });
+      const updated = students.find(s => s.id === id);
+      if (updated) {
+        await saveStudentToFirestore({ ...updated, ...updates });
+      }
+    } catch (err) {
+      console.warn("Sync student update:", err);
+    }
+  };
+
+  const handleDeleteStudent = async (id: string) => {
+    const student = students.find(s => s.id === id);
+    setStudents(prev => prev.filter(s => s.id !== id));
+    showNotification(
+      settings.preferredLanguage === "ar"
+        ? `تم حذف ملف الطالب "${student?.fullName || ""}"`
+        : `Student "${student?.fullName || ""}" deleted`
+    );
+    try {
+      await fetch(`/api/students/${id}`, { method: "DELETE" });
+    } catch (err) {
+      console.warn("Delete student sync:", err);
     }
   };
 
@@ -372,9 +406,15 @@ export function App() {
   const handleUpdateSettings = async (updates: Partial<AppSettings>) => {
     const newSettings = { ...settings, ...updates };
     setSettings(newSettings); // Optimistic immediate state update!
-    showNotification(newSettings.preferredLanguage === "ar" ? "تم حفظ الإعدادات" : "Settings saved");
+    showNotification(
+      newSettings.preferredLanguage === "ar"
+        ? "تم حفظ الإعدادات وقواعد الذكاء الاصطناعي ومزامنتها بنجاح!"
+        : "Settings & AI Rules saved and synced successfully!",
+      "success"
+    );
 
     try {
+      await saveSettingsToFirestore(newSettings);
       const res = await fetch("/api/settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -385,7 +425,7 @@ export function App() {
         setSettings(data);
       }
     } catch (err) {
-      console.warn("Settings saved locally - server update skipped:", err);
+      console.warn("Settings saved locally & Firestore - server update skipped:", err);
     }
   };
 
@@ -507,7 +547,8 @@ export function App() {
                 students={students}
                 settings={settings}
                 onAddStudent={handleAddStudent}
-                onUpdateStudent={() => {}}
+                onUpdateStudent={handleUpdateStudent}
+                onDeleteStudent={handleDeleteStudent}
                 onArchiveStudent={handleArchiveStudent}
                 onRestoreStudent={handleRestoreStudent}
                 onStartSessionForStudent={studentId => {
@@ -594,6 +635,14 @@ export function App() {
                 memories={memories}
                 selectedStudentId={selectedStudentForMemory}
                 onUpdateMemory={handleUpdateMemory}
+              />
+            )}
+
+            {activeTab === "templates" && (
+              <TemplatesView
+                settings={settings}
+                onUpdateSettings={handleUpdateSettings}
+                showNotification={showNotification}
               />
             )}
 

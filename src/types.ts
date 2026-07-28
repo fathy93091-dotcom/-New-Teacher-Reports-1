@@ -205,12 +205,29 @@ export interface AIRule {
   isActive: boolean;
 }
 
+export interface ReportTemplate {
+  id: string;
+  name: string;
+  description: string;
+  category: "daily" | "monthly" | "memorization" | "tajweed_focus" | "custom";
+  structure: {
+    headerFormat: string;
+    sectionsOrder: string[];
+    placeholders: string[];
+    promptInstructions: string;
+  };
+  isDefault: boolean;
+  createdAt: string;
+}
+
 export interface AppSettings {
   preferredLanguage: "en" | "ar";
   reportStyle: "detailed" | "bulleted" | "concise";
   defaultClosingMessage: string;
   writingTone: "encouraging" | "formal" | "academic";
   aiRules: AIRule[];
+  selectedTemplateId?: string;
+  templates?: ReportTemplate[];
   notificationPreferences: {
     upcomingSessions: boolean;
     pendingReports: boolean;

@@ -112,8 +112,11 @@ app.post("/api/reports/daily/generate", async (req, res) => {
     if (!student) return res.status(404).json({ error: "Student not found" });
 
     const user = db.getUser();
+    const settings = db.getSettings();
     const activeAiRules = db.getAIRules().filter(r => r.isActive);
     const studentMemory = db.getStudentMemory(student.id);
+
+    const activeTemplate = settings.templates?.find(t => t.id === settings.selectedTemplateId) || settings.templates?.[0];
 
     const generatedReport = await generateDailyReportAI({
       session,
@@ -121,6 +124,10 @@ app.post("/api/reports/daily/generate", async (req, res) => {
       teacherName: user.fullName,
       activeAiRules,
       studentMemory,
+      selectedTemplate: activeTemplate ? {
+        name: activeTemplate.name,
+        structure: activeTemplate.structure
+      } : undefined,
       targetLanguage
     });
 

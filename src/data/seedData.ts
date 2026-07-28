@@ -306,6 +306,65 @@ export const initialSettings: AppSettings = {
       isActive: true
     }
   ],
+  selectedTemplateId: "tpl_standard_daily",
+  templates: [
+    {
+      id: "tpl_standard_daily",
+      name: "القالب اليومي الشامل (Standard Daily Report)",
+      description: "الهيكل القياسي المعتمد لجميع المواد الإسلامية مع تفصيل الآيات والأحكام والواجبات",
+      category: "daily",
+      structure: {
+        headerFormat: "تقرير المتابعة اليومي - حصة #{sessionNumber}",
+        sectionsOrder: ["مقدمة والثناء", "القرآن والتجويد", "اللغة العربية والدراسات", "التقييم والواجبات", "دعاء الختام"],
+        placeholders: ["{studentName}", "{date}", "{sessionNumber}", "{subjects}", "{teacherRemarks}"],
+        promptInstructions: "اكتب التقرير في صورة أقسام منظمة تشمل: الحمد والثناء على الطالب، تفاصيل الآيات والسور التي تم تلاوتها أو حفظها، أحكام التجويد المطبقة، الواجب المنزلي، وملخص التقييم والدعاء الختامي."
+      },
+      isDefault: true,
+      createdAt: "2026-01-01T00:00:00Z"
+    },
+    {
+      id: "tpl_quran_focus",
+      name: "قالب تركيز حفظ ومراجعة القرآن الكريم (Qur'an & Memorization)",
+      description: "هيكل مخصص للتركيز العالي على مراجعة الماضي، الحفظ الجديد، ومخارج الحروف",
+      category: "memorization",
+      structure: {
+        headerFormat: "تقرير متابعة حفظ القرآن الكريم - {studentName}",
+        sectionsOrder: ["مراجعة الماضي", "الحفظ الجديد", "تصحيح المخارج", "ملاحظات وتوجيهات الحفظ", "دعاء البركة"],
+        placeholders: ["{studentName}", "{date}", "{surahsRecited}", "{teacherRemarks}"],
+        promptInstructions: "ركز التقرير بشكل أساسي على: مقدار المراجعة السابقة، مقدار الحفظ الجديد بدقة بالآيات والسور، جودة الترتيل والتمكين، وأي أخطاء تكررت في المخارج والصفات."
+      },
+      isDefault: false,
+      createdAt: "2026-01-01T00:00:00Z"
+    },
+    {
+      id: "tpl_tajweed_arabic",
+      name: "قالب التجويد واللغة العربية (Tajweed & Arabic Focus)",
+      description: "هيكل تعليمي مخصص لقواعد النون الساكنة والمود والنحو العربي مع الأمثلة",
+      category: "tajweed_focus",
+      structure: {
+        headerFormat: "تقرير تطبيق قواعد التجويد واللغة - {studentName}",
+        sectionsOrder: ["القواعد المدروسة", "تطبيقات وأمثلة من المصحف", "المفردات والنحو", "التكليفات والواجبات"],
+        placeholders: ["{studentName}", "{date}", "{subjects}", "{teacherRemarks}"],
+        promptInstructions: "ركز التقرير على القواعد النظرية والتطبيقية التي تم تدريسها، مع ذكر أمثلة استخراجها من آيات القرآن الكريم، وتكليف الطالب بأمثلة مشابهة."
+      },
+      isDefault: false,
+      createdAt: "2026-01-01T00:00:00Z"
+    },
+    {
+      id: "tpl_concise_parent",
+      name: "قالب المتابعة السريعة لولي الأمر (Concise Parent Note)",
+      description: "فقرة موجزة ومركزة مخصصة للإرسال المباشر لولي الأمر عبر واتساب أو البريد",
+      category: "custom",
+      structure: {
+        headerFormat: "رسالة متابعة سريعة - {studentName}",
+        sectionsOrder: ["تحية وإنجاز الحصة", "أبرز التوصيات", "دعاء ختامي"],
+        placeholders: ["{studentName}", "{date}", "{teacherRemarks}"],
+        promptInstructions: "اكتب التقرير في فقرة واحدة دافئة وموجزة جدا تناسب القراءة السريعة لولي الأمر، تسلط الضوء على الإنجاز الرئيسي والواجب القادم فقط."
+      },
+      isDefault: false,
+      createdAt: "2026-01-01T00:00:00Z"
+    }
+  ],
   notificationPreferences: {
     upcomingSessions: true,
     pendingReports: true,

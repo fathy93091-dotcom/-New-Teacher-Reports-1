@@ -12,7 +12,8 @@ import {
   Bell,
   Search,
   PlusCircle,
-  Sparkles
+  Sparkles,
+  LayoutTemplate
 } from "lucide-react";
 import { UserProfile, AppSettings } from "../types";
 
@@ -22,6 +23,7 @@ export type ActiveTab =
   | "sessions"
   | "reports"
   | "memory"
+  | "templates"
   | "settings"
   | "apiDocs"
   | "unitTests";
@@ -65,6 +67,7 @@ export const Header: React.FC<HeaderProps> = ({
     { id: "sessions", labelEn: "Sessions", labelAr: "الحصص", icon: Calendar },
     { id: "reports", labelEn: "Reports", labelAr: "التقارير", icon: FileText, badge: pendingReportsCount },
     { id: "memory", labelEn: "Student Memory", labelAr: "ذاكرة الطالب", icon: Brain },
+    { id: "templates", labelEn: "Templates", labelAr: "القوالب", icon: LayoutTemplate },
     { id: "settings", labelEn: "AI Rules & Settings", labelAr: "الإعدادات والقواعد", icon: Settings },
     { id: "apiDocs", labelEn: "API Docs", labelAr: "توثيق APIs", icon: Code },
     { id: "unitTests", labelEn: "Unit Tests", labelAr: "اختبارات النظام", icon: CheckCircle2 },

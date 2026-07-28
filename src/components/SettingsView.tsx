@@ -12,7 +12,12 @@ import {
   MessageSquare,
   Shield,
   Save,
-  BookOpen
+  BookOpen,
+  Edit3,
+  X,
+  Zap,
+  Check,
+  RefreshCw
 } from "lucide-react";
 import { AppSettings, AIRule, SubjectName } from "../types";
 
@@ -38,6 +43,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [newRuleCategory, setNewRuleCategory] = useState<AIRule["category"]>("general");
   const [newRuleSubject, setNewRuleSubject] = useState<SubjectName | "">("Holy Qur'an");
 
+  // State for rule currently being edited
+  const [editingRule, setEditingRule] = useState<AIRule | null>(null);
+
   const [closingMessage, setClosingMessage] = useState(settings.defaultClosingMessage);
 
   const handleCreateRule = (e: React.FormEvent) => {
@@ -56,139 +64,256 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setNewRuleInstruction("");
   };
 
+  const handleSaveEditedRule = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingRule) return;
+
+    onUpdateAIRule(editingRule.id, {
+      name: editingRule.name.trim(),
+      category: editingRule.category,
+      subject: editingRule.category === "subject" ? editingRule.subject : undefined,
+      instruction: editingRule.instruction.trim(),
+      isActive: editingRule.isActive
+    });
+
+    setEditingRule(null);
+  };
+
+  const handleAddPresetRule = (preset: Omit<AIRule, "id">) => {
+    // Check if rule name already exists
+    if (settings.aiRules.some(r => r.name === preset.name)) {
+      alert(isArabic ? "هذه القاعدة موجودة بالفعل في القائمة" : "This rule already exists in your list.");
+      return;
+    }
+    onAddAIRule(preset);
+  };
+
+  const handleDeleteWithConfirm = (id: string, name: string) => {
+    if (confirm(isArabic ? `هل أنت تأكد من حذف قاعدة الذكاء الاصطناعي "${name}"؟` : `Are you sure you want to delete AI rule "${name}"?`)) {
+      onDeleteAIRule(id);
+    }
+  };
+
   const handleSaveClosingMessage = () => {
     onUpdateSettings({ defaultClosingMessage: closingMessage });
-    alert(isArabic ? "تم حفظ الدعاء الختامي الافتراضي بنجاح" : "Default closing message saved.");
   };
+
+  // Preset rules templates
+  const PRESET_RULES: Omit<AIRule, "id">[] = [
+    {
+      name: isArabic ? "بدء التقرير بالثناء والدعاء" : "Start with Islamic Praise",
+      category: "general",
+      instruction: isArabic
+        ? "ابدأ التقرير دائماً بالحمد لله والثناء على اجتهاد الطالب وحرصه على التعلم الشريف."
+        : "Always begin the report with Alhamdulillah and praise the student's Islamic effort and dedication.",
+      isActive: true
+    },
+    {
+      name: isArabic ? "دقة آيات ومخارج القرآن" : "Qur'an & Tajweed Precision",
+      category: "subject",
+      subject: "Holy Qur'an",
+      instruction: isArabic
+        ? "تحديد أسماء السور ورقم الآيات وأحكام التجويد (كالإخفاء والإدغام والماد) بدقة في النقاط المخصصة."
+        : "Specify exact Surah names, verse numbers, and Tajweed rule corrections in clear bullet points.",
+      isActive: true
+    },
+    {
+      name: isArabic ? "أسلوب مشجع وإيجابي" : "Encouraging Parental Tone",
+      category: "tone",
+      instruction: isArabic
+        ? "استخدام لغة دافئة ومحفزة للوالدين تبرز نقاط القوة قبل ذكر الجوانب التي تحتاج إلى مراجعة."
+        : "Use warm, encouraging tone highlighting strengths before mentioning review areas.",
+      isActive: true
+    },
+    {
+      name: isArabic ? "تبسيط المصطلحات للأطفال" : "Simplified Terms for Young Students",
+      category: "general",
+      instruction: isArabic
+        ? "صياغة الملاحظات بألفاظ ميسرة ومباشرة تناسب الفئات العمرية المبكرة."
+        : "Use simplified, clear phrasing suitable for young learners and busy parents.",
+      isActive: true
+    }
+  ];
 
   return (
     <div className="max-w-5xl mx-auto space-y-6 animate-fade-in pb-12">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-          <Settings className="w-6 h-6 text-emerald-400" />
-          <span>{isArabic ? "قواعد الذكاء الاصطناعي وإعدادات النظام" : "Permanent AI Rules & App Settings"}</span>
-        </h1>
-        <p className="text-xs text-slate-400 mt-1">
-          {isArabic
-            ? "التحكم الكامل في تعليمات الذكاء الاصطناعي الدائمة (SRS Section 5.6)، أسلوب كتابة التقارير، ودعاء الختام"
-            : "Define permanent AI rules (SRS 5.6 & 8.10), report formatting tones, and Islamic closing messages"}
-        </p>
+      {/* Header with AI Sync Badge */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900/90 border border-slate-800 p-5 rounded-2xl shadow-xl">
+        <div>
+          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+            <Settings className="w-6 h-6 text-emerald-400" />
+            <span>{isArabic ? "قواعد الذكاء الاصطناعي وإعدادات النظام" : "Permanent AI Rules & App Settings"}</span>
+          </h1>
+          <p className="text-xs text-slate-400 mt-1">
+            {isArabic
+              ? "إضافة وتعديل وحذف وقواعد التعليمات المباشرة التي يستخدمها الذكاء الاصطناعي في كتابة جميع التقارير"
+              : "Add, edit, delete, and synchronize direct instruction rules used by the AI when generating reports"}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 text-xs font-bold self-start sm:self-center shadow-inner">
+          <Zap className="w-4 h-4 text-emerald-400 animate-pulse" />
+          <span>{isArabic ? "المزامنة اللحظية مع AI مفعلة" : "Real-time AI Sync Active"}</span>
+        </div>
       </div>
 
-      {/* 1. Permanent AI Rules Engine (SRS 5.6) */}
+      {/* 1. Permanent AI Rules Engine */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-5 shadow-lg">
         <div className="flex items-center justify-between border-b border-slate-800 pb-3">
           <div className="flex items-center gap-2">
             <Sparkles className="w-5 h-5 text-emerald-400" />
             <h2 className="text-base font-bold text-white">
-              {isArabic ? "قواعد الذكاء الاصطناعي الدائمة (AI Rules)" : "Permanent AI Rules Collection (SRS Section 5.6)"}
+              {isArabic ? "قواعد وتعليمات الذكاء الاصطناعي الدائمة" : "Permanent AI Instructions & Rules"}
             </h2>
           </div>
           <span className="text-[11px] px-2.5 py-1 rounded-lg bg-emerald-950 text-emerald-300 border border-emerald-800 font-bold">
-            {settings.aiRules.filter(r => r.isActive).length} Active Rules
+            {settings.aiRules.filter(r => r.isActive).length} / {settings.aiRules.length} {isArabic ? "قاعدة مفعلة" : "Rules Active"}
           </span>
         </div>
 
-        {/* Rules Table / Cards */}
-        <div className="space-y-3">
-          {settings.aiRules.map(rule => (
-            <div
-              key={rule.id}
-              className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition ${
-                rule.isActive
-                  ? "bg-slate-950 border-emerald-500/30"
-                  : "bg-slate-950/50 border-slate-800/80 opacity-60"
-              }`}
-            >
-              <div className="space-y-1 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="font-bold text-sm text-white">{rule.name}</span>
-                  <span className="px-2 py-0.5 rounded text-[10px] uppercase font-bold bg-slate-800 text-teal-300 border border-slate-700">
-                    {rule.category}
+        {/* Preset Rule Quick Templates */}
+        <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-2">
+          <div className="flex items-center gap-2">
+            <BookOpen className="w-4 h-4 text-teal-400" />
+            <span className="text-xs font-bold text-teal-300 uppercase tracking-wider">
+              {isArabic ? "نماذج قواعد جاهزة (اضغط للإضافة السريعة):" : "Quick Preset Rule Templates (Click to Add):"}
+            </span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+            {PRESET_RULES.map((preset, idx) => (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => handleAddPresetRule(preset)}
+                className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-teal-500/50 text-left text-xs transition flex items-center justify-between group"
+              >
+                <div>
+                  <span className="font-bold text-slate-200 group-hover:text-teal-300 transition block">
+                    + {preset.name}
                   </span>
-                  {rule.subject && (
-                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800">
-                      {rule.subject}
-                    </span>
-                  )}
+                  <p className="text-[10px] text-slate-400 line-clamp-1">{preset.instruction}</p>
                 </div>
-                <p className="text-xs text-slate-300 leading-relaxed italic">
-                  "{rule.instruction}"
-                </p>
-              </div>
+                <Plus className="w-4 h-4 text-slate-500 group-hover:text-teal-400 shrink-0" />
+              </button>
+            ))}
+          </div>
+        </div>
 
-              {/* Action Controls */}
-              <div className="flex items-center gap-3 self-end sm:self-center">
-                <button
-                  onClick={() => onUpdateAIRule(rule.id, { isActive: !rule.isActive })}
-                  className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-lg border border-slate-700 bg-slate-900 transition hover:bg-slate-800"
-                >
-                  {rule.isActive ? (
-                    <>
-                      <ToggleRight className="w-5 h-5 text-emerald-400" />
-                      <span className="text-emerald-400">Enabled</span>
-                    </>
-                  ) : (
-                    <>
-                      <ToggleLeft className="w-5 h-5 text-slate-500" />
-                      <span className="text-slate-500">Disabled</span>
-                    </>
-                  )}
-                </button>
-
-                <button
-                  onClick={() => onDeleteAIRule(rule.id)}
-                  className="p-1.5 text-slate-500 hover:text-red-400 transition"
-                  title="Delete Rule"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
+        {/* Existing Rules List */}
+        <div className="space-y-3">
+          {settings.aiRules.length === 0 ? (
+            <div className="p-8 text-center bg-slate-950/50 rounded-xl border border-dashed border-slate-800 text-slate-400 text-xs">
+              {isArabic ? "لا توجد قواعد مسجلة حالياً. استخدم النموذج أدناه لإضافة أول قاعدة." : "No AI rules registered yet. Add your first rule below."}
             </div>
-          ))}
+          ) : (
+            settings.aiRules.map(rule => (
+              <div
+                key={rule.id}
+                className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition ${
+                  rule.isActive
+                    ? "bg-slate-950 border-emerald-500/30"
+                    : "bg-slate-950/50 border-slate-800/80 opacity-60"
+                }`}
+              >
+                <div className="space-y-1 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-bold text-sm text-white">{rule.name}</span>
+                    <span className="px-2 py-0.5 rounded text-[10px] uppercase font-bold bg-slate-800 text-teal-300 border border-slate-700">
+                      {rule.category}
+                    </span>
+                    {rule.subject && (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800">
+                        {rule.subject}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-300 leading-relaxed italic">
+                    "{rule.instruction}"
+                  </p>
+                </div>
+
+                {/* Action Controls */}
+                <div className="flex items-center gap-2 self-end sm:self-center">
+                  <button
+                    onClick={() => onUpdateAIRule(rule.id, { isActive: !rule.isActive })}
+                    className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-lg border border-slate-700 bg-slate-900 transition hover:bg-slate-800"
+                    title={rule.isActive ? (isArabic ? "تعطيل القاعدة" : "Disable Rule") : (isArabic ? "تفعيل القاعدة" : "Enable Rule")}
+                  >
+                    {rule.isActive ? (
+                      <>
+                        <ToggleRight className="w-5 h-5 text-emerald-400" />
+                        <span className="text-emerald-400">{isArabic ? "مفعلة" : "Active"}</span>
+                      </>
+                    ) : (
+                      <>
+                        <ToggleLeft className="w-5 h-5 text-slate-500" />
+                        <span className="text-slate-500">{isArabic ? "معطلة" : "Disabled"}</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    onClick={() => setEditingRule(rule)}
+                    className="p-1.5 rounded-lg bg-slate-800 text-amber-300 border border-slate-700 hover:bg-amber-950/50 transition flex items-center gap-1 text-xs font-bold px-2"
+                    title={isArabic ? "تعديل القاعدة" : "Edit Rule"}
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                    <span>{isArabic ? "تعديل" : "Edit"}</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleDeleteWithConfirm(rule.id, rule.name)}
+                    className="p-1.5 text-slate-500 hover:text-red-400 transition"
+                    title={isArabic ? "حذف القاعدة" : "Delete Rule"}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
         </div>
 
         {/* Add New Permanent Rule Form */}
         <form onSubmit={handleCreateRule} className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3 text-xs">
-          <span className="font-bold text-slate-200 block">
-            {isArabic ? "إضافة قاعدة جديدة للذكاء الاصطناعي" : "+ Add New Permanent AI Rule"}
+          <span className="font-bold text-slate-200 block text-sm">
+            {isArabic ? "+ إضافة قاعدة/تعليمات جديدة للذكاء الاصطناعي" : "+ Add New AI Rule & Instruction"}
           </span>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
-              <label className="block text-slate-400 mb-1">Rule Name</label>
+              <label className="block text-slate-400 mb-1">{isArabic ? "اسم القاعدة" : "Rule Name"}</label>
               <input
                 type="text"
                 required
                 value={newRuleName}
                 onChange={e => setNewRuleName(e.target.value)}
-                placeholder="e.g. Simple Vocabulary"
-                className="w-full px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-white outline-none focus:border-emerald-500"
+                placeholder={isArabic ? "مثال: تبسيط المصطلحات" : "e.g. Simple Vocabulary"}
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-white outline-none focus:border-emerald-500"
               />
             </div>
 
             <div>
-              <label className="block text-slate-400 mb-1">Category</label>
+              <label className="block text-slate-400 mb-1">{isArabic ? "التصنيف" : "Category"}</label>
               <select
                 value={newRuleCategory}
                 onChange={e => setNewRuleCategory(e.target.value as any)}
-                className="w-full px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-white outline-none"
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-white outline-none"
               >
-                <option value="general">General Rule</option>
-                <option value="subject">Subject Specific</option>
-                <option value="tone">Tone / Style</option>
-                <option value="language">Language Requirement</option>
+                <option value="general">{isArabic ? "قاعدة عامة (General)" : "General Rule"}</option>
+                <option value="subject">{isArabic ? "خاصة بمادة معينة (Subject Specific)" : "Subject Specific"}</option>
+                <option value="tone">{isArabic ? "أسلوب ونبرة الكتابة (Tone / Style)" : "Tone / Style"}</option>
+                <option value="language">{isArabic ? "اشتراطات اللغات (Language Requirement)" : "Language Requirement"}</option>
               </select>
             </div>
 
             {newRuleCategory === "subject" && (
               <div>
-                <label className="block text-slate-400 mb-1">Subject</label>
+                <label className="block text-slate-400 mb-1">{isArabic ? "المادة" : "Subject"}</label>
                 <select
                   value={newRuleSubject}
                   onChange={e => setNewRuleSubject(e.target.value as any)}
-                  className="w-full px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-white outline-none"
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-white outline-none"
                 >
                   <option value="Holy Qur'an">Holy Qur'an</option>
                   <option value="Tajweed">Tajweed</option>
@@ -201,28 +326,119 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
 
           <div>
-            <label className="block text-slate-400 mb-1">Instruction Text for AI</label>
+            <label className="block text-slate-400 mb-1">{isArabic ? "نص التعليمات الموجهة للذكاء الاصطناعي" : "Instruction Text for AI"}</label>
             <textarea
               rows={2}
               required
               value={newRuleInstruction}
               onChange={e => setNewRuleInstruction(e.target.value)}
-              placeholder="Explicit instructions automatically included in all prompt calls..."
+              placeholder={isArabic ? "اكتب التعليمات المباشرة التي سيلتزم بها الذكاء الاصطناعي عند كتابة التقارير..." : "Explicit instructions automatically included in all prompt calls..."}
               className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-white outline-none focus:border-emerald-500 resize-none"
             />
           </div>
 
           <button
             type="submit"
-            className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold flex items-center gap-1.5 shadow"
+            className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold flex items-center gap-1.5 shadow transition"
           >
             <Plus className="w-4 h-4" />
-            <span>Add Rule</span>
+            <span>{isArabic ? "حفظ القاعدة ومزامنتها فوراً" : "Save Rule & Sync Immediately"}</span>
           </button>
         </form>
       </div>
 
-      {/* 2. Default Islamic Closing Message / Dua (SRS 6.10) */}
+      {/* Edit Rule Modal */}
+      {editingRule && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl animate-fade-in">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <Edit3 className="w-5 h-5 text-amber-400" />
+                <span>{isArabic ? "تعديل قاعدة الذكاء الاصطناعي" : "Edit Permanent AI Rule"}</span>
+              </h3>
+              <button onClick={() => setEditingRule(null)} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditedRule} className="space-y-3 text-xs">
+              <div>
+                <label className="block text-slate-300 font-medium mb-1">{isArabic ? "اسم القاعدة" : "Rule Name"}</label>
+                <input
+                  type="text"
+                  required
+                  value={editingRule.name}
+                  onChange={e => setEditingRule({ ...editingRule, name: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">{isArabic ? "التصنيف" : "Category"}</label>
+                  <select
+                    value={editingRule.category}
+                    onChange={e => setEditingRule({ ...editingRule, category: e.target.value as any })}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none"
+                  >
+                    <option value="general">General</option>
+                    <option value="subject">Subject</option>
+                    <option value="tone">Tone / Style</option>
+                    <option value="language">Language</option>
+                  </select>
+                </div>
+
+                {editingRule.category === "subject" && (
+                  <div>
+                    <label className="block text-slate-300 font-medium mb-1">{isArabic ? "المادة" : "Subject"}</label>
+                    <select
+                      value={editingRule.subject || "Holy Qur'an"}
+                      onChange={e => setEditingRule({ ...editingRule, subject: e.target.value as any })}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none"
+                    >
+                      <option value="Holy Qur'an">Holy Qur'an</option>
+                      <option value="Tajweed">Tajweed</option>
+                      <option value="Arabic Language">Arabic Language</option>
+                      <option value="Islamic Studies">Islamic Studies</option>
+                      <option value="English Language">English Language</option>
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-medium mb-1">{isArabic ? "تعليمات القاعدة للذكاء الاصطناعي" : "Instruction Text"}</label>
+                <textarea
+                  rows={3}
+                  required
+                  value={editingRule.instruction}
+                  onChange={e => setEditingRule({ ...editingRule, instruction: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-amber-500 resize-none"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 pt-2 justify-end">
+                <button
+                  type="button"
+                  onClick={() => setEditingRule(null)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold"
+                >
+                  {isArabic ? "إلغاء" : "Cancel"}
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold flex items-center gap-1.5 shadow"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>{isArabic ? "حفظ التعديلات" : "Save Changes"}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 2. Default Islamic Closing Message / Dua */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4 shadow-lg">
         <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
           <MessageSquare className="w-5 h-5 text-teal-400" />
@@ -247,7 +463,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             className="px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-bold flex items-center gap-1.5 transition shadow"
           >
             <Save className="w-4 h-4" />
-            <span>Save Closing Message</span>
+            <span>{isArabic ? "حفظ الرسالة الختامية" : "Save Closing Message"}</span>
           </button>
         </div>
       </div>
@@ -263,27 +479,27 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className="block text-slate-300 font-medium mb-1">Preferred Language</label>
+            <label className="block text-slate-300 font-medium mb-1">{isArabic ? "لغة الواجهة والتقارير الافتراضية" : "Preferred Language"}</label>
             <select
               value={settings.preferredLanguage}
               onChange={e => onUpdateSettings({ preferredLanguage: e.target.value as any })}
               className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none"
             >
-              <option value="en">English (Default)</option>
-              <option value="ar">العربية (Arabic)</option>
+              <option value="ar">العربية (Arabic - Default)</option>
+              <option value="en">English</option>
             </select>
           </div>
 
           <div>
-            <label className="block text-slate-300 font-medium mb-1">Report Format Style</label>
+            <label className="block text-slate-300 font-medium mb-1">{isArabic ? "نمط صيغة التقرير" : "Report Format Style"}</label>
             <select
               value={settings.reportStyle}
               onChange={e => onUpdateSettings({ reportStyle: e.target.value as any })}
               className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none"
             >
-              <option value="detailed">Detailed Sections (SRS Standard)</option>
-              <option value="bulleted">Bulleted Bullet Points</option>
-              <option value="concise">Concise Paragraph</option>
+              <option value="detailed">{isArabic ? "أقسام مفصلة (Detailed Sections)" : "Detailed Sections"}</option>
+              <option value="bulleted">{isArabic ? "نقاط مختصرة (Bulleted List)" : "Bulleted Bullet Points"}</option>
+              <option value="concise">{isArabic ? "فقرة مدمجة (Concise Paragraph)" : "Concise Paragraph"}</option>
             </select>
           </div>
         </div>
@@ -291,3 +507,4 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     </div>
   );
 };
+

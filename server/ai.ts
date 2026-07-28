@@ -37,6 +37,14 @@ export interface GenerateDailyReportParams {
   activeAiRules: AIRule[];
   studentMemory?: StudentMemory;
   targetLanguage?: "en" | "ar";
+  selectedTemplate?: {
+    name: string;
+    structure: {
+      promptInstructions: string;
+      sectionsOrder: string[];
+      headerFormat: string;
+    };
+  };
 }
 
 export interface GenerateMonthlyReportParams {
@@ -53,12 +61,19 @@ export interface GenerateMonthlyReportParams {
  * Generate Daily Report according to SRS Chapter 5 & 6 rules
  */
 export async function generateDailyReportAI(params: GenerateDailyReportParams): Promise<DailyReport> {
-  const { session, student, teacherName, activeAiRules, studentMemory, targetLanguage = "en" } = params;
+  const { session, student, teacherName, activeAiRules, studentMemory, selectedTemplate, targetLanguage = "en" } = params;
 
   // Build full context prompt
   const rulesPrompt = activeAiRules
     .map(r => `- [${r.category.toUpperCase()}] ${r.name}: ${r.instruction}`)
     .join("\n");
+
+  const templatePrompt = selectedTemplate ? `
+STRUCTURAL TEMPLATE INSTRUCTIONS (${selectedTemplate.name}):
+- Sections Order: ${selectedTemplate.structure.sectionsOrder.join(" -> ")}
+- Header Format: ${selectedTemplate.structure.headerFormat}
+- AI Structural Rules: ${selectedTemplate.structure.promptInstructions}
+` : "";
 
   const subjectsPrompt = session.subjectRecords.map(sr => {
     return `--- Subject: ${sr.subject} ---
@@ -97,6 +112,7 @@ STRICT EVIDENCE GROUNDING RULES (NO INVENTED FACTS):
 
 ACTIVE PERMANENT AI RULES:
 ${rulesPrompt}
+${templatePrompt}
 `;
 
   const userPrompt = `Generate a comprehensive multi-subject Daily Report and suggested Student Memory updates for student "${student.fullName}".
