@@ -256,3 +256,9 @@ app.all("/api/tests/run", async (_req, res) => {
     res.status(500).json({ error: "Failed to run unit tests", details: err.message });
   }
 });
+
+// Global Express Error Handler
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error("Server Error:", err);
+  res.status(500).json({ error: err?.message || "Internal Server Error" });
+});

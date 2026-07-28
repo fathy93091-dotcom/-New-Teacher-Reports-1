@@ -513,20 +513,7 @@ export class DatabaseService {
   }
 
   private loadStore(): DBStore {
-    try {
-      if (fs.existsSync(DB_FILE_PATH)) {
-        const raw = fs.readFileSync(DB_FILE_PATH, "utf-8");
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (parsed && typeof parsed === "object" && Array.isArray(parsed.students)) {
-            return parsed;
-          }
-        }
-      }
-    } catch (err) {
-      console.warn("Failed to load server_db_store.json:", err);
-    }
-    return {
+    const fallback: DBStore = {
       user: initialUser,
       students: initialStudents,
       sessions: initialSessions,
@@ -535,6 +522,29 @@ export class DatabaseService {
       memories: initialMemories,
       settings: initialSettings
     };
+
+    try {
+      if (fs.existsSync(DB_FILE_PATH)) {
+        const raw = fs.readFileSync(DB_FILE_PATH, "utf-8");
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === "object") {
+            return {
+              user: parsed.user || initialUser,
+              students: Array.isArray(parsed.students) ? parsed.students : initialStudents,
+              sessions: Array.isArray(parsed.sessions) ? parsed.sessions : initialSessions,
+              reports: Array.isArray(parsed.reports) ? parsed.reports : initialDailyReports,
+              monthlyReports: Array.isArray(parsed.monthlyReports) ? parsed.monthlyReports : initialMonthlyReports,
+              memories: parsed.memories && typeof parsed.memories === "object" ? parsed.memories : initialMemories,
+              settings: parsed.settings && typeof parsed.settings === "object" ? parsed.settings : initialSettings
+            };
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to load server_db_store.json:", err);
+    }
+    return fallback;
   }
 
   private persist() {
