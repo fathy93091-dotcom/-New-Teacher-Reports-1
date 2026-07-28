@@ -165,11 +165,53 @@ export function App() {
         return merged.length > 0 ? merged : prev;
       });
 
-      if (fsData.settings) {
-        setSettings(prev => ({ ...prev, ...fsData.settings }));
-      } else if (setRes && typeof setRes === "object" && !("error" in setRes) && setRes.preferredLanguage) {
-        setSettings(prev => ({ ...prev, ...setRes }));
-      }
+      const mergeSettings = (local: AppSettings, incoming?: AppSettings | null): AppSettings => {
+        if (!incoming || typeof incoming !== "object") return local;
+
+        const ruleMap = new Map<string, AIRule>();
+        if (Array.isArray(incoming.aiRules)) {
+          incoming.aiRules.forEach(r => {
+            if (r && (r.id || r.name)) ruleMap.set(r.id || r.name, r);
+          });
+        }
+        if (Array.isArray(local.aiRules)) {
+          local.aiRules.forEach(r => {
+            if (r && (r.id || r.name)) ruleMap.set(r.id || r.name, r);
+          });
+        }
+
+        const templateMap = new Map<string, any>();
+        if (Array.isArray(incoming.templates)) {
+          incoming.templates.forEach(t => { if (t && t.id) templateMap.set(t.id, t); });
+        }
+        if (Array.isArray(local.templates)) {
+          local.templates.forEach(t => { if (t && t.id) templateMap.set(t.id, t); });
+        }
+
+        const mergedRules = Array.from(ruleMap.values());
+        const mergedTemplates = Array.from(templateMap.values());
+
+        return {
+          ...incoming,
+          ...local,
+          aiRules: mergedRules.length > 0 ? mergedRules : (local.aiRules || []),
+          templates: mergedTemplates.length > 0 ? mergedTemplates : (local.templates || [])
+        };
+      };
+
+      setSettings(prev => {
+        let merged = prev;
+        if (fsData.settings) {
+          merged = mergeSettings(merged, fsData.settings);
+        }
+        if (setRes && typeof setRes === "object" && !("error" in setRes) && setRes.preferredLanguage) {
+          merged = mergeSettings(merged, setRes);
+        }
+        try {
+          localStorage.setItem("dita_settings_store_v2", JSON.stringify(merged));
+        } catch (e) {}
+        return merged;
+      });
 
       setMemories(prev => ({
         ...prev,
@@ -486,44 +528,117 @@ export function App() {
   };
 
   const handleUpdateSettings = async (updates: Partial<AppSettings>) => {
-    const newSettings = { ...settings, ...updates };
-    setSettings(newSettings); // Optimistic immediate state update!
+    setSettings(prev => {
+      const nextSettings: AppSettings = { ...prev, ...updates };
+
+      try {
+        localStorage.setItem("dita_settings_store_v2", JSON.stringify(nextSettings));
+      } catch (e) {
+        console.warn("localStorage write error:", e);
+      }
+
+      saveSettingsToFirestore(nextSettings).catch(err => console.warn("Firestore settings error:", err));
+
+      fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(nextSettings)
+      }).catch(err => console.warn("API settings error:", err));
+
+      return nextSettings;
+    });
+
     showNotification(
-      newSettings.preferredLanguage === "ar"
-        ? "تم حفظ الإعدادات وقواعد الذكاء الاصطناعي ومزامنتها بنجاح!"
+      (updates.preferredLanguage || settings.preferredLanguage) === "ar"
+        ? "تم حفظ وتحديث قواعد الذكاء الاصطناعي والإعدادات بنجاح!"
         : "Settings & AI Rules saved and synced successfully!",
       "success"
     );
-
-    try {
-      await saveSettingsToFirestore(newSettings);
-      const res = await fetch("/api/settings", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newSettings)
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setSettings(data);
-      }
-    } catch (err) {
-      console.warn("Settings saved locally & Firestore - server update skipped:", err);
-    }
   };
 
   const handleAddAIRule = (rule: Omit<AIRule, "id">) => {
     const newRule: AIRule = { ...rule, id: `rule_${Date.now()}` };
-    handleUpdateSettings({ aiRules: [...settings.aiRules, newRule] });
+    setSettings(prev => {
+      const currentRules = prev.aiRules || [];
+      const updatedRules = [...currentRules, newRule];
+      const nextSettings = { ...prev, aiRules: updatedRules };
+
+      try {
+        localStorage.setItem("dita_settings_store_v2", JSON.stringify(nextSettings));
+      } catch (e) {}
+
+      saveSettingsToFirestore(nextSettings).catch(e => console.warn(e));
+      fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(nextSettings)
+      }).catch(e => console.warn(e));
+
+      return nextSettings;
+    });
+
+    showNotification(
+      settings.preferredLanguage === "ar"
+        ? `تم إضافة قاعدة الذكاء الاصطناعي "${rule.name}" ومزامنتها بنجاح!`
+        : `AI Rule "${rule.name}" added and synced successfully!`,
+      "success"
+    );
   };
 
   const handleUpdateAIRule = (id: string, updates: Partial<AIRule>) => {
-    const updatedRules = settings.aiRules.map(r => (r.id === id ? { ...r, ...updates } : r));
-    handleUpdateSettings({ aiRules: updatedRules });
+    setSettings(prev => {
+      const currentRules = prev.aiRules || [];
+      const updatedRules = currentRules.map(r => (r.id === id ? { ...r, ...updates } : r));
+      const nextSettings = { ...prev, aiRules: updatedRules };
+
+      try {
+        localStorage.setItem("dita_settings_store_v2", JSON.stringify(nextSettings));
+      } catch (e) {}
+
+      saveSettingsToFirestore(nextSettings).catch(e => console.warn(e));
+      fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(nextSettings)
+      }).catch(e => console.warn(e));
+
+      return nextSettings;
+    });
+
+    showNotification(
+      settings.preferredLanguage === "ar"
+        ? "تم تحديث قاعدة الذكاء الاصطناعي ومزامنتها"
+        : "AI Rule updated and synced",
+      "success"
+    );
   };
 
   const handleDeleteAIRule = (id: string) => {
-    const updatedRules = settings.aiRules.filter(r => r.id !== id);
-    handleUpdateSettings({ aiRules: updatedRules });
+    setSettings(prev => {
+      const currentRules = prev.aiRules || [];
+      const updatedRules = currentRules.filter(r => r.id !== id);
+      const nextSettings = { ...prev, aiRules: updatedRules };
+
+      try {
+        localStorage.setItem("dita_settings_store_v2", JSON.stringify(nextSettings));
+      } catch (e) {}
+
+      saveSettingsToFirestore(nextSettings).catch(e => console.warn(e));
+      fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(nextSettings)
+      }).catch(e => console.warn(e));
+
+      return nextSettings;
+    });
+
+    showNotification(
+      settings.preferredLanguage === "ar"
+        ? "تم حذف قاعدة الذكاء الاصطناعي ومزامنتها"
+        : "AI Rule deleted and synced",
+      "info"
+    );
   };
 
   const isArabic = settings?.preferredLanguage === "ar";
