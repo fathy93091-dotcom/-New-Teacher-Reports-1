@@ -114,6 +114,14 @@ export interface DailyReportSection {
   homework: string[];
 }
 
+export interface MemoryUpdateSuggestion {
+  id: string;
+  type: "strength" | "areaForImprovement" | "recurringMistake" | "teacherNote";
+  subject?: SubjectName;
+  text: string;
+  status: "pending" | "approved" | "edited" | "rejected";
+}
+
 export interface DailyReport {
   id: string;
   sessionId: string;
@@ -133,6 +141,7 @@ export interface DailyReport {
   closingMessage: string;
   contentEnglish: string;
   contentArabic?: string;
+  suggestedMemoryUpdates?: MemoryUpdateSuggestion[];
   isApproved: boolean;
   isDraft: boolean;
   createdAt: string;

@@ -6,7 +6,8 @@ import {
   MonthlyReport,
   StudentMemory,
   AIRule,
-  SubjectSessionRecord
+  SubjectSessionRecord,
+  MemoryUpdateSuggestion
 } from "../src/types";
 
 // Initialize Gemini Client
@@ -77,21 +78,28 @@ Student Memory Context (For Continuity Only - Do NOT invent new facts):
 - Past Homework Progress: ${studentMemory.homeworkHistory.slice(0, 3).map(h => h.task).join("; ") || "None"}
 ` : "";
 
-  const systemInstruction = `You are DITA (Daily Islamic Teacher Assistant), an intelligent AI assistant built exclusively for Islamic & Arabic education teachers.
-Your mandate is to convert verified teacher lesson input into a professional, structured, parent-friendly daily report.
+  const systemInstruction = `You are DITA (Daily Islamic Teacher Assistant), an AI educational assistant for teachers, NOT a conversational chatbot.
 
-STRICT ACCURACY RULES (SRS Chapter 5):
-1. THE TEACHER IS THE PRIMARY AUTHORITY. Generate report content ONLY from provided teacher notes, performance scores, and homework.
-2. NEVER INVENT or fabricate Quranic verses, Hadith, Fatwas, homework, mistakes, or unrecorded student activities.
-3. If information is absent for a section, omit that section cleanly.
-4. Output language must be ${targetLanguage === "ar" ? "Arabic" : "Professional English"}.
-5. Follow all active AI Rules provided below.
+STRICT EVIDENCE GROUNDING RULES (NO INVENTED FACTS):
+1. THE AI MUST NEVER INVENT INFORMATION. Generate report content and memory suggestions ONLY from:
+   - Teacher notes
+   - Uploaded lesson files/attachments
+   - Student Memory history
+   - Previous reports
+   - Active Teacher AI Rules
+2. THE TEACHER IS ALWAYS THE FINAL DECISION MAKER. All AI outputs are pending suggestions for teacher review and final approval.
+3. ONE LESSON MAY CONTAIN MULTIPLE SUBJECTS (e.g. Holy Qur'an, Tajweed, Arabic Language, Islamic Studies, English). Generate ONE well-organized, unified report covering all subjects in the session.
+4. SUGGESTED STUDENT MEMORY UPDATES:
+   - Analyze the lesson notes, performance ratings, mistakes, and achievements.
+   - Suggest 2-5 concrete updates for Student Memory (type: strength, areaForImprovement, recurringMistake, or teacherNote).
+   - NEVER update Student Memory automatically; suggestions require explicit teacher review with Accept, Edit, or Reject options.
+5. Output language: ${targetLanguage === "ar" ? "Arabic" : "Professional English"}.
 
 ACTIVE PERMANENT AI RULES:
 ${rulesPrompt}
 `;
 
-  const userPrompt = `Generate a comprehensive Daily Report for student "${student.fullName}".
+  const userPrompt = `Generate a comprehensive multi-subject Daily Report and suggested Student Memory updates for student "${student.fullName}".
 
 Session Details:
 - Student Name: ${student.fullName} (Age: ${student.age}, Level: ${student.currentLevel})
@@ -108,12 +116,12 @@ ${memoryContext}
 Respond ONLY with a valid JSON object matching this schema:
 {
   "title": "Daily Educational Report - Session #${session.sessionNumber}",
-  "overallPerformanceSummary": "A concise paragraph summarizing the session performance and engagement.",
+  "overallPerformanceSummary": "A concise paragraph summarizing multi-subject performance and engagement.",
   "subjectsCovered": [
     {
       "subject": "Name of subject",
-      "summary": "1-2 sentence summary of material covered.",
-      "lessonsStudied": ["List of specific lessons or topics"],
+      "summary": "1-2 sentence summary of material covered strictly from teacher notes.",
+      "lessonsStudied": ["List of specific lessons or topics from notes"],
       "surahsRecited": ["List of Surahs or verses if Quran"],
       "grammarOrTopics": ["Grammar or Tajweed topics if applicable"],
       "vocabularyOrRules": ["Key rules or vocabulary"],
@@ -124,7 +132,16 @@ Respond ONLY with a valid JSON object matching this schema:
   "teacherRemarks": "Encouraging overall teacher remarks.",
   "closingMessage": "Respectful closing Islamic dua or parent message.",
   "contentEnglish": "Full formatted text version of the report in English",
-  "contentArabic": "Full formatted text version of the report in Arabic"
+  "contentArabic": "Full formatted text version of the report in Arabic",
+  "suggestedMemoryUpdates": [
+    {
+      "id": "sug_1",
+      "type": "strength | areaForImprovement | recurringMistake | teacherNote",
+      "subject": "Subject name if specific",
+      "text": "Evidence-grounded update suggestion derived strictly from lesson notes/achievements/mistakes",
+      "status": "pending"
+    }
+  ]
 }`;
 
   const client = getGeminiClient();
@@ -147,6 +164,15 @@ Respond ONLY with a valid JSON object matching this schema:
         // Build homework items list
         const allHomework = session.subjectRecords.flatMap(sr => sr.homework);
 
+        const rawSuggestions: any[] = Array.isArray(parsed.suggestedMemoryUpdates) ? parsed.suggestedMemoryUpdates : [];
+        const suggestedMemoryUpdates: MemoryUpdateSuggestion[] = rawSuggestions.map((s, i) => ({
+          id: s.id || `sug_${Date.now()}_${i}`,
+          type: s.type || "teacherNote",
+          subject: s.subject,
+          text: s.text || "Lesson observation",
+          status: "pending"
+        }));
+
         return {
           id: reportId,
           sessionId: session.id,
@@ -166,6 +192,7 @@ Respond ONLY with a valid JSON object matching this schema:
           closingMessage: parsed.closingMessage || "May Allah bless the student with continuous knowledge and wisdom. Ameen.",
           contentEnglish: parsed.contentEnglish || buildFallbackText(student, session, teacherName, "en"),
           contentArabic: parsed.contentArabic || buildFallbackText(student, session, teacherName, "ar"),
+          suggestedMemoryUpdates,
           isApproved: false,
           isDraft: true,
           createdAt: new Date().toISOString(),
@@ -334,6 +361,37 @@ function createFallbackDailyReport(session: Session, student: Student, teacherNa
 
   const allHw = session.subjectRecords.flatMap(sr => sr.homework);
 
+  const suggestedMemoryUpdates: MemoryUpdateSuggestion[] = [];
+  session.subjectRecords.forEach((sr, idx) => {
+    sr.achievements.forEach((ach, aIdx) => {
+      suggestedMemoryUpdates.push({
+        id: `sug_ach_${idx}_${aIdx}`,
+        type: "strength",
+        subject: sr.subject,
+        text: `Achievement in ${sr.subject}: ${ach}`,
+        status: "pending"
+      });
+    });
+    sr.mistakes.forEach((m, mIdx) => {
+      suggestedMemoryUpdates.push({
+        id: `sug_mis_${idx}_${mIdx}`,
+        type: "recurringMistake",
+        subject: sr.subject,
+        text: `Area to focus in ${sr.subject}: ${m}`,
+        status: "pending"
+      });
+    });
+    if (sr.performance.writtenObservations) {
+      suggestedMemoryUpdates.push({
+        id: `sug_obs_${idx}`,
+        type: "teacherNote",
+        subject: sr.subject,
+        text: `Observation in ${sr.subject}: ${sr.performance.writtenObservations}`,
+        status: "pending"
+      });
+    }
+  });
+
   return {
     id: `rep_${Date.now()}`,
     sessionId: session.id,
@@ -353,6 +411,7 @@ function createFallbackDailyReport(session: Session, student: Student, teacherNa
     closingMessage: "May Allah grant the student continuous success in knowledge and character. Ameen.",
     contentEnglish: buildFallbackText(student, session, teacherName, "en"),
     contentArabic: buildFallbackText(student, session, teacherName, "ar"),
+    suggestedMemoryUpdates,
     isApproved: false,
     isDraft: true,
     createdAt: new Date().toISOString(),

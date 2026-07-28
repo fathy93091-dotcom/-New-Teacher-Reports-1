@@ -12,6 +12,15 @@ import { UnitTestsView } from "./components/UnitTestsView";
 import { MobileBottomNav } from "./components/MobileBottomNav";
 import { testFirebaseConnection } from "./lib/firebase";
 import {
+  saveStudentToFirestore,
+  saveSessionToFirestore,
+  saveDailyReportToFirestore,
+  saveMonthlyReportToFirestore,
+  saveStudentMemoryToFirestore,
+  saveSettingsToFirestore,
+  loadInitialFirestoreData
+} from "./lib/firestoreService";
+import {
   initialStudents,
   initialSessions,
   initialDailyReports,
@@ -202,20 +211,103 @@ export function App() {
 
   const handleApproveReport = async (updatedReport: DailyReport) => {
     try {
-      const res = await fetch("/api/reports/daily/save", {
+      // 1. Process teacher-approved memory update suggestions
+      const approvedSuggestions = (updatedReport.suggestedMemoryUpdates || []).filter(
+        s => s.status === "approved" || s.status === "edited"
+      );
+
+      let updatedMemory: StudentMemory | undefined = undefined;
+      if (approvedSuggestions.length > 0 && updatedReport.studentId) {
+        const currentMemory = memories[updatedReport.studentId] || {
+          id: `mem_${updatedReport.studentId}`,
+          studentId: updatedReport.studentId,
+          educationalHistory: [],
+          homeworkHistory: [],
+          strengths: [],
+          areasForImprovement: [],
+          recurringMistakes: [],
+          teacherNotes: [],
+          progressSummary: "",
+          lastUpdated: new Date().toISOString()
+        };
+
+        const newStrengths = [...currentMemory.strengths];
+        const newAreas = [...currentMemory.areasForImprovement];
+        const newMistakes = [...currentMemory.recurringMistakes];
+        const newNotes = [...currentMemory.teacherNotes];
+
+        approvedSuggestions.forEach(s => {
+          if (s.type === "strength" && !newStrengths.includes(s.text)) newStrengths.push(s.text);
+          else if (s.type === "areaForImprovement" && !newAreas.includes(s.text)) newAreas.push(s.text);
+          else if (s.type === "recurringMistake" && !newMistakes.includes(s.text)) newMistakes.push(s.text);
+          else if (s.type === "teacherNote" && !newNotes.includes(s.text)) newNotes.push(s.text);
+        });
+
+        const historyRecord = {
+          id: `hist_${Date.now()}`,
+          date: updatedReport.date,
+          sessionId: updatedReport.sessionId,
+          sessionNumber: updatedReport.sessionNumber,
+          summary: updatedReport.overallPerformanceSummary,
+          subjects: updatedReport.subjectsCovered.map(s => s.subject),
+          keyAchievements: approvedSuggestions.filter(s => s.type === "strength").map(s => s.text),
+          areasToFocus: approvedSuggestions.filter(s => s.type === "areaForImprovement" || s.type === "recurringMistake").map(s => s.text)
+        };
+
+        updatedMemory = {
+          ...currentMemory,
+          strengths: newStrengths,
+          areasForImprovement: newAreas,
+          recurringMistakes: newMistakes,
+          teacherNotes: newNotes,
+          educationalHistory: [historyRecord, ...currentMemory.educationalHistory],
+          lastUpdated: new Date().toISOString()
+        };
+
+        setMemories(prev => ({ ...prev, [updatedReport.studentId]: updatedMemory! }));
+      }
+
+      // 2. Local State Updates
+      setDailyReports(prev => [updatedReport, ...prev.filter(r => r.id !== updatedReport.id)]);
+
+      const matchingSession = sessions.find(s => s.id === updatedReport.sessionId);
+      let updatedSession: Session | undefined = undefined;
+      if (matchingSession) {
+        updatedSession = { ...matchingSession, reportStatus: "approved", reportId: updatedReport.id };
+        setSessions(prev => prev.map(s => (s.id === updatedSession!.id ? updatedSession! : s)));
+      }
+
+      // 3. Direct Firebase Firestore Persistence (Session, DailyReport, Approved Student Memory)
+      await saveDailyReportToFirestore(updatedReport);
+      if (updatedSession) {
+        await saveSessionToFirestore(updatedSession);
+      }
+      if (updatedMemory) {
+        await saveStudentMemoryToFirestore(updatedMemory);
+      }
+
+      // 4. Express Server Sync
+      await fetch("/api/reports/daily/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ report: updatedReport, isApproved: true })
       });
-      const result = await res.json();
 
       setSelectedReportForPreview(null);
-      await refreshAllData();
-      showNotification(settings.preferredLanguage === "ar" ? "تم إعتماد التقرير وتحديث ذاكرة الطالب تلقائياً!" : "Report approved & saved! Student Memory updated automatically.", "success");
+      showNotification(
+        settings.preferredLanguage === "ar"
+          ? "تم حفظ الجلسة والتقرير وتحديث ذاكرة الطالب المعتمدة في الفايربيس بنجاح!"
+          : "Session, Report & Approved Student Memory saved to Firebase!",
+        "success"
+      );
     } catch (err) {
+      console.error("Save error:", err);
       setSelectedReportForPreview(null);
       setDailyReports(prev => [updatedReport, ...prev.filter(r => r.id !== updatedReport.id)]);
-      showNotification(settings.preferredLanguage === "ar" ? "تم حفظ التقرير بنجاح" : "Report approved & saved locally.", "success");
+      showNotification(
+        settings.preferredLanguage === "ar" ? "تم إعتماد التقرير وحفظه بنجاح" : "Report approved & saved locally.",
+        "success"
+      );
     }
   };
 

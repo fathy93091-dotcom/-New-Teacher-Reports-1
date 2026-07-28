@@ -11,9 +11,13 @@ import {
   X,
   Edit3,
   Check,
-  Share2
+  Share2,
+  Brain,
+  ThumbsUp,
+  ThumbsDown,
+  AlertCircle
 } from "lucide-react";
-import { DailyReport, AppSettings } from "../types";
+import { DailyReport, AppSettings, MemoryUpdateSuggestion } from "../types";
 
 interface ReportPreviewModalProps {
   report: DailyReport;
@@ -40,6 +44,13 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
   const [englishText, setEnglishText] = useState(report.contentEnglish);
   const [arabicText, setArabicText] = useState(report.contentArabic || "");
 
+  const [suggestions, setSuggestions] = useState<MemoryUpdateSuggestion[]>(
+    report.suggestedMemoryUpdates || []
+  );
+
+  const [editingSuggestionId, setEditingSuggestionId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState("");
+
   const currentText = activeLangTab === "en" ? englishText : (arabicText || englishText);
 
   const handleCopy = () => {
@@ -48,17 +59,7 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleExportText = () => {
-    const blob = new Blob([currentText], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `DITA_Report_${report.studentName.replace(/\s+/g, "_")}_Session${report.sessionNumber}.txt`;
-    a.click();
-  };
-
   const handleExportWord = () => {
-    // Generate simple html-based DOCX compatible file
     const wordContent = `
       <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
       <head><title>${report.title}</title></head>
@@ -78,11 +79,38 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
     a.click();
   };
 
+  const handleAcceptSuggestion = (id: string) => {
+    setSuggestions(prev =>
+      prev.map(s => (s.id === id ? { ...s, status: "approved" } : s))
+    );
+  };
+
+  const handleRejectSuggestion = (id: string) => {
+    setSuggestions(prev =>
+      prev.map(s => (s.id === id ? { ...s, status: "rejected" } : s))
+    );
+  };
+
+  const startEditSuggestion = (s: MemoryUpdateSuggestion) => {
+    setEditingSuggestionId(s.id);
+    setEditingText(s.text);
+  };
+
+  const saveEditedSuggestion = (id: string) => {
+    setSuggestions(prev =>
+      prev.map(s =>
+        s.id === id ? { ...s, text: editingText, status: "edited" } : s
+      )
+    );
+    setEditingSuggestionId(null);
+  };
+
   const handleApprove = () => {
     const updated: DailyReport = {
       ...report,
       contentEnglish: englishText,
       contentArabic: arabicText,
+      suggestedMemoryUpdates: suggestions,
       isApproved: true,
       isDraft: false,
       lastModified: new Date().toISOString()
@@ -95,11 +123,25 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
       ...report,
       contentEnglish: englishText,
       contentArabic: arabicText,
+      suggestedMemoryUpdates: suggestions,
       isApproved: false,
       isDraft: true,
       lastModified: new Date().toISOString()
     };
     onSaveAsDraft(updated);
+  };
+
+  const getTypeBadge = (type: MemoryUpdateSuggestion["type"]) => {
+    switch (type) {
+      case "strength":
+        return <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">{isArabicDefault ? "نقطة قوة" : "Strength"}</span>;
+      case "areaForImprovement":
+        return <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">{isArabicDefault ? "مجال للتحسين" : "Area to Focus"}</span>;
+      case "recurringMistake":
+        return <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">{isArabicDefault ? "ملاحظة خطأ" : "Mistake Recorded"}</span>;
+      default:
+        return <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">{isArabicDefault ? "ملاحظة معلم" : "Teacher Note"}</span>;
+    }
   };
 
   return (
@@ -194,7 +236,7 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
         </div>
 
         {/* Modal Body: Report Preview & Editor */}
-        <div className="p-6 overflow-y-auto flex-1 space-y-4 font-sans text-sm leading-relaxed text-slate-200">
+        <div className="p-6 overflow-y-auto flex-1 space-y-5 font-sans text-sm leading-relaxed text-slate-200">
           {/* Top Subjects Summary Badge List */}
           <div className="flex flex-wrap gap-2 p-3 bg-slate-950/80 rounded-xl border border-slate-800">
             <span className="text-xs font-bold text-slate-400 self-center">Subjects:</span>
@@ -208,7 +250,7 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
           {/* Report Main Content Area */}
           {isEditing ? (
             <textarea
-              rows={14}
+              rows={12}
               value={activeLangTab === "en" ? englishText : arabicText}
               onChange={e => {
                 if (activeLangTab === "en") setEnglishText(e.target.value);
@@ -230,6 +272,107 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
           {report.closingMessage && (
             <div className="p-3 bg-emerald-950/40 border border-emerald-800/60 rounded-xl text-center text-xs text-emerald-300 italic font-serif">
               "{report.closingMessage}"
+            </div>
+          )}
+
+          {/* Suggested Student Memory Updates (Teacher Approval required) */}
+          {suggestions.length > 0 && (
+            <div className="p-4 bg-slate-950/90 rounded-2xl border border-teal-500/30 space-y-3">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                <div className="flex items-center gap-2">
+                  <Brain className="w-4 h-4 text-teal-400" />
+                  <h3 className="text-xs font-bold text-teal-300 uppercase tracking-wider">
+                    {isArabicDefault ? "مقترحات ذاكرة الطالب (تتطلب موافقة المعلم)" : "Suggested Student Memory Updates (Requires Teacher Approval)"}
+                  </h3>
+                </div>
+                <span className="text-[10px] text-slate-400">
+                  {suggestions.filter(s => s.status === "approved" || s.status === "edited").length} / {suggestions.length} {isArabicDefault ? "مقبول" : "Approved"}
+                </span>
+              </div>
+
+              <div className="space-y-2">
+                {suggestions.map((s) => (
+                  <div
+                    key={s.id}
+                    className={`p-3 rounded-xl border text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition ${
+                      s.status === "approved" || s.status === "edited"
+                        ? "bg-emerald-950/30 border-emerald-500/40"
+                        : s.status === "rejected"
+                        ? "bg-slate-900/50 border-slate-800 opacity-50"
+                        : "bg-slate-900 border-slate-700"
+                    }`}
+                  >
+                    <div className="flex-1 space-y-1">
+                      <div className="flex items-center gap-2">
+                        {getTypeBadge(s.type)}
+                        {s.subject && <span className="text-[10px] font-medium text-slate-400">• {s.subject}</span>}
+                        {s.status === "approved" && <span className="text-[10px] text-emerald-400 font-bold">✓ Approved</span>}
+                        {s.status === "edited" && <span className="text-[10px] text-amber-400 font-bold">✎ Edited & Approved</span>}
+                        {s.status === "rejected" && <span className="text-[10px] text-slate-500 line-through">Rejected</span>}
+                      </div>
+
+                      {editingSuggestionId === s.id ? (
+                        <div className="flex items-center gap-2 mt-2">
+                          <input
+                            type="text"
+                            value={editingText}
+                            onChange={e => setEditingText(e.target.value)}
+                            className="flex-1 px-3 py-1 bg-slate-950 border border-teal-500/50 rounded-lg text-white text-xs outline-none"
+                          />
+                          <button
+                            onClick={() => saveEditedSuggestion(s.id)}
+                            className="px-3 py-1 rounded-lg bg-teal-500 text-slate-950 font-bold text-xs hover:bg-teal-400"
+                          >
+                            Save
+                          </button>
+                        </div>
+                      ) : (
+                        <p className={`text-slate-200 ${s.status === "rejected" ? "line-through text-slate-500" : ""}`}>
+                          {s.text}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Action buttons: Accept, Edit, Reject */}
+                    <div className="flex items-center gap-1.5 self-end sm:self-center">
+                      <button
+                        onClick={() => handleAcceptSuggestion(s.id)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 border transition ${
+                          s.status === "approved"
+                            ? "bg-emerald-500 text-slate-950 border-emerald-400"
+                            : "bg-slate-800 text-emerald-400 border-slate-700 hover:bg-emerald-950/50"
+                        }`}
+                        title="Accept suggestion"
+                      >
+                        <Check className="w-3 h-3" />
+                        <span>{isArabicDefault ? "قبول" : "Accept"}</span>
+                      </button>
+
+                      <button
+                        onClick={() => startEditSuggestion(s)}
+                        className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-slate-800 text-amber-300 border border-slate-700 hover:bg-amber-950/50 transition flex items-center gap-1"
+                        title="Edit text"
+                      >
+                        <Edit3 className="w-3 h-3" />
+                        <span>{isArabicDefault ? "تعديل" : "Edit"}</span>
+                      </button>
+
+                      <button
+                        onClick={() => handleRejectSuggestion(s.id)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 border transition ${
+                          s.status === "rejected"
+                            ? "bg-rose-500/20 text-rose-300 border-rose-500"
+                            : "bg-slate-800 text-slate-400 border-slate-700 hover:bg-rose-950/50 hover:text-rose-300"
+                        }`}
+                        title="Reject suggestion"
+                      >
+                        <X className="w-3 h-3" />
+                        <span>{isArabicDefault ? "رفض" : "Reject"}</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>
@@ -258,7 +401,7 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
               className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm shadow-xl shadow-emerald-900/50 flex items-center gap-2 transition"
             >
               <CheckCircle2 className="w-4 h-4" />
-              <span>Approve & Save (Update Memory)</span>
+              <span>{isArabicDefault ? "اعتماد وحفظ (تحديث الذاكرة بالفيسبايس)" : "Approve & Save (Update Memory & Firebase)"}</span>
             </button>
           </div>
         </div>
@@ -266,3 +409,4 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
     </div>
   );
 };
+
