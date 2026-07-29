@@ -1,4 +1,5 @@
 import React from "react";
+import { User } from "firebase/auth";
 import {
   BookOpen,
   Users,
@@ -13,7 +14,10 @@ import {
   Search,
   PlusCircle,
   Sparkles,
-  LayoutTemplate
+  LayoutTemplate,
+  LogIn,
+  ShieldCheck,
+  CloudCheck
 } from "lucide-react";
 import { UserProfile, AppSettings } from "../types";
 
@@ -32,6 +36,8 @@ interface HeaderProps {
   activeTab: ActiveTab;
   setActiveTab: (tab: ActiveTab) => void;
   user?: UserProfile;
+  authUser?: User | null;
+  onOpenAuthModal?: () => void;
   settings?: AppSettings;
   onLanguageToggle?: (lang: "en" | "ar") => void;
   onOpenQuickSearch?: () => void;
@@ -53,6 +59,8 @@ export const Header: React.FC<HeaderProps> = ({
   activeTab,
   setActiveTab,
   user = defaultUser,
+  authUser,
+  onOpenAuthModal,
   settings,
   onLanguageToggle,
   onOpenQuickSearch,
@@ -74,22 +82,22 @@ export const Header: React.FC<HeaderProps> = ({
   ];
 
   return (
-    <header className="bg-slate-900 text-white border-b border-slate-800 sticky top-0 z-30 shadow-md">
+    <header className="bg-white/95 backdrop-blur-md text-slate-800 border-b border-emerald-100 sticky top-0 z-30 shadow-xs">
       {/* Top Branding Bar */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         {/* Brand Title */}
         <div className="flex items-center gap-3 cursor-pointer" onClick={() => setActiveTab("dashboard")}>
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-700 flex items-center justify-center shadow-lg shadow-emerald-900/40 border border-emerald-400/30">
-            <Sparkles className="w-5 h-5 text-emerald-100" />
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-600 to-teal-700 flex items-center justify-center shadow-md shadow-emerald-600/20 border border-emerald-400/30">
+            <Sparkles className="w-5 h-5 text-amber-300" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="font-bold text-lg tracking-tight text-emerald-100">DITA</span>
-              <span className="text-[10px] font-semibold tracking-wider uppercase px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800/80">
+              <span className="font-extrabold text-lg tracking-tight text-emerald-950">DITA</span>
+              <span className="text-[10px] font-bold tracking-wider uppercase px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">
                 SRS v1.0
               </span>
             </div>
-            <p className="text-xs text-slate-400 hidden sm:block">
+            <p className="text-xs text-emerald-800/80 font-medium hidden sm:block">
               {isArabic ? "مساعد المعلم الإسلامي اليومي الذكي" : "Daily Islamic Teacher Assistant"}
             </p>
           </div>
@@ -100,64 +108,87 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Quick Search */}
           <button
             onClick={() => onOpenQuickSearch?.()}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs sm:text-sm border border-slate-700 transition"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-50/70 hover:bg-emerald-100/60 text-emerald-950 text-xs sm:text-sm border border-emerald-200/80 transition"
             title={isArabic ? "بحث سريع" : "Quick Search"}
           >
-            <Search className="w-4 h-4 text-emerald-400" />
-            <span className="hidden md:inline">{isArabic ? "بحث شامل..." : "Search students, reports..."}</span>
-            <kbd className="hidden lg:inline-block px-1.5 py-0.5 text-[10px] bg-slate-900 text-slate-400 rounded border border-slate-700">⌘K</kbd>
+            <Search className="w-4 h-4 text-emerald-600" />
+            <span className="hidden md:inline font-medium">{isArabic ? "بحث شامل..." : "Search students, reports..."}</span>
+            <kbd className="hidden lg:inline-block px-1.5 py-0.5 text-[10px] bg-white text-emerald-800 font-bold rounded border border-emerald-200">⌘K</kbd>
           </button>
 
           {/* Start New Session CTA */}
           <button
             onClick={() => onStartNewSession?.()}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs sm:text-sm shadow-md shadow-emerald-900/30 transition transform active:scale-95"
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold text-xs sm:text-sm shadow-md shadow-emerald-600/20 transition transform active:scale-95"
           >
-            <PlusCircle className="w-4 h-4" />
+            <PlusCircle className="w-4 h-4 text-amber-300" />
             <span className="hidden sm:inline">{isArabic ? "حصة جديدة" : "New Session"}</span>
           </button>
 
           {/* Language Switcher */}
           <button
             onClick={() => onLanguageToggle?.(isArabic ? "en" : "ar")}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs border border-slate-700 transition"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-white hover:bg-emerald-50 text-emerald-900 text-xs border border-emerald-200 transition font-bold shadow-2xs"
             title="Toggle Language / تغيير اللغة"
           >
-            <Globe className="w-4 h-4 text-teal-400" />
-            <span className="font-semibold">{isArabic ? "English" : "العربية"}</span>
+            <Globe className="w-4 h-4 text-teal-600" />
+            <span>{isArabic ? "English" : "العربية"}</span>
           </button>
 
           {/* Notifications Indicator */}
           <button
             onClick={() => setActiveTab("reports")}
-            className="relative p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition"
+            className="relative p-2 rounded-xl bg-white hover:bg-emerald-50 text-slate-700 border border-emerald-200 transition shadow-2xs"
             title={isArabic ? "التنبيهات" : "Notifications"}
           >
-            <Bell className="w-4 h-4" />
+            <Bell className="w-4 h-4 text-emerald-700" />
             {pendingReportsCount > 0 && (
-              <span className="absolute -top-1 -right-1 w-4 h-4 bg-amber-500 text-slate-950 font-bold text-[10px] rounded-full flex items-center justify-center animate-pulse">
+              <span className="absolute -top-1 -right-1 w-4.5 h-4.5 bg-amber-500 text-white font-black text-[10px] rounded-full flex items-center justify-center animate-pulse shadow-sm">
                 {pendingReportsCount}
               </span>
             )}
           </button>
 
-          {/* Teacher Profile Avatar */}
-          <div className="flex items-center gap-2 pl-2 border-l border-slate-800">
-            <img
-              src={user?.avatarUrl || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=200"}
-              alt={user?.fullName || "Teacher"}
-              className="w-8 h-8 rounded-full border border-emerald-500 object-cover"
-            />
-            <div className="hidden lg:block text-left text-xs">
-              <div className="font-semibold text-slate-200">{user?.fullName || "Sheikh Ahmad"}</div>
-              <div className="text-[10px] text-emerald-400 truncate max-w-[120px]">{user?.title || "Quran Teacher"}</div>
-            </div>
-          </div>
+          {/* Firebase Authentication Button / User Profile */}
+          <button
+            onClick={onOpenAuthModal}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-slate-900 border border-emerald-200 transition shadow-2xs text-xs font-bold"
+            title={authUser ? (isArabic ? "إدارة حساب Firebase" : "Manage Firebase Account") : (isArabic ? "تسجيل الدخول عبر Firebase" : "Firebase Sign In")}
+          >
+            {authUser ? (
+              <>
+                <div className="relative">
+                  <img
+                    src={authUser.photoURL || user?.avatarUrl || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=200"}
+                    alt={authUser.displayName || "User"}
+                    className="w-7 h-7 rounded-full border-2 border-emerald-600 object-cover"
+                  />
+                  <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-500 border-2 border-white rounded-full"></span>
+                </div>
+                <div className="hidden lg:block text-left text-xs">
+                  <div className="font-extrabold text-slate-900 truncate max-w-[110px]">
+                    {authUser.displayName || user?.fullName || "Teacher"}
+                  </div>
+                  <div className="text-[10px] text-emerald-700 font-bold flex items-center gap-1">
+                    <CloudCheck className="w-3 h-3 text-emerald-600 inline" />
+                    <span>Firebase Auth</span>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <LogIn className="w-4 h-4 text-emerald-700" />
+                <span className="hidden sm:inline text-emerald-950 font-bold">
+                  {isArabic ? "تسجيل الدخول" : "Firebase Login"}
+                </span>
+              </>
+            )}
+          </button>
         </div>
       </div>
 
       {/* Navigation Tab Bar */}
-      <nav className="bg-slate-950 border-t border-slate-800/80 overflow-x-auto scrollbar-none">
+      <nav className="bg-emerald-50/40 border-t border-emerald-100/80 overflow-x-auto scrollbar-none">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex space-x-1 sm:space-x-2">
           {navItems.map(item => {
             const Icon = item.icon;
@@ -166,16 +197,16 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 key={item.id}
                 onClick={() => setActiveTab(item.id as ActiveTab)}
-                className={`flex items-center gap-2 px-3 py-2.5 text-xs sm:text-sm font-medium border-b-2 transition whitespace-nowrap ${
+                className={`flex items-center gap-2 px-3.5 py-2.5 text-xs sm:text-sm font-medium border-b-2 transition whitespace-nowrap ${
                   isActive
-                    ? "border-emerald-500 text-emerald-400 bg-slate-900/80 font-semibold"
-                    : "border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/40"
+                    ? "border-emerald-600 text-emerald-950 bg-white font-bold shadow-2xs"
+                    : "border-transparent text-slate-600 hover:text-emerald-900 hover:bg-emerald-100/50"
                 }`}
               >
-                <Icon className={`w-4 h-4 ${isActive ? "text-emerald-400" : "text-slate-400"}`} />
+                <Icon className={`w-4 h-4 ${isActive ? "text-emerald-600" : "text-slate-500"}`} />
                 <span>{isArabic ? item.labelAr : item.labelEn}</span>
                 {item.badge !== undefined && item.badge > 0 && (
-                  <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                  <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-500 text-white shadow-2xs">
                     {item.badge}
                   </span>
                 )}

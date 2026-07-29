@@ -815,13 +815,13 @@ export class DatabaseService {
   }
 
   updateSettings(updates: Partial<AppSettings>): AppSettings {
-    this.store.settings = { ...this.store.settings, ...updates };
+    this.store.settings = { ...this.store.settings, ...updates, lastUpdated: new Date().toISOString() };
     this.persist();
     return this.store.settings;
   }
 
   getAIRules(): AIRule[] {
-    return this.store.settings.aiRules;
+    return this.store.settings.aiRules || [];
   }
 
   addAIRule(rule: Omit<AIRule, "id">): AIRule {
@@ -829,25 +829,105 @@ export class DatabaseService {
       ...rule,
       id: `rule_${Date.now()}`
     };
+    if (!Array.isArray(this.store.settings.aiRules)) {
+      this.store.settings.aiRules = [];
+    }
     this.store.settings.aiRules.push(newRule);
+    this.store.settings.lastUpdated = new Date().toISOString();
     this.persist();
     return newRule;
   }
 
   updateAIRule(id: string, updates: Partial<AIRule>): AIRule | undefined {
+    if (!Array.isArray(this.store.settings.aiRules)) {
+      this.store.settings.aiRules = [];
+    }
     const idx = this.store.settings.aiRules.findIndex(r => r.id === id);
     if (idx === -1) return undefined;
     this.store.settings.aiRules[idx] = { ...this.store.settings.aiRules[idx], ...updates };
+    this.store.settings.lastUpdated = new Date().toISOString();
     this.persist();
     return this.store.settings.aiRules[idx];
   }
 
   deleteAIRule(id: string): boolean {
+    if (!Array.isArray(this.store.settings.aiRules)) {
+      this.store.settings.aiRules = [];
+    }
     const idx = this.store.settings.aiRules.findIndex(r => r.id === id);
     if (idx === -1) return false;
     this.store.settings.aiRules.splice(idx, 1);
+    this.store.settings.lastUpdated = new Date().toISOString();
     this.persist();
     return true;
+  }
+
+  getBackup(): DBStore {
+    return this.store;
+  }
+
+  restoreBackup(bundle: Partial<DBStore>): DBStore {
+    if (Array.isArray(bundle.students)) {
+      this.store.students = bundle.students;
+    }
+    if (Array.isArray(bundle.sessions)) {
+      this.store.sessions = bundle.sessions;
+    }
+    if (Array.isArray(bundle.reports)) {
+      this.store.reports = bundle.reports;
+    }
+    if (Array.isArray(bundle.monthlyReports)) {
+      this.store.monthlyReports = bundle.monthlyReports;
+    }
+    if (bundle.memories && typeof bundle.memories === "object") {
+      this.store.memories = bundle.memories;
+    }
+    if (bundle.settings && typeof bundle.settings === "object") {
+      this.store.settings = { ...this.store.settings, ...bundle.settings };
+    }
+    if (bundle.user && typeof bundle.user === "object") {
+      this.store.user = { ...this.store.user, ...bundle.user };
+    }
+    this.persist();
+    return this.store;
+  }
+
+  syncAll(bundle: {
+    students?: Student[];
+    sessions?: Session[];
+    reports?: DailyReport[];
+    monthlyReports?: MonthlyReport[];
+    memories?: Record<string, StudentMemory>;
+    settings?: AppSettings;
+  }): DBStore {
+    const mergeArrays = <T extends { id: string }>(existing: T[], incoming?: T[]): T[] => {
+      if (!Array.isArray(incoming)) return existing;
+      const map = new Map<string, T>();
+      existing.forEach(item => { if (item && item.id) map.set(item.id, item); });
+      incoming.forEach(item => { if (item && item.id) map.set(item.id, item); });
+      return Array.from(map.values());
+    };
+
+    if (Array.isArray(bundle.students)) {
+      this.store.students = mergeArrays(this.store.students, bundle.students);
+    }
+    if (Array.isArray(bundle.sessions)) {
+      this.store.sessions = mergeArrays(this.store.sessions, bundle.sessions);
+    }
+    if (Array.isArray(bundle.reports)) {
+      this.store.reports = mergeArrays(this.store.reports, bundle.reports);
+    }
+    if (Array.isArray(bundle.monthlyReports)) {
+      this.store.monthlyReports = mergeArrays(this.store.monthlyReports, bundle.monthlyReports);
+    }
+    if (bundle.memories && typeof bundle.memories === "object") {
+      this.store.memories = { ...this.store.memories, ...bundle.memories };
+    }
+    if (bundle.settings && typeof bundle.settings === "object") {
+      this.store.settings = { ...this.store.settings, ...bundle.settings };
+    }
+    this.persist();
+    return this.store;
   }
 }
 

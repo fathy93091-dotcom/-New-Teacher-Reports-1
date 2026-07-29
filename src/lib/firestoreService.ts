@@ -3,9 +3,9 @@ import {
   setDoc,
   getDoc,
   getDocs,
+  deleteDoc,
   collection,
-  query,
-  where
+  writeBatch
 } from "firebase/firestore";
 import { db } from "./firebase";
 import { handleFirestoreError, OperationType } from "./firestoreErrors";
@@ -27,12 +27,30 @@ export async function saveStudentToFirestore(student: Student): Promise<void> {
   }
 }
 
+export async function deleteStudentFromFirestore(studentId: string): Promise<void> {
+  const path = `students/${studentId}`;
+  try {
+    await deleteDoc(doc(db, "students", studentId));
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, path);
+  }
+}
+
 export async function saveSessionToFirestore(session: Session): Promise<void> {
   const path = `sessions/${session.id}`;
   try {
     await setDoc(doc(db, "sessions", session.id), session, { merge: true });
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
+  }
+}
+
+export async function deleteSessionFromFirestore(sessionId: string): Promise<void> {
+  const path = `sessions/${sessionId}`;
+  try {
+    await deleteDoc(doc(db, "sessions", sessionId));
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, path);
   }
 }
 
@@ -45,12 +63,30 @@ export async function saveDailyReportToFirestore(report: DailyReport): Promise<v
   }
 }
 
+export async function deleteDailyReportFromFirestore(reportId: string): Promise<void> {
+  const path = `dailyReports/${reportId}`;
+  try {
+    await deleteDoc(doc(db, "dailyReports", reportId));
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, path);
+  }
+}
+
 export async function saveMonthlyReportToFirestore(report: MonthlyReport): Promise<void> {
   const path = `monthlyReports/${report.id}`;
   try {
     await setDoc(doc(db, "monthlyReports", report.id), report, { merge: true });
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
+  }
+}
+
+export async function deleteMonthlyReportFromFirestore(reportId: string): Promise<void> {
+  const path = `monthlyReports/${reportId}`;
+  try {
+    await deleteDoc(doc(db, "monthlyReports", reportId));
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, path);
   }
 }
 
@@ -69,6 +105,45 @@ export async function saveSettingsToFirestore(settings: AppSettings): Promise<vo
     await setDoc(doc(db, "settings", "default_teacher_settings"), settings, { merge: true });
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
+  }
+}
+
+export async function syncAllDataToFirestore(data: {
+  students: Student[];
+  sessions: Session[];
+  dailyReports: DailyReport[];
+  monthlyReports: MonthlyReport[];
+  memories: Record<string, StudentMemory>;
+  settings: AppSettings;
+}): Promise<void> {
+  try {
+    const batch = writeBatch(db);
+
+    data.students.forEach(s => {
+      batch.set(doc(db, "students", s.id), s, { merge: true });
+    });
+
+    data.sessions.forEach(s => {
+      batch.set(doc(db, "sessions", s.id), s, { merge: true });
+    });
+
+    data.dailyReports.forEach(r => {
+      batch.set(doc(db, "dailyReports", r.id), r, { merge: true });
+    });
+
+    data.monthlyReports.forEach(r => {
+      batch.set(doc(db, "monthlyReports", r.id), r, { merge: true });
+    });
+
+    Object.values(data.memories).forEach(m => {
+      batch.set(doc(db, "studentMemories", m.id), m, { merge: true });
+    });
+
+    batch.set(doc(db, "settings", "default_teacher_settings"), data.settings, { merge: true });
+
+    await batch.commit();
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, "batch_sync");
   }
 }
 
@@ -140,3 +215,4 @@ export async function loadInitialFirestoreData(): Promise<{
 
   return result;
 }
+

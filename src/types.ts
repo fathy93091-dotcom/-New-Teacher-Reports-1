@@ -233,6 +233,7 @@ export interface AppSettings {
     pendingReports: boolean;
     incompleteHomework: boolean;
   };
+  lastUpdated?: string;
 }
 
 export interface UserProfile {

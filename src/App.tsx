@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { onAuthStateChanged, User } from "firebase/auth";
 import { Header, ActiveTab } from "./components/Header";
 import { DashboardView } from "./components/DashboardView";
 import { StudentsView } from "./components/StudentsView";
@@ -11,14 +12,20 @@ import { TemplatesView } from "./components/TemplatesView";
 import { ApiDocsView } from "./components/ApiDocsView";
 import { UnitTestsView } from "./components/UnitTestsView";
 import { MobileBottomNav } from "./components/MobileBottomNav";
-import { testFirebaseConnection } from "./lib/firebase";
+import { AuthModal } from "./components/AuthModal";
+import { testFirebaseConnection, auth } from "./lib/firebase";
 import {
   saveStudentToFirestore,
+  deleteStudentFromFirestore,
   saveSessionToFirestore,
+  deleteSessionFromFirestore,
   saveDailyReportToFirestore,
+  deleteDailyReportFromFirestore,
   saveMonthlyReportToFirestore,
+  deleteMonthlyReportFromFirestore,
   saveStudentMemoryToFirestore,
   saveSettingsToFirestore,
+  syncAllDataToFirestore,
   loadInitialFirestoreData
 } from "./lib/firestoreService";
 import {
@@ -38,55 +45,105 @@ import {
   AppSettings,
   AIRule
 } from "./types";
-import { CheckCircle2, AlertCircle, Info, Sparkles } from "lucide-react";
+import { CheckCircle2, AlertCircle, Info, Sparkles, CloudCheck } from "lucide-react";
 
-function getStoredState<T>(key: string, fallback: T): T {
-  try {
-    const saved = localStorage.getItem(key);
-    if (saved) return JSON.parse(saved);
-  } catch (err) {
-    console.warn(`Error reading localStorage key ${key}:`, err);
+function getStoredStateWithFallback<T>(keys: string[], fallback: T): T {
+  for (const key of keys) {
+    try {
+      const saved = localStorage.getItem(key);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(fallback)) {
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed as T;
+        } else if (typeof fallback === "object" && fallback !== null) {
+          if (parsed && typeof parsed === "object" && Object.keys(parsed).length > 0) return parsed as T;
+        } else if (parsed !== null && parsed !== undefined) {
+          return parsed as T;
+        }
+      }
+    } catch (err) {
+      console.warn(`Error reading localStorage key ${key}:`, err);
+    }
   }
   return fallback;
 }
+
+const syncToStorageKeys = (keys: string[], data: any) => {
+  const json = JSON.stringify(data);
+  keys.forEach(k => {
+    try { localStorage.setItem(k, json); } catch (e) {}
+  });
+};
 
 export function App() {
 
   const [activeTab, setActiveTab] = useState<ActiveTab>("dashboard");
 
-  // Domain State seeded with rich initial defaults & localStorage fallback
-  const [students, setStudents] = useState<Student[]>(() => getStoredState("dita_students_store_v2", initialStudents));
-  const [sessions, setSessions] = useState<Session[]>(() => getStoredState("dita_sessions_store_v2", initialSessions));
-  const [dailyReports, setDailyReports] = useState<DailyReport[]>(() => getStoredState("dita_daily_reports_store_v2", initialDailyReports));
-  const [monthlyReports, setMonthlyReports] = useState<MonthlyReport[]>(() => getStoredState("dita_monthly_reports_store_v2", initialMonthlyReports));
-  const [memories, setMemories] = useState<Record<string, StudentMemory>>(() => getStoredState("dita_memories_store_v2", initialMemories));
-  const [settings, setSettings] = useState<AppSettings>(() => getStoredState("dita_settings_store_v2", initialSettings));
+  // Firebase Auth State
+  const [authUser, setAuthUser] = useState<User | null>(null);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+
+  // Listen to Firebase Auth state
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setAuthUser(user);
+      if (user) {
+        showNotification(
+          settings.preferredLanguage === "ar"
+            ? `مرحباً بك، ${user.displayName || user.email} (تم ربط Firebase Auth)`
+            : `Welcome, ${user.displayName || user.email} (Connected to Firebase)`,
+          "success"
+        );
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Domain State seeded with rich initial defaults & multi-key localStorage fallback
+  const [students, setStudents] = useState<Student[]>(() =>
+    getStoredStateWithFallback(["dita_students_store_v2", "dita_students_store", "dita_students"], initialStudents)
+  );
+  const [sessions, setSessions] = useState<Session[]>(() =>
+    getStoredStateWithFallback(["dita_sessions_store_v2", "dita_sessions_store", "dita_sessions"], initialSessions)
+  );
+  const [dailyReports, setDailyReports] = useState<DailyReport[]>(() =>
+    getStoredStateWithFallback(["dita_daily_reports_store_v2", "dita_daily_reports_store", "dita_daily_reports"], initialDailyReports)
+  );
+  const [monthlyReports, setMonthlyReports] = useState<MonthlyReport[]>(() =>
+    getStoredStateWithFallback(["dita_monthly_reports_store_v2", "dita_monthly_reports_store", "dita_monthly_reports"], initialMonthlyReports)
+  );
+  const [memories, setMemories] = useState<Record<string, StudentMemory>>(() =>
+    getStoredStateWithFallback(["dita_memories_store_v2", "dita_memories_store", "dita_memories"], initialMemories)
+  );
+  const [settings, setSettings] = useState<AppSettings>(() =>
+    getStoredStateWithFallback(["dita_settings_store_v2", "dita_settings_store", "dita_settings"], initialSettings)
+  );
 
   const [loading, setLoading] = useState(true);
 
-  // Sync state to localStorage automatically on updates
+  // Sync state to localStorage across all key versions automatically on updates
   useEffect(() => {
-    try { localStorage.setItem("dita_students_store_v2", JSON.stringify(students)); } catch (e) {}
+    syncToStorageKeys(["dita_students_store_v2", "dita_students_store", "dita_students"], students);
   }, [students]);
 
   useEffect(() => {
-    try { localStorage.setItem("dita_sessions_store_v2", JSON.stringify(sessions)); } catch (e) {}
+    syncToStorageKeys(["dita_sessions_store_v2", "dita_sessions_store", "dita_sessions"], sessions);
   }, [sessions]);
 
   useEffect(() => {
-    try { localStorage.setItem("dita_daily_reports_store_v2", JSON.stringify(dailyReports)); } catch (e) {}
+    syncToStorageKeys(["dita_daily_reports_store_v2", "dita_daily_reports_store", "dita_daily_reports"], dailyReports);
   }, [dailyReports]);
 
   useEffect(() => {
-    try { localStorage.setItem("dita_monthly_reports_store_v2", JSON.stringify(monthlyReports)); } catch (e) {}
+    syncToStorageKeys(["dita_monthly_reports_store_v2", "dita_monthly_reports_store", "dita_monthly_reports"], monthlyReports);
   }, [monthlyReports]);
 
   useEffect(() => {
-    try { localStorage.setItem("dita_memories_store_v2", JSON.stringify(memories)); } catch (e) {}
+    syncToStorageKeys(["dita_memories_store_v2", "dita_memories_store", "dita_memories"], memories);
   }, [memories]);
 
   useEffect(() => {
-    try { localStorage.setItem("dita_settings_store_v2", JSON.stringify(settings)); } catch (e) {}
+    syncToStorageKeys(["dita_settings_store_v2", "dita_settings_store", "dita_settings"], settings);
   }, [settings]);
 
   // Session Builder & Report Preview Modal state
@@ -641,6 +698,154 @@ export function App() {
     );
   };
 
+  const handleSyncAllToFirebase = async () => {
+    try {
+      showNotification(
+        settings.preferredLanguage === "ar"
+          ? "جاري مزامنة وحفظ جميع البيانات على Firebase والحافظة المحلية..."
+          : "Syncing all data to Firebase Cloud & Local Backup...",
+        "info"
+      );
+      // Sync with Express backend
+      try {
+        await fetch("/api/sync/all", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            students,
+            sessions,
+            reports: dailyReports,
+            monthlyReports,
+            memories,
+            settings
+          })
+        });
+      } catch (e) {
+        console.warn("Backend sync skipped:", e);
+      }
+
+      // Sync with Firestore
+      await syncAllDataToFirestore({
+        students,
+        sessions,
+        dailyReports,
+        monthlyReports,
+        memories,
+        settings
+      });
+      showNotification(
+        settings.preferredLanguage === "ar"
+          ? "تمت المزامنة وحفظ البيانات بنجاح على Firebase والحافظة السحابية!"
+          : "All data successfully synced & saved to Firebase Firestore!",
+        "success"
+      );
+    } catch (err) {
+      console.error(err);
+      showNotification(
+        settings.preferredLanguage === "ar"
+          ? "حدث خطأ أثناء المزامنة مع Firebase"
+          : "Error syncing data to Firebase",
+        "error"
+      );
+    }
+  };
+
+  const handleExportBackup = () => {
+    try {
+      const backupBundle = {
+        app: "Daily Islamic Teacher Assistant",
+        version: "2.5",
+        exportedAt: new Date().toISOString(),
+        students,
+        sessions,
+        dailyReports,
+        monthlyReports,
+        memories,
+        settings
+      };
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupBundle, null, 2));
+      const downloadAnchor = document.createElement("a");
+      downloadAnchor.setAttribute("href", dataStr);
+      downloadAnchor.setAttribute("download", `dita_backup_${new Date().toISOString().slice(0, 10)}.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+      showNotification(
+        settings.preferredLanguage === "ar"
+          ? "تم تصدير النسخة الاحتياطية بنجاح على جهازك!"
+          : "Backup exported successfully to your device!",
+        "success"
+      );
+    } catch (err) {
+      console.error("Export backup error:", err);
+      showNotification(
+        settings.preferredLanguage === "ar" ? "فشل تصدير النسخة الاحتياطية" : "Failed to export backup",
+        "error"
+      );
+    }
+  };
+
+  const handleImportBackup = async (file: File) => {
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      if (!data || typeof data !== "object") {
+        throw new Error("Invalid backup file format");
+      }
+      if (Array.isArray(data.students)) setStudents(data.students);
+      if (Array.isArray(data.sessions)) setSessions(data.sessions);
+      if (Array.isArray(data.dailyReports)) setDailyReports(data.dailyReports);
+      if (Array.isArray(data.monthlyReports)) setMonthlyReports(data.monthlyReports);
+      if (data.memories && typeof data.memories === "object") setMemories(data.memories);
+      if (data.settings && typeof data.settings === "object") setSettings(prev => ({ ...prev, ...data.settings }));
+
+      // Sync to Express Server
+      try {
+        await fetch("/api/backup/restore", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            students: data.students,
+            sessions: data.sessions,
+            reports: data.dailyReports,
+            monthlyReports: data.monthlyReports,
+            memories: data.memories,
+            settings: data.settings
+          })
+        });
+      } catch (e) {
+        console.warn("Backend restore sync skipped:", e);
+      }
+
+      // Sync to Firebase
+      try {
+        await syncAllDataToFirestore({
+          students: data.students || students,
+          sessions: data.sessions || sessions,
+          dailyReports: data.dailyReports || dailyReports,
+          monthlyReports: data.monthlyReports || monthlyReports,
+          memories: data.memories || memories,
+          settings: data.settings ? { ...settings, ...data.settings } : settings
+        });
+      } catch (e) {
+        console.warn("Firestore backup restore skipped:", e);
+      }
+
+      showNotification(
+        settings.preferredLanguage === "ar"
+          ? "تم استعادة كافة بيانات الطلاب والقواعد والتقارير بنجاح!"
+          : "All student profiles, AI rules, and reports restored successfully!",
+        "success"
+      );
+    } catch (err: any) {
+      console.error("Backup import error:", err);
+      showNotification(
+        settings.preferredLanguage === "ar" ? "فشل استعادة الملف: تأكد من صحة الملف" : "Failed to import backup file",
+        "error"
+      );
+    }
+  };
+
   const isArabic = settings?.preferredLanguage === "ar";
 
   useEffect(() => {
@@ -650,9 +855,9 @@ export function App() {
 
   if (loading) {
     return (
-      <div dir={isArabic ? "rtl" : "ltr"} className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center space-y-4">
-        <Sparkles className="w-10 h-10 text-emerald-400 animate-spin" />
-        <p className="text-sm font-semibold text-slate-300">
+      <div dir={isArabic ? "rtl" : "ltr"} className="min-h-screen bg-[#f6f9f6] text-slate-800 flex flex-col items-center justify-center space-y-4">
+        <Sparkles className="w-10 h-10 text-emerald-600 animate-spin" />
+        <p className="text-sm font-bold text-slate-700">
           {isArabic ? "جاري تحميل مساعد المعلم الإسلامي اليومي (DITA)..." : "Loading Daily Islamic Teacher Assistant..."}
         </p>
       </div>
@@ -660,20 +865,20 @@ export function App() {
   }
 
   return (
-    <div dir={isArabic ? "rtl" : "ltr"} className="min-h-screen bg-slate-950 text-slate-100 font-sans antialiased selection:bg-emerald-500 selection:text-slate-950">
+    <div dir={isArabic ? "rtl" : "ltr"} className="min-h-screen bg-[#f6f9f6] text-slate-800 font-sans antialiased selection:bg-emerald-200 selection:text-emerald-950">
       {/* Toast Notification */}
       {notification && (
         <div className="fixed top-20 right-6 z-50 animate-bounce">
           <div
-            className={`px-4 py-3 rounded-2xl shadow-2xl border text-xs font-bold flex items-center gap-2 ${
+            className={`px-4 py-3 rounded-2xl shadow-xl border text-xs font-bold flex items-center gap-2 ${
               notification.type === "success"
-                ? "bg-emerald-950 text-emerald-200 border-emerald-500"
+                ? "bg-emerald-50 text-emerald-900 border-emerald-300 shadow-emerald-900/10"
                 : notification.type === "error"
-                ? "bg-rose-950 text-rose-200 border-rose-500"
-                : "bg-blue-950 text-blue-200 border-blue-500"
+                ? "bg-rose-50 text-rose-900 border-rose-300 shadow-rose-900/10"
+                : "bg-blue-50 text-blue-900 border-blue-300 shadow-blue-900/10"
             }`}
           >
-            <CheckCircle2 className="w-4 h-4" />
+            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
             <span>{notification.message}</span>
           </div>
         </div>
@@ -687,6 +892,8 @@ export function App() {
           setIsSessionBuilderOpen(false);
         }}
         settings={settings}
+        authUser={authUser}
+        onOpenAuthModal={() => setIsAuthModalOpen(true)}
         pendingReportsCount={Array.isArray(dailyReports) ? dailyReports.filter(r => !r.isApproved).length : 0}
         onLanguageToggle={lang => handleUpdateSettings({ ...settings, preferredLanguage: lang })}
         onStartNewSession={() => {
@@ -743,6 +950,9 @@ export function App() {
               <StudentsView
                 students={students}
                 settings={settings}
+                dailyReports={dailyReports}
+                monthlyReports={monthlyReports}
+                onSelectReport={rep => setSelectedReportForPreview(rep)}
                 onAddStudent={handleAddStudent}
                 onUpdateStudent={handleUpdateStudent}
                 onDeleteStudent={handleDeleteStudent}
@@ -761,31 +971,33 @@ export function App() {
 
             {activeTab === "sessions" && (
               <div className="space-y-4">
-                <div className="flex justify-between items-center bg-slate-900 p-4 rounded-2xl border border-slate-800">
-                  <h1 className="text-xl font-bold text-white">Recorded Lessons History</h1>
+                <div className="flex justify-between items-center bg-white p-5 rounded-2xl border border-emerald-100 shadow-sm">
+                  <h1 className="text-xl font-bold text-emerald-950">
+                    {isArabic ? "سجل الحصص التعليمية المسجلة" : "Recorded Lessons History"}
+                  </h1>
                   <button
                     onClick={() => {
                       setPreselectedStudentIdForSession(undefined);
                       setIsSessionBuilderOpen(true);
                     }}
-                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs"
+                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md shadow-emerald-600/20 transition"
                   >
-                    + Record New Lesson
+                    + {isArabic ? "تسجيل حصة جديدة" : "Record New Lesson"}
                   </button>
                 </div>
                 <div className="space-y-3">
                   {sessions.map(s => {
                     const student = students.find(st => st.id === s.studentId);
                     return (
-                      <div key={s.id} className="bg-slate-900 border border-slate-800 p-4 rounded-2xl flex justify-between items-center">
+                      <div key={s.id} className="bg-white border border-emerald-100/80 p-4 rounded-2xl flex justify-between items-center shadow-xs hover:border-emerald-300 transition">
                         <div>
-                          <h3 className="font-bold text-white">{student?.fullName || "Student"}</h3>
-                          <p className="text-xs text-slate-400">
-                            Session #{s.sessionNumber} • {s.date} ({s.time}) • {s.durationMinutes} mins
+                          <h3 className="font-bold text-slate-900">{student?.fullName || "Student"}</h3>
+                          <p className="text-xs text-slate-500">
+                            {isArabic ? `الحصة رقم #${s.sessionNumber} • ${s.date} (${s.time}) • ${s.durationMinutes} دقيقة` : `Session #${s.sessionNumber} • ${s.date} (${s.time}) • ${s.durationMinutes} mins`}
                           </p>
-                          <div className="flex gap-1 mt-1">
+                          <div className="flex gap-1 mt-1.5">
                             {s.subjectRecords.map(sr => (
-                              <span key={sr.subject} className="px-2 py-0.5 bg-slate-800 text-teal-300 rounded text-[10px] font-semibold">
+                              <span key={sr.subject} className="px-2 py-0.5 bg-emerald-50 text-emerald-800 border border-emerald-200/80 rounded text-[10px] font-bold">
                                 {sr.subject}
                               </span>
                             ))}
@@ -802,9 +1014,9 @@ export function App() {
                             const rep = await res.json();
                             setSelectedReportForPreview(rep);
                           }}
-                          className="px-3 py-1.5 rounded-lg bg-emerald-600/90 text-white text-xs font-semibold"
+                          className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold shadow-md shadow-emerald-600/20 transition"
                         >
-                          Generate AI Report
+                          {isArabic ? "توليد التقرير" : "Generate AI Report"}
                         </button>
                       </div>
                     );
@@ -850,6 +1062,11 @@ export function App() {
                 onAddAIRule={handleAddAIRule}
                 onUpdateAIRule={handleUpdateAIRule}
                 onDeleteAIRule={handleDeleteAIRule}
+                authUser={authUser}
+                onOpenAuthModal={() => setIsAuthModalOpen(true)}
+                onSyncAllToFirebase={handleSyncAllToFirebase}
+                onExportBackup={handleExportBackup}
+                onImportBackup={handleImportBackup}
               />
             )}
 
@@ -859,6 +1076,14 @@ export function App() {
           </>
         )}
       </main>
+
+      {/* Firebase Auth Modal */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        currentUser={authUser}
+        isArabic={settings.preferredLanguage === "ar"}
+      />
 
       {/* Report Preview & Approval Modal */}
       {selectedReportForPreview && (

@@ -139,13 +139,13 @@ export const TemplatesView: React.FC<TemplatesViewProps> = ({
   return (
     <div className="max-w-6xl mx-auto space-y-6 animate-fade-in pb-12">
       {/* Top Banner */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gradient-to-r from-emerald-800 via-teal-800 to-emerald-900 border border-emerald-700 p-6 rounded-2xl shadow-md text-white">
         <div>
-          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-            <LayoutTemplate className="w-6 h-6 text-emerald-400" />
+          <h1 className="text-2xl font-black text-white flex items-center gap-2">
+            <LayoutTemplate className="w-6 h-6 text-amber-300" />
             <span>{isArabic ? "قوالب التقارير والهياكل البنائية (Report Templates)" : "AI Report Templates & Structural Layouts"}</span>
           </h1>
-          <p className="text-xs text-slate-400 mt-1">
+          <p className="text-xs text-emerald-100 font-medium mt-1">
             {isArabic
               ? "إدارة وقوالب وهياكل كتابة التقارير الكاملة مع إمكانية التعديل والحذف والتفعيل التلقائي للذكاء الاصطناعي"
               : "Create, edit, delete, and set active templates used by AI when generating student reports"}
@@ -155,28 +155,28 @@ export const TemplatesView: React.FC<TemplatesViewProps> = ({
         <div className="flex items-center gap-3 self-start sm:self-center">
           <button
             onClick={() => setIsAddModalOpen(true)}
-            className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-lg transition"
+            className="px-4 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-emerald-950 font-bold text-xs flex items-center gap-1.5 shadow-md transition"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-4 h-4 stroke-[2.5]" />
             <span>{isArabic ? "إضافة قالب جديد" : "+ Add New Template"}</span>
           </button>
         </div>
       </div>
 
       {/* Active Selected Template Notice */}
-      <div className="p-4 bg-emerald-950/60 border border-emerald-500/40 rounded-2xl flex items-center justify-between gap-3 text-emerald-200 text-xs shadow-inner">
+      <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center justify-between gap-3 text-emerald-900 text-xs shadow-2xs">
         <div className="flex items-center gap-2.5">
-          <Zap className="w-5 h-5 text-emerald-400 animate-pulse shrink-0" />
+          <Zap className="w-5 h-5 text-emerald-600 animate-pulse shrink-0" />
           <div>
-            <strong className="text-white block font-bold">
+            <strong className="text-emerald-950 block font-bold">
               {isArabic ? "القالب النشط حالياً للذكاء الاصطناعي:" : "Current Active AI Template:"}
             </strong>
-            <span className="text-emerald-300">
+            <span className="text-emerald-800 font-bold">
               {templates.find(t => t.id === activeTemplateId)?.name || (isArabic ? "لم يتم تحديد قالب" : "None")}
             </span>
           </div>
         </div>
-        <span className="px-3 py-1 bg-emerald-900 border border-emerald-700 text-emerald-300 font-bold rounded-lg text-[11px] shrink-0">
+        <span className="px-3 py-1 bg-emerald-600 text-white font-bold rounded-lg text-[11px] shrink-0 shadow-2xs">
           {isArabic ? "يتم استخدامه آلياً في جميع التقارير" : "Auto-applied in all AI generations"}
         </span>
       </div>
@@ -188,14 +188,14 @@ export const TemplatesView: React.FC<TemplatesViewProps> = ({
           return (
             <div
               key={tpl.id}
-              className={`bg-slate-900 border rounded-2xl p-6 flex flex-col justify-between gap-4 transition shadow-lg relative ${
+              className={`bg-white border rounded-2xl p-6 flex flex-col justify-between gap-4 transition shadow-xs relative ${
                 isActive
-                  ? "border-emerald-500 bg-slate-900/90 ring-1 ring-emerald-500/30"
-                  : "border-slate-800 hover:border-slate-700"
+                  ? "border-emerald-500 ring-2 ring-emerald-500/20"
+                  : "border-emerald-100 hover:border-emerald-300"
               }`}
             >
               {isActive && (
-                <div className="absolute top-4 left-4 px-2.5 py-0.5 rounded-full bg-emerald-500 text-slate-950 text-[10px] font-extrabold flex items-center gap-1 shadow">
+                <div className="absolute top-4 left-4 px-2.5 py-0.5 rounded-full bg-emerald-600 text-white text-[10px] font-extrabold flex items-center gap-1 shadow-xs">
                   <Check className="w-3 h-3 stroke-[3]" />
                   <span>{isArabic ? "القالب المعتمد" : "ACTIVE TEMPLATE"}</span>
                 </div>
@@ -204,29 +204,29 @@ export const TemplatesView: React.FC<TemplatesViewProps> = ({
               <div className="space-y-3">
                 <div className="flex items-start justify-between pr-2">
                   <div className="space-y-1">
-                    <span className="px-2 py-0.5 rounded text-[10px] uppercase font-bold bg-slate-800 text-teal-300 border border-slate-700">
+                    <span className="px-2 py-0.5 rounded-lg text-[10px] uppercase font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
                       {tpl.category}
                     </span>
-                    <h3 className="font-bold text-base text-white pt-1">{tpl.name}</h3>
+                    <h3 className="font-bold text-base text-slate-900 pt-1">{tpl.name}</h3>
                   </div>
                 </div>
 
-                <p className="text-xs text-slate-300 leading-relaxed">
+                <p className="text-xs text-slate-600 font-medium leading-relaxed">
                   {tpl.description}
                 </p>
 
                 {/* Structure details */}
-                <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800/80 space-y-2 text-[11px]">
+                <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-2 text-[11px]">
                   <div>
-                    <span className="text-slate-400 font-medium block">{isArabic ? "صيغة العنوان:" : "Header Format:"}</span>
-                    <code className="text-emerald-300 font-mono text-[10px]">{tpl.structure.headerFormat}</code>
+                    <span className="text-slate-500 font-bold block">{isArabic ? "صيغة العنوان:" : "Header Format:"}</span>
+                    <code className="text-emerald-800 font-mono text-[10px] font-bold">{tpl.structure.headerFormat}</code>
                   </div>
 
                   <div>
-                    <span className="text-slate-400 font-medium block">{isArabic ? "ترتيب الأقسام الرئيسية:" : "Sections Order:"}</span>
+                    <span className="text-slate-500 font-bold block">{isArabic ? "ترتيب الأقسام الرئيسية:" : "Sections Order:"}</span>
                     <div className="flex flex-wrap gap-1 pt-1">
                       {tpl.structure.sectionsOrder.map((sec, idx) => (
-                        <span key={idx} className="px-2 py-0.5 bg-slate-900 border border-slate-700 rounded text-slate-300 text-[10px]">
+                        <span key={idx} className="px-2 py-0.5 bg-white border border-slate-200 rounded text-slate-700 font-bold text-[10px]">
                           {idx + 1}. {sec}
                         </span>
                       ))}
@@ -234,23 +234,23 @@ export const TemplatesView: React.FC<TemplatesViewProps> = ({
                   </div>
 
                   <div>
-                    <span className="text-slate-400 font-medium block">{isArabic ? "توجيهات الهيكل للـ AI:" : "AI Prompt Guide:"}</span>
-                    <p className="text-slate-300 italic line-clamp-2 pt-0.5">"{tpl.structure.promptInstructions}"</p>
+                    <span className="text-slate-500 font-bold block">{isArabic ? "توجيهات الهيكل للـ AI:" : "AI Prompt Guide:"}</span>
+                    <p className="text-slate-700 italic line-clamp-2 pt-0.5 font-medium">"{tpl.structure.promptInstructions}"</p>
                   </div>
                 </div>
               </div>
 
               {/* Action Buttons */}
-              <div className="flex items-center justify-between pt-3 border-t border-slate-800 text-xs">
+              <div className="flex items-center justify-between pt-3 border-t border-slate-100 text-xs">
                 {isActive ? (
-                  <span className="text-emerald-400 font-bold flex items-center gap-1">
-                    <CheckCircle className="w-4 h-4" />
+                  <span className="text-emerald-700 font-bold flex items-center gap-1">
+                    <CheckCircle className="w-4 h-4 text-emerald-600" />
                     <span>{isArabic ? "نشط ومفعل" : "Currently Active"}</span>
                   </span>
                 ) : (
                   <button
                     onClick={() => handleSelectActiveTemplate(tpl.id)}
-                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-emerald-600 hover:text-white text-emerald-400 font-bold border border-emerald-500/40 transition flex items-center gap-1.5"
+                    className="px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-600 hover:text-white text-emerald-800 font-bold border border-emerald-200 transition flex items-center gap-1.5"
                   >
                     <Sparkles className="w-3.5 h-3.5" />
                     <span>{isArabic ? "تفعيل كقالب رئيسي" : "Activate Template"}</span>
@@ -260,16 +260,16 @@ export const TemplatesView: React.FC<TemplatesViewProps> = ({
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => setEditingTemplate(tpl)}
-                    className="px-2.5 py-1.5 rounded-lg bg-slate-800 text-amber-300 border border-slate-700 hover:bg-amber-950/50 transition flex items-center gap-1 text-xs font-bold"
+                    className="px-2.5 py-1.5 rounded-xl bg-amber-50 text-amber-900 border border-amber-200 hover:bg-amber-100 transition flex items-center gap-1 text-xs font-bold"
                     title={isArabic ? "تعديل القالب" : "Edit Template"}
                   >
-                    <Edit3 className="w-3.5 h-3.5" />
+                    <Edit3 className="w-3.5 h-3.5 text-amber-700" />
                     <span>{isArabic ? "تعديل" : "Edit"}</span>
                   </button>
 
                   <button
                     onClick={() => handleDeleteTemplate(tpl.id, tpl.name)}
-                    className="p-1.5 text-slate-500 hover:text-red-400 transition"
+                    className="p-1.5 text-slate-400 hover:text-rose-600 transition"
                     title={isArabic ? "حذف القالب" : "Delete Template"}
                   >
                     <Trash2 className="w-4 h-4" />
@@ -283,49 +283,49 @@ export const TemplatesView: React.FC<TemplatesViewProps> = ({
 
       {/* CREATE NEW TEMPLATE MODAL */}
       {isAddModalOpen && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-xl w-full p-6 space-y-4 shadow-2xl my-8">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <h2 className="text-base font-bold text-white flex items-center gap-2">
-                <Plus className="w-5 h-5 text-emerald-400" />
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white border border-emerald-100 rounded-2xl max-w-xl w-full p-6 space-y-4 shadow-2xl my-8">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <Plus className="w-5 h-5 text-emerald-600" />
                 <span>{isArabic ? "إضافة قالب تقارير جديد" : "Add New Report Template"}</span>
               </h2>
-              <button onClick={() => setIsAddModalOpen(false)} className="text-slate-400 hover:text-white">
+              <button onClick={() => setIsAddModalOpen(false)} className="text-slate-400 hover:text-slate-700 hover:bg-slate-100 p-1 rounded-lg">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <form onSubmit={handleCreateTemplate} className="space-y-3 text-xs">
               <div>
-                <label className="block text-slate-300 font-medium mb-1">{isArabic ? "اسم القالب *" : "Template Name *"}</label>
+                <label className="block text-slate-700 font-bold mb-1">{isArabic ? "اسم القالب *" : "Template Name *"}</label>
                 <input
                   type="text"
                   required
                   value={formData.name}
                   onChange={e => setFormData({ ...formData, name: e.target.value })}
                   placeholder={isArabic ? "مثال: قالب متابعة سورة البقرة" : "e.g. Surah Al-Baqarah Intensive"}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-emerald-500"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 font-medium outline-none focus:border-emerald-600 focus:bg-white"
                 />
               </div>
 
               <div>
-                <label className="block text-slate-300 font-medium mb-1">{isArabic ? "الوصف" : "Description"}</label>
+                <label className="block text-slate-700 font-bold mb-1">{isArabic ? "الوصف" : "Description"}</label>
                 <input
                   type="text"
                   value={formData.description}
                   onChange={e => setFormData({ ...formData, description: e.target.value })}
                   placeholder={isArabic ? "توضيح مختصر لاستخدام هذا القالب..." : "Brief description of this template's use..."}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-emerald-500"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 font-medium outline-none focus:border-emerald-600 focus:bg-white"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">{isArabic ? "التصنيف" : "Category"}</label>
+                  <label className="block text-slate-700 font-bold mb-1">{isArabic ? "التصنيف" : "Category"}</label>
                   <select
                     value={formData.category}
                     onChange={e => setFormData({ ...formData, category: e.target.value as any })}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 font-medium outline-none"
                   >
                     <option value="daily">{isArabic ? "يومي (Daily)" : "Daily"}</option>
                     <option value="monthly">{isArabic ? "شهري (Monthly)" : "Monthly"}</option>
@@ -336,18 +336,18 @@ export const TemplatesView: React.FC<TemplatesViewProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">{isArabic ? "صيغة العنوان" : "Header Format"}</label>
+                  <label className="block text-slate-700 font-bold mb-1">{isArabic ? "صيغة العنوان" : "Header Format"}</label>
                   <input
                     type="text"
                     value={formData.headerFormat}
                     onChange={e => setFormData({ ...formData, headerFormat: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-emerald-500 font-mono text-[11px]"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 font-medium outline-none focus:border-emerald-600 font-mono text-[11px]"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-slate-300 font-medium mb-1">
+                <label className="block text-slate-700 font-bold mb-1">
                   {isArabic ? "الأقسام الرئيسية (مفصولة بفواصل)" : "Sections Order (Comma separated)"}
                 </label>
                 <input
@@ -355,12 +355,12 @@ export const TemplatesView: React.FC<TemplatesViewProps> = ({
                   value={formData.sectionsOrder}
                   onChange={e => setFormData({ ...formData, sectionsOrder: e.target.value })}
                   placeholder="مقدمة, القرآن والتجويد, الواجبات, الختام"
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-emerald-500"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 font-medium outline-none focus:border-emerald-600"
                 />
               </div>
 
               <div>
-                <label className="block text-slate-300 font-medium mb-1">
+                <label className="block text-slate-700 font-bold mb-1">
                   {isArabic ? "تعليمات الهيكل للذكاء الاصطناعي *" : "AI Structural Prompt Instructions *"}
                 </label>
                 <textarea
@@ -369,7 +369,7 @@ export const TemplatesView: React.FC<TemplatesViewProps> = ({
                   value={formData.promptInstructions}
                   onChange={e => setFormData({ ...formData, promptInstructions: e.target.value })}
                   placeholder={isArabic ? "التعليمات الواجب على الذكاء الاصطناعي اتباعها عند صياغة التقرير بناءً على هذا القالب..." : "Exact structural instructions for AI when compiling reports using this template..."}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-emerald-500 resize-none"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 font-medium outline-none focus:border-emerald-600 resize-none"
                 />
               </div>
 
@@ -377,13 +377,13 @@ export const TemplatesView: React.FC<TemplatesViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsAddModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 font-bold"
+                  className="px-4 py-2 rounded-xl bg-slate-100 text-slate-700 font-bold border border-slate-200"
                 >
                   {isArabic ? "إلغاء" : "Cancel"}
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold flex items-center gap-1.5 shadow"
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold flex items-center gap-1.5 shadow-md shadow-emerald-600/20"
                 >
                   <Save className="w-4 h-4" />
                   <span>{isArabic ? "حفظ القالب ومزامنة AI" : "Save Template"}</span>
@@ -396,47 +396,47 @@ export const TemplatesView: React.FC<TemplatesViewProps> = ({
 
       {/* EDIT TEMPLATE MODAL */}
       {editingTemplate && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-xl w-full p-6 space-y-4 shadow-2xl my-8">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <h2 className="text-base font-bold text-white flex items-center gap-2">
-                <Edit3 className="w-5 h-5 text-amber-400" />
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white border border-emerald-100 rounded-2xl max-w-xl w-full p-6 space-y-4 shadow-2xl my-8">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <Edit3 className="w-5 h-5 text-amber-600" />
                 <span>{isArabic ? "تعديل قالب التقارير" : "Edit Report Template"}</span>
               </h2>
-              <button onClick={() => setEditingTemplate(null)} className="text-slate-400 hover:text-white">
+              <button onClick={() => setEditingTemplate(null)} className="text-slate-400 hover:text-slate-700 hover:bg-slate-100 p-1 rounded-lg">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <form onSubmit={handleSaveEditedTemplate} className="space-y-3 text-xs">
               <div>
-                <label className="block text-slate-300 font-medium mb-1">{isArabic ? "اسم القالب" : "Template Name"}</label>
+                <label className="block text-slate-700 font-bold mb-1">{isArabic ? "اسم القالب" : "Template Name"}</label>
                 <input
                   type="text"
                   required
                   value={editingTemplate.name}
                   onChange={e => setEditingTemplate({ ...editingTemplate, name: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-amber-500"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 font-medium outline-none focus:border-amber-600"
                 />
               </div>
 
               <div>
-                <label className="block text-slate-300 font-medium mb-1">{isArabic ? "الوصف" : "Description"}</label>
+                <label className="block text-slate-700 font-bold mb-1">{isArabic ? "الوصف" : "Description"}</label>
                 <input
                   type="text"
                   value={editingTemplate.description}
                   onChange={e => setEditingTemplate({ ...editingTemplate, description: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-amber-500"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 font-medium outline-none focus:border-amber-600"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">{isArabic ? "التصنيف" : "Category"}</label>
+                  <label className="block text-slate-700 font-bold mb-1">{isArabic ? "التصنيف" : "Category"}</label>
                   <select
                     value={editingTemplate.category}
                     onChange={e => setEditingTemplate({ ...editingTemplate, category: e.target.value as any })}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 font-medium outline-none"
                   >
                     <option value="daily">Daily</option>
                     <option value="monthly">Monthly</option>
@@ -447,7 +447,7 @@ export const TemplatesView: React.FC<TemplatesViewProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">{isArabic ? "صيغة العنوان" : "Header Format"}</label>
+                  <label className="block text-slate-700 font-bold mb-1">{isArabic ? "صيغة العنوان" : "Header Format"}</label>
                   <input
                     type="text"
                     value={editingTemplate.structure.headerFormat}
@@ -455,13 +455,13 @@ export const TemplatesView: React.FC<TemplatesViewProps> = ({
                       ...editingTemplate,
                       structure: { ...editingTemplate.structure, headerFormat: e.target.value }
                     })}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-amber-500 font-mono text-[11px]"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 font-medium outline-none focus:border-amber-600 font-mono text-[11px]"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-slate-300 font-medium mb-1">
+                <label className="block text-slate-700 font-bold mb-1">
                   {isArabic ? "الأقسام الرئيسية (مفصولة بفواصل)" : "Sections Order"}
                 </label>
                 <input
@@ -474,12 +474,12 @@ export const TemplatesView: React.FC<TemplatesViewProps> = ({
                       sectionsOrder: e.target.value.split(",").map(s => s.trim()).filter(Boolean)
                     }
                   })}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-amber-500"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 font-medium outline-none focus:border-amber-600"
                 />
               </div>
 
               <div>
-                <label className="block text-slate-300 font-medium mb-1">
+                <label className="block text-slate-700 font-bold mb-1">
                   {isArabic ? "تعليمات الهيكل للذكاء الاصطناعي" : "AI Prompt Instructions"}
                 </label>
                 <textarea
@@ -490,7 +490,7 @@ export const TemplatesView: React.FC<TemplatesViewProps> = ({
                     ...editingTemplate,
                     structure: { ...editingTemplate.structure, promptInstructions: e.target.value }
                   })}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-amber-500 resize-none"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 font-medium outline-none focus:border-amber-600 resize-none"
                 />
               </div>
 
@@ -498,13 +498,13 @@ export const TemplatesView: React.FC<TemplatesViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setEditingTemplate(null)}
-                  className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 font-bold"
+                  className="px-4 py-2 rounded-xl bg-slate-100 text-slate-700 font-bold border border-slate-200"
                 >
                   {isArabic ? "إلغاء" : "Cancel"}
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold flex items-center gap-1.5 shadow"
+                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold flex items-center gap-1.5 shadow-md shadow-amber-500/20"
                 >
                   <Save className="w-4 h-4" />
                   <span>{isArabic ? "حفظ التعديلات" : "Save Changes"}</span>

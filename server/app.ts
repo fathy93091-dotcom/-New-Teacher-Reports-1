@@ -110,7 +110,7 @@ app.get("/api/reports/:id", (req, res) => {
 
 app.post("/api/reports/daily/generate", async (req, res) => {
   try {
-    const { sessionId, targetLanguage } = req.body;
+    const { sessionId, targetLanguage, customAiRules } = req.body;
     const session = db.getSessionById(sessionId);
     if (!session) return res.status(404).json({ error: "Session not found" });
 
@@ -118,8 +118,17 @@ app.post("/api/reports/daily/generate", async (req, res) => {
     if (!student) return res.status(404).json({ error: "Student not found" });
 
     const user = db.getUser();
+    
+    // If client provided customAiRules array, persist it to server settings
+    if (Array.isArray(customAiRules) && customAiRules.length > 0) {
+      db.updateSettings({ aiRules: customAiRules });
+    }
+
     const settings = db.getSettings();
-    const activeAiRules = db.getAIRules().filter(r => r.isActive);
+    const activeAiRules = Array.isArray(customAiRules) && customAiRules.length > 0
+      ? customAiRules.filter((r: any) => r && r.isActive)
+      : db.getAIRules().filter(r => r.isActive);
+
     const studentMemory = db.getStudentMemory(student.id);
 
     const activeTemplate = settings.templates?.find(t => t.id === settings.selectedTemplateId) || settings.templates?.[0];
@@ -167,13 +176,20 @@ app.get("/api/reports/monthly", (req, res) => {
 
 app.post("/api/reports/monthly/generate", async (req, res) => {
   try {
-    const { studentId, month, year, targetLanguage } = req.body;
+    const { studentId, month, year, targetLanguage, customAiRules } = req.body;
     const student = db.getStudentById(studentId);
     if (!student) return res.status(404).json({ error: "Student not found" });
 
     const user = db.getUser();
+    
+    if (Array.isArray(customAiRules) && customAiRules.length > 0) {
+      db.updateSettings({ aiRules: customAiRules });
+    }
+
     const approvedReports = db.getReports(studentId).filter(r => r.isApproved);
-    const activeAiRules = db.getAIRules().filter(r => r.isActive);
+    const activeAiRules = Array.isArray(customAiRules) && customAiRules.length > 0
+      ? customAiRules.filter((r: any) => r && r.isActive)
+      : db.getAIRules().filter(r => r.isActive);
 
     const monthlyReport = await generateMonthlyReportAI({
       student,
@@ -196,8 +212,12 @@ app.post("/api/reports/monthly/generate", async (req, res) => {
 // AI Notes Enhancement
 app.post("/api/ai/enhance-notes", async (req, res) => {
   try {
-    const { notes, subject } = req.body;
-    const enhanced = await enhanceTeacherNotes(notes || "", subject || "General");
+    const { notes, subject, customAiRules } = req.body;
+    const activeAiRules = Array.isArray(customAiRules) && customAiRules.length > 0
+      ? customAiRules.filter((r: any) => r && r.isActive)
+      : db.getAIRules().filter(r => r.isActive);
+
+    const enhanced = await enhanceTeacherNotes(notes || "", subject || "General", activeAiRules);
     res.json({ enhancedNotes: enhanced });
   } catch (err: any) {
     res.status(500).json({ error: "Failed to enhance notes", details: err.message });
@@ -240,6 +260,29 @@ app.delete("/api/settings/ai-rules/:id", (req, res) => {
   const success = db.deleteAIRule(req.params.id);
   if (!success) return res.status(404).json({ error: "AI Rule not found" });
   res.json({ success: true });
+});
+
+// Full Backup & Multi-Source Synchronization Endpoints
+app.get("/api/backup", (_req, res) => {
+  res.json(db.getBackup());
+});
+
+app.post("/api/backup/restore", (req, res) => {
+  try {
+    const restored = db.restoreBackup(req.body);
+    res.json({ success: true, message: "Backup restored successfully", store: restored });
+  } catch (err: any) {
+    res.status(400).json({ error: "Failed to restore backup", details: err.message });
+  }
+});
+
+app.post("/api/sync/all", (req, res) => {
+  try {
+    const mergedStore = db.syncAll(req.body);
+    res.json({ success: true, store: mergedStore });
+  } catch (err: any) {
+    res.status(500).json({ error: "Failed to sync all data", details: err.message });
+  }
 });
 
 // Interactive API Documentation Endpoint

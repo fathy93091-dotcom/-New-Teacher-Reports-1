@@ -165,13 +165,13 @@ export const SessionBuilder: React.FC<SessionBuilderProps> = ({
   return (
     <div className="max-w-4xl mx-auto space-y-6 animate-fade-in pb-12">
       {/* Banner */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-lg">
+      <div className="bg-gradient-to-r from-emerald-800 via-teal-800 to-emerald-900 border border-emerald-700/50 rounded-2xl p-6 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-md text-white">
         <div>
-          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-            <BookOpen className="w-6 h-6 text-emerald-400" />
+          <h1 className="text-2xl font-black text-white flex items-center gap-2">
+            <BookOpen className="w-6 h-6 text-amber-300" />
             <span>{isArabic ? "كتابة تفاصيل التقرير اليومي" : "Daily Report Input Form"}</span>
           </h1>
-          <p className="text-xs text-slate-400 mt-1">
+          <p className="text-xs text-emerald-100 mt-1 font-medium leading-relaxed">
             {isArabic
               ? "اكتب كل التفاصيل (الدروس، الأداء، الواجب، الملاحظات) في المربع الموحد أدناه، وسيتكفل الذكاء الاصطناعي بتنظيمها وصياغتها وتطبيق القواعد والقوالب المفعّلة."
               : "Enter all lesson details, homework, and observations in the single text area below. AI will structure, format, and apply active rules & templates."}
@@ -180,7 +180,7 @@ export const SessionBuilder: React.FC<SessionBuilderProps> = ({
 
         <button
           onClick={onCancel}
-          className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold self-start md:self-auto transition"
+          className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/20 text-xs font-bold self-start md:self-auto transition"
         >
           {isArabic ? "إلغاء والعودة" : "Cancel & Return"}
         </button>
@@ -188,20 +188,20 @@ export const SessionBuilder: React.FC<SessionBuilderProps> = ({
 
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Step 1: Student & Session Info */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-sm">
-          <h2 className="text-sm font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-2">
-            <User className="w-4 h-4" />
+        <div className="bg-white border border-emerald-100 rounded-2xl p-5 space-y-4 shadow-xs">
+          <h2 className="text-sm font-bold text-emerald-800 uppercase tracking-wider flex items-center gap-2">
+            <User className="w-4 h-4 text-emerald-600" />
             <span>{isArabic ? "1. بيانات الطالب والحصة" : "1. Student & Session Details"}</span>
           </h2>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
             {/* Student Selector */}
             <div className="sm:col-span-2">
-              <label className="block text-slate-300 font-medium mb-1">{isArabic ? "اختيار الطالب *" : "Select Student *"}</label>
+              <label className="block text-slate-700 font-bold mb-1">{isArabic ? "اختيار الطالب *" : "Select Student *"}</label>
               <select
                 value={selectedStudentId}
                 onChange={e => setSelectedStudentId(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white font-semibold text-sm focus:border-emerald-500 outline-none"
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 font-bold text-sm focus:border-emerald-600 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 outline-none transition"
               >
                 {activeStudents.map(s => (
                   <option key={s.id} value={s.id}>
@@ -213,55 +213,55 @@ export const SessionBuilder: React.FC<SessionBuilderProps> = ({
 
             {/* Session Number */}
             <div>
-              <label className="block text-slate-300 font-medium mb-1">{isArabic ? "رقم الحصة" : "Session Number"}</label>
+              <label className="block text-slate-700 font-bold mb-1">{isArabic ? "رقم الحصة" : "Session Number"}</label>
               <input
                 type="number"
                 value={sessionNumber}
                 onChange={e => setSessionNumber(parseInt(e.target.value) || 1)}
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white font-semibold focus:border-emerald-500 outline-none"
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 font-bold focus:border-emerald-600 focus:bg-white outline-none transition"
               />
             </div>
 
             {/* Session Duration */}
             <div>
-              <label className="block text-slate-300 font-medium mb-1">{isArabic ? "المدة (دقائق)" : "Duration (Minutes)"}</label>
+              <label className="block text-slate-700 font-bold mb-1">{isArabic ? "المدة (دقائق)" : "Duration (Minutes)"}</label>
               <input
                 type="number"
                 value={durationMinutes}
                 onChange={e => setDurationMinutes(parseInt(e.target.value) || 45)}
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white font-semibold focus:border-emerald-500 outline-none"
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 font-bold focus:border-emerald-600 focus:bg-white outline-none transition"
               />
             </div>
 
             {/* Date */}
             <div>
-              <label className="block text-slate-300 font-medium mb-1">{isArabic ? "تاريخ الحصة" : "Session Date"}</label>
+              <label className="block text-slate-700 font-bold mb-1">{isArabic ? "تاريخ الحصة" : "Session Date"}</label>
               <input
                 type="date"
                 value={sessionDate}
                 onChange={e => setSessionDate(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:border-emerald-500 outline-none"
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 font-medium focus:border-emerald-600 focus:bg-white outline-none transition"
               />
             </div>
 
             {/* Time */}
             <div>
-              <label className="block text-slate-300 font-medium mb-1">{isArabic ? "وقت الحصة" : "Session Time"}</label>
+              <label className="block text-slate-700 font-bold mb-1">{isArabic ? "وقت الحصة" : "Session Time"}</label>
               <input
                 type="text"
                 value={sessionTime}
                 onChange={e => setSessionTime(e.target.value)}
                 placeholder="10:00 AM"
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:border-emerald-500 outline-none"
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 font-medium focus:border-emerald-600 focus:bg-white outline-none transition"
               />
             </div>
           </div>
         </div>
 
         {/* Step 2: Subject Tags */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3 shadow-sm">
-          <h2 className="text-sm font-bold text-teal-400 uppercase tracking-wider flex items-center gap-2">
-            <Layers className="w-4 h-4" />
+        <div className="bg-white border border-emerald-100 rounded-2xl p-5 space-y-3 shadow-xs">
+          <h2 className="text-sm font-bold text-teal-800 uppercase tracking-wider flex items-center gap-2">
+            <Layers className="w-4 h-4 text-teal-600" />
             <span>{isArabic ? "2. المواد المشملولة في التقرير" : "2. Subjects Included in Report"}</span>
           </h2>
 
@@ -275,11 +275,11 @@ export const SessionBuilder: React.FC<SessionBuilderProps> = ({
                   onClick={() => handleSubjectToggle(subj)}
                   className={`px-4 py-2 rounded-xl text-xs font-bold border flex items-center gap-2 transition ${
                     isSelected
-                      ? "bg-teal-500/20 text-teal-200 border-teal-500 shadow-md"
-                      : "bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200"
+                      ? "bg-teal-50 text-teal-900 border-teal-300 shadow-xs"
+                      : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100"
                   }`}
                 >
-                  <CheckCircle className={`w-4 h-4 ${isSelected ? "text-teal-400" : "text-slate-600"}`} />
+                  <CheckCircle className={`w-4 h-4 ${isSelected ? "text-teal-600" : "text-slate-400"}`} />
                   <span>{subj}</span>
                 </button>
               );
@@ -288,14 +288,14 @@ export const SessionBuilder: React.FC<SessionBuilderProps> = ({
         </div>
 
         {/* Step 3: UNIFIED SINGLE REPORT TEXTBOX (مربع التقرير الموحد الشامل) */}
-        <div className="bg-slate-900 border border-emerald-500/50 rounded-2xl p-6 space-y-4 shadow-xl">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+        <div className="bg-white border border-emerald-200 rounded-2xl p-6 space-y-4 shadow-sm">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
             <div>
-              <h2 className="text-base font-bold text-white flex items-center gap-2">
-                <Edit3 className="w-5 h-5 text-emerald-400" />
+              <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <Edit3 className="w-5 h-5 text-emerald-600" />
                 <span>{isArabic ? "3. مربع التقرير الموحد (اكتب كل ما تم في الحصة هنا)" : "3. Unified Report Textbox"}</span>
               </h2>
-              <p className="text-xs text-slate-400 mt-1">
+              <p className="text-xs text-slate-600 mt-1 font-medium">
                 {isArabic
                   ? "اكتب هنا كل شيء: الدروس المشروحة، تفاصيل التلاوة/الحفظ، مستوى الطالب والتركيز، الواجب المطلوب، والتوصيات."
                   : "Type everything here: lessons covered, recitation details, student focus/performance, assigned homework, and recommendations."}
@@ -306,9 +306,9 @@ export const SessionBuilder: React.FC<SessionBuilderProps> = ({
               type="button"
               disabled={isEnhancing || !unifiedNotes.trim()}
               onClick={handleEnhanceUnifiedNotes}
-              className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold shadow-md flex items-center gap-2 transition disabled:opacity-50 self-start sm:self-auto shrink-0"
+              className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold shadow-md flex items-center gap-2 transition disabled:opacity-50 self-start sm:self-auto shrink-0"
             >
-              <Wand2 className="w-4 h-4 text-emerald-200" />
+              <Wand2 className="w-4 h-4 text-amber-300" />
               <span>
                 {isEnhancing
                   ? (isArabic ? "جاري التدقيق..." : "Refining...")
@@ -326,14 +326,14 @@ export const SessionBuilder: React.FC<SessionBuilderProps> = ({
                 ? "مثال:\nتم بفضل الله مراجعة سورة الملك من الآية 1 إلى 15 بتطبيق متميز لأحكام التجويد (مخارج الحروف، الإدغام بغنة).\nمستوى التركيز والمشاركة ممتازان جدًا.\nالواجب المطلوب: حفظ سورة الملك من الآية 16 إلى 24 ومراجعة الوجه الأول."
                 : "e.g.\nRecited Surah Al-Mulk verses 1-15 applying Tajweed rules. Excellent focus and engagement.\nHomework: Memorize verses 16-24 and review first page."
             }
-            className="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm leading-relaxed focus:border-emerald-500 outline-none resize-none font-sans shadow-inner"
+            className="w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 text-sm leading-relaxed focus:border-emerald-600 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 outline-none resize-none font-sans shadow-2xs font-medium"
           />
 
           {/* Optional Attachments */}
-          <div className="pt-3 border-t border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-center gap-2">
-              <label className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium border border-slate-700 cursor-pointer flex items-center gap-1.5 transition">
-                <Paperclip className="w-3.5 h-3.5 text-teal-400" />
+              <label className="px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100/70 text-emerald-900 text-xs font-bold border border-emerald-200 cursor-pointer flex items-center gap-1.5 transition">
+                <Paperclip className="w-3.5 h-3.5 text-emerald-700" />
                 <span>{isArabic ? "إرفاق ملفات مساندة (اختياري)" : "Attach Files (Optional)"}</span>
                 <input
                   type="file"
@@ -342,7 +342,7 @@ export const SessionBuilder: React.FC<SessionBuilderProps> = ({
                   className="hidden"
                 />
               </label>
-              <span className="text-[11px] text-slate-500">
+              <span className="text-[11px] text-slate-500 font-medium">
                 {attachments.length > 0 ? `${attachments.length} ${isArabic ? "ملفات مرفقة" : "files attached"}` : ""}
               </span>
             </div>
@@ -350,8 +350,8 @@ export const SessionBuilder: React.FC<SessionBuilderProps> = ({
             {attachments.length > 0 && (
               <div className="flex flex-wrap gap-2">
                 {attachments.map(att => (
-                  <div key={att.id} className="px-2.5 py-1 rounded-md bg-slate-950 border border-slate-800 text-[11px] text-slate-300 flex items-center gap-1.5">
-                    <FileText className="w-3.5 h-3.5 text-emerald-400" />
+                  <div key={att.id} className="px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-[11px] text-emerald-900 font-bold flex items-center gap-1.5">
+                    <FileText className="w-3.5 h-3.5 text-emerald-600" />
                     <span>{att.fileName}</span>
                   </div>
                 ))}
@@ -361,8 +361,8 @@ export const SessionBuilder: React.FC<SessionBuilderProps> = ({
         </div>
 
         {/* Action Button Bar */}
-        <div className="sticky bottom-4 bg-slate-900/95 backdrop-blur-md p-4 rounded-2xl border border-emerald-500/30 shadow-2xl flex items-center justify-between gap-4 z-20">
-          <div className="text-xs text-slate-300 hidden sm:block">
+        <div className="sticky bottom-4 bg-white/95 backdrop-blur-md p-4 rounded-2xl border border-emerald-200 shadow-xl flex items-center justify-between gap-4 z-20">
+          <div className="text-xs text-slate-600 font-medium hidden sm:block">
             {isArabic
               ? "سيقوم الذكاء الاصطناعي باستخراج كل التفاصيل والواجب وتطبيق القواعد والقوالب صياغةً وهيكلةً."
               : "AI will extract all sections & homework and apply active rules/templates automatically."}
@@ -372,16 +372,16 @@ export const SessionBuilder: React.FC<SessionBuilderProps> = ({
             <button
               type="button"
               onClick={onCancel}
-              className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition"
+              className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition border border-slate-200"
             >
               {isArabic ? "إلغاء" : "Cancel"}
             </button>
 
             <button
               type="submit"
-              className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs sm:text-sm shadow-xl shadow-emerald-900/50 flex items-center gap-2 transition"
+              className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold text-xs sm:text-sm shadow-md shadow-emerald-600/20 flex items-center gap-2 transition"
             >
-              <Sparkles className="w-4.5 h-4.5 text-emerald-200" />
+              <Sparkles className="w-4.5 h-4.5 text-amber-300" />
               <span>{isArabic ? "توليد وتحليل التقرير بالذكاء الاصطناعي" : "Analyze & Generate AI Report"}</span>
             </button>
           </div>

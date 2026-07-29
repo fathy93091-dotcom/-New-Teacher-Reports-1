@@ -165,7 +165,7 @@ Respond ONLY with a valid JSON object matching this schema:
   if (client) {
     try {
       const response = await client.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-3.6-flash",
         contents: userPrompt,
         config: {
           systemInstruction,
@@ -266,7 +266,7 @@ Respond strictly with a JSON object matching this schema:
 }`;
 
       const res = await client.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-3.6-flash",
         contents: prompt,
         config: {
           systemInstruction: "You are DITA AI engine generating monthly student progress reports based ONLY on approved daily reports.",
@@ -337,15 +337,19 @@ Respond strictly with a JSON object matching this schema:
 /**
  * Enhance Teacher Notes without altering educational facts (SRS REQ-AI-003)
  */
-export async function enhanceTeacherNotes(rawNotes: string, subject: string): Promise<string> {
+export async function enhanceTeacherNotes(rawNotes: string, subject: string, activeAiRules?: AIRule[]): Promise<string> {
   if (!rawNotes.trim()) return rawNotes;
+
+  const rulesText = Array.isArray(activeAiRules) && activeAiRules.length > 0
+    ? `\n\nFollow these specific teacher AI rules:\n` + activeAiRules.map(r => `- ${r.name}: ${r.instruction}`).join("\n")
+    : "";
 
   const client = getGeminiClient();
   if (client) {
     try {
       const res = await client.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: `Refine and format the following raw teacher notes for subject "${subject}". Make grammar clear, organize into clean bullet points, but DO NOT add any fake facts or unmentioned lessons.
+        model: "gemini-3.6-flash",
+        contents: `Refine and format the following raw teacher notes for subject "${subject}". Make grammar clear, organize into clean bullet points, but DO NOT add any fake facts or unmentioned lessons.${rulesText}
 
 Raw Notes:
 ${rawNotes}`,

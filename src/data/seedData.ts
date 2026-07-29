@@ -289,6 +289,7 @@ export const initialSettings: AppSettings = {
   reportStyle: "detailed",
   defaultClosingMessage: "جزاكم الله خيراً ونفع بدراستكم وحفظكم للقرآن الكريم.",
   writingTone: "encouraging",
+  lastUpdated: "2026-01-01T00:00:00.000Z",
   aiRules: [
     {
       id: "rule_01",

@@ -28,15 +28,15 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   const isArabic = settings?.preferredLanguage === "ar";
 
   return (
-    <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900/95 backdrop-blur-lg border-t border-slate-800 px-2 py-1.5 shadow-2xl">
+    <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-lg border-t border-emerald-100 px-2 py-1.5 shadow-lg">
       <div className="flex items-center justify-around max-w-md mx-auto">
         {/* Dashboard */}
         <button
           onClick={() => setActiveTab("dashboard")}
           className={`flex flex-col items-center justify-center py-1 px-2.5 rounded-xl transition ${
             activeTab === "dashboard"
-              ? "text-emerald-400 bg-slate-800/80 font-bold"
-              : "text-slate-400 hover:text-slate-200"
+              ? "text-emerald-800 bg-emerald-50 font-bold"
+              : "text-slate-500 hover:text-slate-800"
           }`}
         >
           <BookOpen className="w-5 h-5 mb-0.5" />
@@ -48,8 +48,8 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
           onClick={() => setActiveTab("students")}
           className={`flex flex-col items-center justify-center py-1 px-2.5 rounded-xl transition ${
             activeTab === "students"
-              ? "text-emerald-400 bg-slate-800/80 font-bold"
-              : "text-slate-400 hover:text-slate-200"
+              ? "text-emerald-800 bg-emerald-50 font-bold"
+              : "text-slate-500 hover:text-slate-800"
           }`}
         >
           <Users className="w-5 h-5 mb-0.5" />
@@ -59,7 +59,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
         {/* Floating Quick CTA for New Session */}
         <button
           onClick={onStartNewSession}
-          className="flex flex-col items-center justify-center -mt-5 bg-gradient-to-tr from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white p-3 rounded-full shadow-lg shadow-emerald-950/80 border-2 border-slate-900 transition transform active:scale-90"
+          className="flex flex-col items-center justify-center -mt-5 bg-gradient-to-tr from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white p-3 rounded-full shadow-lg border-2 border-white transition transform active:scale-90"
         >
           <PlusCircle className="w-6 h-6" />
         </button>
@@ -69,14 +69,14 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
           onClick={() => setActiveTab("reports")}
           className={`relative flex flex-col items-center justify-center py-1 px-2.5 rounded-xl transition ${
             activeTab === "reports"
-              ? "text-emerald-400 bg-slate-800/80 font-bold"
-              : "text-slate-400 hover:text-slate-200"
+              ? "text-emerald-800 bg-emerald-50 font-bold"
+              : "text-slate-500 hover:text-slate-800"
           }`}
         >
           <FileText className="w-5 h-5 mb-0.5" />
           <span className="text-[10px]">{isArabic ? "التقارير" : "Reports"}</span>
           {pendingReportsCount > 0 && (
-            <span className="absolute top-0 right-1 w-4 h-4 bg-amber-500 text-slate-950 font-extrabold text-[9px] rounded-full flex items-center justify-center animate-pulse">
+            <span className="absolute top-0 right-1 w-4 h-4 bg-amber-500 text-slate-950 font-black text-[9px] rounded-full flex items-center justify-center animate-pulse">
               {pendingReportsCount}
             </span>
           )}
@@ -87,8 +87,8 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
           onClick={() => setActiveTab("memory")}
           className={`flex flex-col items-center justify-center py-1 px-2.5 rounded-xl transition ${
             activeTab === "memory"
-              ? "text-emerald-400 bg-slate-800/80 font-bold"
-              : "text-slate-400 hover:text-slate-200"
+              ? "text-emerald-800 bg-emerald-50 font-bold"
+              : "text-slate-500 hover:text-slate-800"
           }`}
         >
           <Brain className="w-5 h-5 mb-0.5" />
@@ -100,8 +100,8 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
           onClick={() => setActiveTab("settings")}
           className={`flex flex-col items-center justify-center py-1 px-2.5 rounded-xl transition ${
             activeTab === "settings"
-              ? "text-emerald-400 bg-slate-800/80 font-bold"
-              : "text-slate-400 hover:text-slate-200"
+              ? "text-emerald-800 bg-emerald-50 font-bold"
+              : "text-slate-500 hover:text-slate-800"
           }`}
         >
           <Settings className="w-5 h-5 mb-0.5" />
