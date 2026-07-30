@@ -24,6 +24,7 @@ interface ReportsViewProps {
   settings: AppSettings;
   onSelectReport: (report: DailyReport) => void;
   onDeleteReport: (id: string) => void;
+  onDeleteMonthlyReport?: (id: string) => void;
   onGenerateMonthlyReport: (studentId: string, month: string, year: number) => void;
 }
 
@@ -34,6 +35,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   settings,
   onSelectReport,
   onDeleteReport,
+  onDeleteMonthlyReport,
   onGenerateMonthlyReport
 }) => {
   const isArabic = settings?.preferredLanguage === "ar";
@@ -96,11 +98,6 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             <FileText className="w-6 h-6 text-amber-300" />
             <span>{isArabic ? "مستودع التقارير التعليمية" : "Educational Reports Hub"}</span>
           </h1>
-          <p className="text-xs text-emerald-100 font-medium mt-1">
-            {isArabic
-              ? "مراجعة واعتماد التقارير اليومية والشهرية، التصدير للوالدين، ومتابعة سجلات الاعتماد"
-              : "Review daily and monthly educational reports, approve drafts, and export for parents"}
-          </p>
         </div>
 
         <button
@@ -273,9 +270,20 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                     </p>
                   </div>
 
-                  <span className="px-3 py-1 rounded-full bg-teal-50 text-teal-800 border border-teal-200 text-xs font-bold">
-                    {m.homeworkCompletionRate}% Homework Rate
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="px-3 py-1 rounded-full bg-teal-50 text-teal-800 border border-teal-200 text-xs font-bold">
+                      {m.homeworkCompletionRate}% Homework Rate
+                    </span>
+                    {onDeleteMonthlyReport && (
+                      <button
+                        onClick={() => onDeleteMonthlyReport(m.id)}
+                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
+                        title={isArabic ? "حذف التقرير الشهري" : "Delete Monthly Report"}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">

@@ -116,11 +116,6 @@ export const ApiDocsView: React.FC<ApiDocsViewProps> = ({ settings }) => {
             <Code className="w-6 h-6 text-amber-300" />
             <span>{isArabic ? "توثيق واجهات برمجة التطبيقات (API Documentation)" : "Interactive API Explorer & Documentation"}</span>
           </h1>
-          <p className="text-xs text-emerald-100 font-medium mt-1">
-            {isArabic
-              ? "توثيق شامل ودقيق لجميع مسارات النظام مع إمكانية تجربة الطلبات الحية مباشرة"
-              : "Complete reference for DITA REST API endpoints, schemas, parameters, and live test call runner."}
-          </p>
         </div>
 
         <div className="flex items-center gap-2 bg-white p-1.5 rounded-xl border border-emerald-200 shadow-xs">

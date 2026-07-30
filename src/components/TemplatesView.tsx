@@ -122,7 +122,7 @@ export const TemplatesView: React.FC<TemplatesViewProps> = ({
       return;
     }
 
-    if (confirm(isArabic ? `هل أنت تأكد من حذف القالب "${name}"؟` : `Are you sure you want to delete template "${name}"?`)) {
+    if (confirm(isArabic ? `هل أنت متأكد من حذف القالب "${name}"؟` : `Are you sure you want to delete template "${name}"?`)) {
       const updatedTemplates = templates.filter(t => t.id !== id);
       const newActiveId = activeTemplateId === id ? updatedTemplates[0].id : activeTemplateId;
       onUpdateSettings({
@@ -145,11 +145,6 @@ export const TemplatesView: React.FC<TemplatesViewProps> = ({
             <LayoutTemplate className="w-6 h-6 text-amber-300" />
             <span>{isArabic ? "قوالب التقارير والهياكل البنائية (Report Templates)" : "AI Report Templates & Structural Layouts"}</span>
           </h1>
-          <p className="text-xs text-emerald-100 font-medium mt-1">
-            {isArabic
-              ? "إدارة وقوالب وهياكل كتابة التقارير الكاملة مع إمكانية التعديل والحذف والتفعيل التلقائي للذكاء الاصطناعي"
-              : "Create, edit, delete, and set active templates used by AI when generating student reports"}
-          </p>
         </div>
 
         <div className="flex items-center gap-3 self-start sm:self-center">

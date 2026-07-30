@@ -50,8 +50,7 @@ export const SessionBuilder: React.FC<SessionBuilderProps> = ({
     "Holy Qur'an",
     "Tajweed",
     "Arabic Language",
-    "Islamic Studies",
-    "English Language"
+    "Islamic Studies"
   ];
 
   const [selectedSubjects, setSelectedSubjects] = useState<SubjectName[]>(["Holy Qur'an", "Tajweed"]);
@@ -194,9 +193,9 @@ export const SessionBuilder: React.FC<SessionBuilderProps> = ({
             <span>{isArabic ? "1. بيانات الطالب والحصة" : "1. Student & Session Details"}</span>
           </h2>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 text-xs">
             {/* Student Selector */}
-            <div className="sm:col-span-2">
+            <div className="sm:col-span-2 lg:col-span-2">
               <label className="block text-slate-700 font-bold mb-1">{isArabic ? "اختيار الطالب *" : "Select Student *"}</label>
               <select
                 value={selectedStudentId}
@@ -240,18 +239,6 @@ export const SessionBuilder: React.FC<SessionBuilderProps> = ({
                 type="date"
                 value={sessionDate}
                 onChange={e => setSessionDate(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 font-medium focus:border-emerald-600 focus:bg-white outline-none transition"
-              />
-            </div>
-
-            {/* Time */}
-            <div>
-              <label className="block text-slate-700 font-bold mb-1">{isArabic ? "وقت الحصة" : "Session Time"}</label>
-              <input
-                type="text"
-                value={sessionTime}
-                onChange={e => setSessionTime(e.target.value)}
-                placeholder="10:00 AM"
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 font-medium focus:border-emerald-600 focus:bg-white outline-none transition"
               />
             </div>
@@ -334,7 +321,7 @@ export const SessionBuilder: React.FC<SessionBuilderProps> = ({
             <div className="flex items-center gap-2">
               <label className="px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100/70 text-emerald-900 text-xs font-bold border border-emerald-200 cursor-pointer flex items-center gap-1.5 transition">
                 <Paperclip className="w-3.5 h-3.5 text-emerald-700" />
-                <span>{isArabic ? "إرفاق ملفات مساندة (اختياري)" : "Attach Files (Optional)"}</span>
+                <span>{isArabic ? "إرفاق ملفات مساندة" : "Attach Files"}</span>
                 <input
                   type="file"
                   multiple

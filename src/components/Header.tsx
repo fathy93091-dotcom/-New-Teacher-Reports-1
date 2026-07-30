@@ -37,7 +37,9 @@ interface HeaderProps {
   setActiveTab: (tab: ActiveTab) => void;
   user?: UserProfile;
   authUser?: User | null;
+  isDemoMode?: boolean;
   onOpenAuthModal?: () => void;
+  onSwitchToAuthLanding?: () => void;
   settings?: AppSettings;
   onLanguageToggle?: (lang: "en" | "ar") => void;
   onOpenQuickSearch?: () => void;
@@ -60,7 +62,9 @@ export const Header: React.FC<HeaderProps> = ({
   setActiveTab,
   user = defaultUser,
   authUser,
+  isDemoMode,
   onOpenAuthModal,
+  onSwitchToAuthLanding,
   settings,
   onLanguageToggle,
   onOpenQuickSearch,
@@ -97,9 +101,6 @@ export const Header: React.FC<HeaderProps> = ({
                 SRS v1.0
               </span>
             </div>
-            <p className="text-xs text-emerald-800/80 font-medium hidden sm:block">
-              {isArabic ? "مساعد المعلم الإسلامي اليومي الذكي" : "Daily Islamic Teacher Assistant"}
-            </p>
           </div>
         </div>
 
@@ -149,41 +150,54 @@ export const Header: React.FC<HeaderProps> = ({
             )}
           </button>
 
-          {/* Firebase Authentication Button / User Profile */}
-          <button
-            onClick={onOpenAuthModal}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-slate-900 border border-emerald-200 transition shadow-2xs text-xs font-bold"
-            title={authUser ? (isArabic ? "إدارة حساب Firebase" : "Manage Firebase Account") : (isArabic ? "تسجيل الدخول عبر Firebase" : "Firebase Sign In")}
-          >
-            {authUser ? (
-              <>
-                <div className="relative">
-                  <img
-                    src={authUser.photoURL || user?.avatarUrl || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=200"}
-                    alt={authUser.displayName || "User"}
-                    className="w-7 h-7 rounded-full border-2 border-emerald-600 object-cover"
-                  />
-                  <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-500 border-2 border-white rounded-full"></span>
+          {/* Firebase Authentication Button / User Profile / Demo Indicator */}
+          {authUser ? (
+            <button
+              onClick={onOpenAuthModal}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-slate-900 border border-emerald-200 transition shadow-2xs text-xs font-bold"
+              title={isArabic ? "إدارة حساب المعلم والنسخ السحابي" : "Manage Teacher Account"}
+            >
+              <div className="relative">
+                <img
+                  src={authUser.photoURL || user?.avatarUrl || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=200"}
+                  alt={authUser.displayName || "User"}
+                  className="w-7 h-7 rounded-full border-2 border-emerald-600 object-cover"
+                />
+                <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-500 border-2 border-white rounded-full"></span>
+              </div>
+              <div className="hidden lg:block text-left text-xs">
+                <div className="font-extrabold text-slate-900 truncate max-w-[110px]">
+                  {authUser.displayName || authUser.email?.split("@")[0] || "المعلم"}
                 </div>
-                <div className="hidden lg:block text-left text-xs">
-                  <div className="font-extrabold text-slate-900 truncate max-w-[110px]">
-                    {authUser.displayName || user?.fullName || "Teacher"}
-                  </div>
-                  <div className="text-[10px] text-emerald-700 font-bold flex items-center gap-1">
-                    <CloudCheck className="w-3 h-3 text-emerald-600 inline" />
-                    <span>Firebase Auth</span>
-                  </div>
+                <div className="text-[10px] text-emerald-700 font-bold flex items-center gap-1">
+                  <CloudCheck className="w-3 h-3 text-emerald-600 inline" />
+                  <span>{isArabic ? "مساحة مسجلة" : "Teacher Cloud"}</span>
                 </div>
-              </>
-            ) : (
-              <>
-                <LogIn className="w-4 h-4 text-emerald-700" />
-                <span className="hidden sm:inline text-emerald-950 font-bold">
-                  {isArabic ? "تسجيل الدخول" : "Firebase Login"}
-                </span>
-              </>
-            )}
-          </button>
+              </div>
+            </button>
+          ) : isDemoMode ? (
+            <div className="flex items-center gap-1.5">
+              <span className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-amber-50 text-amber-900 border border-amber-200 text-xs font-bold">
+                <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                <span>{isArabic ? "وضع تجريبي" : "Demo Mode"}</span>
+              </span>
+              <button
+                onClick={onSwitchToAuthLanding}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition shadow-sm"
+              >
+                <LogIn className="w-3.5 h-3.5" />
+                <span>{isArabic ? "تسجيل دخول معلم" : "Teacher Login"}</span>
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={onSwitchToAuthLanding || onOpenAuthModal}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition shadow-md"
+            >
+              <LogIn className="w-4 h-4" />
+              <span>{isArabic ? "تسجيل الدخول" : "Sign In"}</span>
+            </button>
+          )}
         </div>
       </div>
 

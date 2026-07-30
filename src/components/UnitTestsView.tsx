@@ -72,11 +72,6 @@ export const UnitTestsView: React.FC<UnitTestsViewProps> = ({ settings }) => {
             <CheckCircle className="w-6 h-6 text-amber-300" />
             <span>{isArabic ? "اختبارات الوحدة الشاملة (Unit Testing Suite)" : "Comprehensive Unit Testing Suite"}</span>
           </h1>
-          <p className="text-xs text-emerald-100 font-medium mt-1">
-            {isArabic
-              ? "تحقق تلقائي من استقرار جميع خدمات النظام، دقة الذكاء الاصطناعي، وتحديثات الذاكرة"
-              : "Live test runner validating backend database, session recording, AI accuracy, and memory updates."}
-          </p>
         </div>
 
         <button

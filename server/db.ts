@@ -93,7 +93,7 @@ const initialStudents: Student[] = [
     parentName: "Mansoor Khan",
     parentContact: "+44 7700 900077",
     currentLevel: "Qur'an Recitation & English Islamic Studies",
-    subjects: ["Holy Qur'an", "Islamic Studies", "English Language"],
+    subjects: ["Holy Qur'an", "Islamic Studies"],
     status: "Active",
     notes: "Studying Seerah and English translation of Juz' Amma.",
     createdAt: "2026-03-01T11:00:00Z",

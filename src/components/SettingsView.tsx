@@ -107,7 +107,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   };
 
   const handleDeleteWithConfirm = (id: string, name: string) => {
-    if (confirm(isArabic ? `هل أنت تأكد من حذف قاعدة الذكاء الاصطناعي "${name}"؟` : `Are you sure you want to delete AI rule "${name}"?`)) {
+    if (confirm(isArabic ? `هل أنت متأكد من حذف قاعدة الذكاء الاصطناعي "${name}"؟` : `Are you sure you want to delete AI rule "${name}"?`)) {
       onDeleteAIRule(id);
     }
   };
@@ -285,11 +285,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <Settings className="w-6 h-6 text-amber-300" />
             <span>{isArabic ? "قواعد الذكاء الاصطناعي وإعدادات النظام" : "Permanent AI Rules & App Settings"}</span>
           </h1>
-          <p className="text-xs text-emerald-100 font-medium mt-1">
-            {isArabic
-              ? "إضافة وتعديل وحذف وقواعد التعليمات المباشرة التي يستخدمها الذكاء الاصطناعي في كتابة جميع التقارير"
-              : "Add, edit, delete, and synchronize direct instruction rules used by the AI when generating reports"}
-          </p>
         </div>
 
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/10 backdrop-blur-xs border border-white/20 text-white text-xs font-bold self-start sm:self-center">

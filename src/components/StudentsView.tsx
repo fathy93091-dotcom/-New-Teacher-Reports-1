@@ -73,7 +73,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [selectedStudentForProfile, setSelectedStudentForProfile] = useState<Student | null>(null);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
-  const [profileTab, setProfileTab] = useState<"info" | "daily" | "monthly">("info");
+  const [profileTab, setProfileTab] = useState<"info" | "daily" | "monthly" | "memory">("info");
 
   // Add Student Form State (ALL FIELDS OPTIONAL)
   const [addFormData, setAddFormData] = useState({
@@ -114,8 +114,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     "Holy Qur'an",
     "Tajweed",
     "Arabic Language",
-    "Islamic Studies",
-    "English Language"
+    "Islamic Studies"
   ];
 
   const filteredStudents = students.filter(student => {
@@ -250,25 +249,19 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   // Delete Student Profile
   const handleDeleteProfile = () => {
     if (!selectedStudentForProfile) return;
-    const confirmMsg = isArabic
-      ? `هل أنت متأكد من حذف ملف الطالب "${selectedStudentForProfile.fullName}" نهائياً من النظام والقاعدة السحابية؟`
-      : `Are you sure you want to permanently delete student profile "${selectedStudentForProfile.fullName}"?`;
-
-    if (confirm(confirmMsg)) {
-      if (onDeleteStudent) {
-        onDeleteStudent(selectedStudentForProfile.id);
-      }
-      setSelectedStudentForProfile(null);
+    if (onDeleteStudent) {
+      onDeleteStudent(selectedStudentForProfile.id);
     }
+    setSelectedStudentForProfile(null);
   };
 
   // Filter Reports for selected student
   const studentDailyReports = selectedStudentForProfile
-    ? dailyReports.filter(r => r.studentId === selectedStudentForProfile.id)
+    ? dailyReports.filter(r => r.studentId === selectedStudentForProfile.id || (r.studentName && selectedStudentForProfile.fullName && r.studentName.trim().toLowerCase() === selectedStudentForProfile.fullName.trim().toLowerCase()))
     : [];
 
   const studentMonthlyReports = selectedStudentForProfile
-    ? monthlyReports.filter(r => r.studentId === selectedStudentForProfile.id)
+    ? monthlyReports.filter(r => r.studentId === selectedStudentForProfile.id || (r.studentName && selectedStudentForProfile.fullName && r.studentName.trim().toLowerCase() === selectedStudentForProfile.fullName.trim().toLowerCase()))
     : [];
 
   return (
@@ -280,11 +273,6 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
             <Users className="w-6 h-6 text-emerald-600" />
             <span>{isArabic ? "سجل إدارة ملفات الطلاب" : "Student Profiles Directory"}</span>
           </h1>
-          <p className="text-xs text-slate-500 font-medium mt-1">
-            {isArabic
-              ? "إدارة وتعديل وحذف ملفات الطلاب، مع الاطلاع الفوري على التقارير اليومية والشهرية لكل طالب"
-              : "Manage, edit, delete student profiles & inspect individual daily and monthly reports"}
-          </p>
         </div>
 
         <button
@@ -292,7 +280,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
           className="px-4.5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold text-sm flex items-center gap-2 shadow-md shadow-emerald-600/20 transition"
         >
           <Plus className="w-4 h-4 text-amber-300" />
-          <span>{isArabic ? "إضافة طالب جديد (جميع الحقول اختيارية)" : "Add Student (All Fields Optional)"}</span>
+          <span>{isArabic ? "إضافة طالب جديد" : "Add Student"}</span>
         </button>
       </div>
 
@@ -452,11 +440,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 
                       {onDeleteStudent && (
                         <button
-                          onClick={() => {
-                            if (confirm(isArabic ? `هل أنت متأكد من حذف الطالب "${student.fullName}" نهائياً؟` : `Delete student "${student.fullName}" permanently?`)) {
-                              onDeleteStudent(student.id);
-                            }
-                          }}
+                          onClick={() => onDeleteStudent(student.id)}
                           className="p-1.5 text-slate-400 hover:text-rose-600 transition"
                           title={isArabic ? "حذف نهائي" : "Delete"}
                         >
@@ -490,9 +474,6 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                   <Plus className="w-5 h-5 text-emerald-600" />
                   <span>{isArabic ? "إضافة طالب جديد" : "Add New Student"}</span>
                 </h2>
-                <p className="text-xs text-emerald-700 font-medium">
-                  {isArabic ? "ملاحظة: جميع الحقول اختيارية، يمكنك إضافة البيانات المتوفرة فقط" : "Note: All fields are optional. Fill only what is available."}
-                </p>
               </div>
               <button
                 onClick={() => setIsAddModalOpen(false)}
@@ -506,7 +487,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-slate-700 font-bold mb-1">
-                    {isArabic ? "اسم الطالب (اختياري)" : "Student Full Name (Optional)"}
+                    {isArabic ? "اسم الطالب" : "Student Full Name"}
                   </label>
                   <input
                     type="text"
@@ -519,7 +500,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 
                 <div>
                   <label className="block text-slate-700 font-bold mb-1">
-                    {isArabic ? "الاسم المفضل (اختياري)" : "Preferred Name (Optional)"}
+                    {isArabic ? "الاسم المفضل" : "Preferred Name"}
                   </label>
                   <input
                     type="text"
@@ -543,7 +524,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1">{isArabic ? "العمر (اختياري)" : "Age (Optional)"}</label>
+                  <label className="block text-slate-700 font-bold mb-1">{isArabic ? "العمر" : "Age"}</label>
                   <input
                     type="number"
                     value={addFormData.age}
@@ -555,7 +536,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 
                 <div>
                   <label className="block text-slate-700 font-bold mb-1">
-                    {isArabic ? "اسم ولي الأمر (اختياري)" : "Parent Name (Optional)"}
+                    {isArabic ? "اسم ولي الأمر" : "Parent Name"}
                   </label>
                   <input
                     type="text"
@@ -568,7 +549,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 
                 <div>
                   <label className="block text-slate-700 font-bold mb-1">
-                    {isArabic ? "هاتف ولي الأمر (اختياري)" : "Parent Phone (Optional)"}
+                    {isArabic ? "هاتف ولي الأمر" : "Parent Phone"}
                   </label>
                   <input
                     type="text"
@@ -580,7 +561,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1">{isArabic ? "الدولة (اختياري)" : "Country (Optional)"}</label>
+                  <label className="block text-slate-700 font-bold mb-1">{isArabic ? "الدولة" : "Country"}</label>
                   <input
                     type="text"
                     value={addFormData.country}
@@ -589,23 +570,12 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 font-medium focus:border-emerald-600 focus:bg-white outline-none"
                   />
                 </div>
-
-                <div>
-                  <label className="block text-slate-700 font-bold mb-1">{isArabic ? "المستوى الحالي (اختياري)" : "Current Level (Optional)"}</label>
-                  <input
-                    type="text"
-                    value={addFormData.currentLevel}
-                    onChange={e => setAddFormData({ ...addFormData, currentLevel: e.target.value })}
-                    placeholder={isArabic ? "جزء عم / تجويد / مبتدئ..." : "Juz Amma / Tajweed / Beginner..."}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 font-medium focus:border-emerald-600 focus:bg-white outline-none"
-                  />
-                </div>
               </div>
 
               {/* Subject Selector */}
               <div>
                 <label className="block text-slate-700 font-bold mb-1.5">
-                  {isArabic ? "المواد المقررة (اختياري)" : "Teaching Subjects (Optional)"}
+                  {isArabic ? "المواد المقررة" : "Teaching Subjects"}
                 </label>
                 <div className="flex flex-wrap gap-2">
                   {availableSubjects.map(subj => {
@@ -631,7 +601,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 
               {/* Notes */}
               <div>
-                <label className="block text-slate-700 font-bold mb-1">{isArabic ? "ملاحظات المعلم (اختياري)" : "Teacher Notes (Optional)"}</label>
+                <label className="block text-slate-700 font-bold mb-1">{isArabic ? "ملاحظات المعلم" : "Teacher Notes"}</label>
                 <textarea
                   rows={2}
                   value={addFormData.notes}
@@ -756,7 +726,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
               <form onSubmit={handleSaveEditProfile} className="space-y-4 text-xs p-4 rounded-xl bg-emerald-50/50 border border-emerald-200">
                 <h3 className="font-extrabold text-sm text-slate-900 flex items-center gap-2 border-b border-emerald-200 pb-2">
                   <Pencil className="w-4 h-4 text-emerald-600" />
-                  <span>{isArabic ? "تعديل بيانات ملف الطالب (جميع الحقول اختيارية)" : "Edit Student Information (All Fields Optional)"}</span>
+                  <span>{isArabic ? "تعديل بيانات ملف الطالب" : "Edit Student Information"}</span>
                 </h3>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -937,6 +907,18 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                       {isArabic ? "التقارير الشهرية" : "Monthly Reports"} ({studentMonthlyReports.length})
                     </span>
                   </button>
+
+                  <button
+                    onClick={() => setProfileTab("memory")}
+                    className={`flex-1 py-2 rounded-lg transition flex items-center justify-center gap-1.5 ${
+                      profileTab === "memory"
+                        ? "bg-white text-emerald-950 shadow-2xs"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    <Brain className="w-4 h-4 text-amber-600" />
+                    <span>{isArabic ? "الذاكرة والسجل" : "Memory & Progress"}</span>
+                  </button>
                 </div>
 
                 {/* TAB 1: PROFILE DETAILS INFO */}
@@ -1091,6 +1073,63 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                         </div>
                       ))
                     )}
+                  </div>
+                )}
+
+                {/* TAB 4: STUDENT MEMORY & PROGRESS LOGS */}
+                {profileTab === "memory" && (
+                  <div className="space-y-4 max-h-[360px] overflow-y-auto pr-1 text-xs">
+                    <div className="bg-amber-50/70 p-4 rounded-xl border border-amber-200 flex items-center justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <Brain className="w-5 h-5 text-amber-600 shrink-0" />
+                        <div>
+                          <h4 className="font-extrabold text-slate-900">
+                            {isArabic ? "سجل الذاكرة التراكمية والتوصيات التربوية" : "Cumulative Student Memory & Pedagogical Insights"}
+                          </h4>
+                          <p className="text-[11px] text-slate-600 font-medium">
+                            {isArabic ? "يتم بناء هذا السجل تلقائياً عبر جلسات المعلم والذكاء الاصطناعي" : "Built automatically across recorded teaching sessions"}
+                          </p>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => {
+                          const sid = selectedStudentForProfile.id;
+                          setSelectedStudentForProfile(null);
+                          onViewStudentMemory(sid);
+                        }}
+                        className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs flex items-center gap-1 shadow-2xs transition shrink-0"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>{isArabic ? "فتح السجل الكامل" : "Full Memory Log"}</span>
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+                        <h5 className="font-bold text-slate-800 flex items-center gap-1 text-[11px]">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                          <span>{isArabic ? "إحصاءات تقارير الطالب" : "Report Metrics"}</span>
+                        </h5>
+                        <div className="space-y-1 text-slate-600 text-[11px]">
+                          <p>• {isArabic ? "عدد التقارير اليومية المسجلة:" : "Daily Reports Count:"} <strong className="text-slate-900">{studentDailyReports.length}</strong></p>
+                          <p>• {isArabic ? "عدد التقارير الشهرية المسجلة:" : "Monthly Reports Count:"} <strong className="text-slate-900">{studentMonthlyReports.length}</strong></p>
+                          <p>• {isArabic ? "الحالة الأكاديمية:" : "Academic Status:"} <strong className="text-emerald-700">{selectedStudentForProfile.currentLevel || "نشط"}</strong></p>
+                        </div>
+                      </div>
+
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+                        <h5 className="font-bold text-slate-800 flex items-center gap-1 text-[11px]">
+                          <Clock className="w-4 h-4 text-teal-600" />
+                          <span>{isArabic ? "معلومات التواصل والتسجيل" : "Contact & Meta"}</span>
+                        </h5>
+                        <div className="space-y-1 text-slate-600 text-[11px]">
+                          <p>• {isArabic ? "ولي الأمر:" : "Parent:"} <strong className="text-slate-900">{selectedStudentForProfile.parentName || "-"}</strong></p>
+                          <p>• {isArabic ? "الهاتف:" : "Phone:"} <strong className="text-slate-900">{selectedStudentForProfile.parentContact || "-"}</strong></p>
+                          <p>• {isArabic ? "تاريخ الإنشاء:" : "Created Date:"} <strong className="text-slate-900">{selectedStudentForProfile.createdAt || "-"}</strong></p>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>

@@ -8,7 +8,6 @@ export type SubjectName =
   | "Tajweed"
   | "Arabic Language"
   | "Islamic Studies"
-  | "English Language";
 
 export type Gender = "Male" | "Female";
 
@@ -221,6 +220,7 @@ export interface ReportTemplate {
 }
 
 export interface AppSettings {
+  teacherName?: string;
   preferredLanguage: "en" | "ar";
   reportStyle: "detailed" | "bulleted" | "concise";
   defaultClosingMessage: string;

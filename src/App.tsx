@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { onAuthStateChanged, User } from "firebase/auth";
+import { onAuthStateChanged, signOut, User } from "firebase/auth";
 import { Header, ActiveTab } from "./components/Header";
+import { AuthLandingGate } from "./components/AuthLandingGate";
 import { DashboardView } from "./components/DashboardView";
 import { StudentsView } from "./components/StudentsView";
 import { SessionBuilder } from "./components/SessionBuilder";
@@ -29,6 +30,10 @@ import {
   loadInitialFirestoreData
 } from "./lib/firestoreService";
 import {
+  generateClientSideDailyReport,
+  generateClientSideMonthlyReport
+} from "./lib/clientReportGenerator";
+import {
   initialStudents,
   initialSessions,
   initialDailyReports,
@@ -54,9 +59,9 @@ function getStoredStateWithFallback<T>(keys: string[], fallback: T): T {
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(fallback)) {
-          if (Array.isArray(parsed) && parsed.length > 0) return parsed as T;
+          if (Array.isArray(parsed)) return parsed as T;
         } else if (typeof fallback === "object" && fallback !== null) {
-          if (parsed && typeof parsed === "object" && Object.keys(parsed).length > 0) return parsed as T;
+          if (parsed && typeof parsed === "object") return parsed as T;
         } else if (parsed !== null && parsed !== undefined) {
           return parsed as T;
         }
@@ -79,78 +84,17 @@ export function App() {
 
   const [activeTab, setActiveTab] = useState<ActiveTab>("dashboard");
 
-  // Firebase Auth State
+  // Firebase Auth & App Entry Gate State
   const [authUser, setAuthUser] = useState<User | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-
-  // Listen to Firebase Auth state
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setAuthUser(user);
-      if (user) {
-        showNotification(
-          settings.preferredLanguage === "ar"
-            ? `مرحباً بك، ${user.displayName || user.email} (تم ربط Firebase Auth)`
-            : `Welcome, ${user.displayName || user.email} (Connected to Firebase)`,
-          "success"
-        );
-      }
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // Domain State seeded with rich initial defaults & multi-key localStorage fallback
-  const [students, setStudents] = useState<Student[]>(() =>
-    getStoredStateWithFallback(["dita_students_store_v2", "dita_students_store", "dita_students"], initialStudents)
-  );
-  const [sessions, setSessions] = useState<Session[]>(() =>
-    getStoredStateWithFallback(["dita_sessions_store_v2", "dita_sessions_store", "dita_sessions"], initialSessions)
-  );
-  const [dailyReports, setDailyReports] = useState<DailyReport[]>(() =>
-    getStoredStateWithFallback(["dita_daily_reports_store_v2", "dita_daily_reports_store", "dita_daily_reports"], initialDailyReports)
-  );
-  const [monthlyReports, setMonthlyReports] = useState<MonthlyReport[]>(() =>
-    getStoredStateWithFallback(["dita_monthly_reports_store_v2", "dita_monthly_reports_store", "dita_monthly_reports"], initialMonthlyReports)
-  );
-  const [memories, setMemories] = useState<Record<string, StudentMemory>>(() =>
-    getStoredStateWithFallback(["dita_memories_store_v2", "dita_memories_store", "dita_memories"], initialMemories)
-  );
-  const [settings, setSettings] = useState<AppSettings>(() =>
-    getStoredStateWithFallback(["dita_settings_store_v2", "dita_settings_store", "dita_settings"], initialSettings)
-  );
-
-  const [loading, setLoading] = useState(true);
-
-  // Sync state to localStorage across all key versions automatically on updates
-  useEffect(() => {
-    syncToStorageKeys(["dita_students_store_v2", "dita_students_store", "dita_students"], students);
-  }, [students]);
-
-  useEffect(() => {
-    syncToStorageKeys(["dita_sessions_store_v2", "dita_sessions_store", "dita_sessions"], sessions);
-  }, [sessions]);
-
-  useEffect(() => {
-    syncToStorageKeys(["dita_daily_reports_store_v2", "dita_daily_reports_store", "dita_daily_reports"], dailyReports);
-  }, [dailyReports]);
-
-  useEffect(() => {
-    syncToStorageKeys(["dita_monthly_reports_store_v2", "dita_monthly_reports_store", "dita_monthly_reports"], monthlyReports);
-  }, [monthlyReports]);
-
-  useEffect(() => {
-    syncToStorageKeys(["dita_memories_store_v2", "dita_memories_store", "dita_memories"], memories);
-  }, [memories]);
-
-  useEffect(() => {
-    syncToStorageKeys(["dita_settings_store_v2", "dita_settings_store", "dita_settings"], settings);
-  }, [settings]);
-
-  // Session Builder & Report Preview Modal state
-  const [isSessionBuilderOpen, setIsSessionBuilderOpen] = useState(false);
-  const [preselectedStudentIdForSession, setPreselectedStudentIdForSession] = useState<string | undefined>(undefined);
-  const [selectedReportForPreview, setSelectedReportForPreview] = useState<DailyReport | null>(null);
-  const [selectedStudentForMemory, setSelectedStudentForMemory] = useState<string | undefined>(undefined);
+  const [isDemoMode, setIsDemoMode] = useState<boolean>(() => {
+    try {
+      return sessionStorage.getItem("dita_is_demo_mode") === "true";
+    } catch {
+      return false;
+    }
+  });
+  const [authChecked, setAuthChecked] = useState(false);
 
   // Notification Toast State
   const [notification, setNotification] = useState<{
@@ -163,63 +107,325 @@ export function App() {
     setTimeout(() => setNotification(null), 4000);
   };
 
-  // Initial Data Fetcher - Merges Firestore, Express API, and LocalStorage
-  const refreshAllData = async () => {
-    const safeFetch = async (url: string) => {
-      try {
-        const res = await fetch(url);
-        if (!res.ok) return null;
-        return await res.json();
-      } catch {
-        return null;
-      }
-    };
+  // Domain State seeded dynamically based on Teacher Account or Demo Mode
+  const [students, setStudents] = useState<Student[]>([]);
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [dailyReports, setDailyReports] = useState<DailyReport[]>([]);
+  const [monthlyReports, setMonthlyReports] = useState<MonthlyReport[]>([]);
+  const [memories, setMemories] = useState<Record<string, StudentMemory>>({});
+  const [settings, setSettings] = useState<AppSettings>(initialSettings);
 
+  const [loading, setLoading] = useState(true);
+
+  // Load state based on current Auth User or Demo Mode
+  const loadWorkspaceState = (user: User | null, demo: boolean) => {
+    if (user) {
+      const teacherKey = `dita_teacher_${user.uid}`;
+      const isInitialized = localStorage.getItem(`${teacherKey}_initialized`);
+
+      if (isInitialized) {
+        setStudents(getStoredStateWithFallback([`${teacherKey}_students`], []));
+        setSessions(getStoredStateWithFallback([`${teacherKey}_sessions`], []));
+        setDailyReports(getStoredStateWithFallback([`${teacherKey}_daily_reports`], []));
+        setMonthlyReports(getStoredStateWithFallback([`${teacherKey}_monthly_reports`], []));
+        setMemories(getStoredStateWithFallback([`${teacherKey}_memories`], {}));
+        setSettings(
+          getStoredStateWithFallback([`${teacherKey}_settings`], {
+            ...initialSettings,
+            teacherName: user.displayName || user.email || "معلم الحلقة"
+          })
+        );
+      } else {
+        // Brand NEW teacher workspace -> CLEAN SLATE (No students, no reports)
+        setStudents([]);
+        setSessions([]);
+        setDailyReports([]);
+        setMonthlyReports([]);
+        setMemories({});
+        const newSettings: AppSettings = {
+          ...initialSettings,
+          teacherName: user.displayName || user.email || "معلم الحلقة"
+        };
+        setSettings(newSettings);
+        try {
+          localStorage.setItem(`${teacherKey}_initialized`, "true");
+          localStorage.setItem(`${teacherKey}_students`, JSON.stringify([]));
+          localStorage.setItem(`${teacherKey}_sessions`, JSON.stringify([]));
+          localStorage.setItem(`${teacherKey}_daily_reports`, JSON.stringify([]));
+          localStorage.setItem(`${teacherKey}_monthly_reports`, JSON.stringify([]));
+          localStorage.setItem(`${teacherKey}_memories`, JSON.stringify({}));
+          localStorage.setItem(`${teacherKey}_settings`, JSON.stringify(newSettings));
+        } catch (e) {}
+      }
+    } else if (demo) {
+      // Demo Mode -> Seed with sample students and reports for exploration
+      setStudents(getStoredStateWithFallback(["dita_demo_students"], initialStudents));
+      setSessions(getStoredStateWithFallback(["dita_demo_sessions"], initialSessions));
+      setDailyReports(getStoredStateWithFallback(["dita_demo_daily_reports"], initialDailyReports));
+      setMonthlyReports(getStoredStateWithFallback(["dita_demo_monthly_reports"], initialMonthlyReports));
+      setMemories(getStoredStateWithFallback(["dita_demo_memories"], initialMemories));
+      setSettings(getStoredStateWithFallback(["dita_demo_settings"], initialSettings));
+    }
+  };
+
+  // Listen to Firebase Auth state
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setAuthUser(user);
+      setAuthChecked(true);
+      setLoading(false);
+
+      if (user) {
+        setIsDemoMode(false);
+        try { sessionStorage.removeItem("dita_is_demo_mode"); } catch (e) {}
+        loadWorkspaceState(user, false);
+        showNotification(
+          settings.preferredLanguage === "ar"
+            ? `مرحباً بك، ${user.displayName || user.email}! تم فتح مساحتك الخاصة.`
+            : `Welcome, ${user.displayName || user.email}! Teacher workspace active.`,
+          "success"
+        );
+      } else if (isDemoMode) {
+        loadWorkspaceState(null, true);
+      }
+    });
+    return () => unsubscribe();
+  }, [isDemoMode]);
+
+  // Handle Quick Demo Activation
+  const handleEnterDemoMode = () => {
+    setIsDemoMode(true);
+    try { sessionStorage.setItem("dita_is_demo_mode", "true"); } catch (e) {}
+    loadWorkspaceState(null, true);
+    setLoading(false);
+    showNotification(
+      settings.preferredLanguage === "ar"
+        ? "تم الدخول في الوضع التجريبي! يمكنك استكشاف جميع ميزات الموقع."
+        : "Entered Demo Mode! You can now explore all features with sample data.",
+      "info"
+    );
+  };
+
+  // Handle Sign Out or Switch to Auth Landing Gate
+  const handleSwitchToAuthLanding = async () => {
+    setIsDemoMode(false);
+    try { sessionStorage.removeItem("dita_is_demo_mode"); } catch (e) {}
+    if (authUser) {
+      await signOut(auth);
+    }
+    showNotification(
+      settings.preferredLanguage === "ar"
+        ? "تم العودة لصفحة تسجيل الدخول والدخول السريع"
+        : "Returned to Login & Quick Entry screen",
+      "info"
+    );
+  };
+
+  // Sync state to localStorage automatically on updates
+  useEffect(() => {
+    if (authUser) {
+      const key = `dita_teacher_${authUser.uid}_students`;
+      syncToStorageKeys([key], students);
+    } else if (isDemoMode) {
+      syncToStorageKeys(["dita_demo_students"], students);
+    }
+  }, [students, authUser, isDemoMode]);
+
+  useEffect(() => {
+    if (authUser) {
+      const key = `dita_teacher_${authUser.uid}_sessions`;
+      syncToStorageKeys([key], sessions);
+    } else if (isDemoMode) {
+      syncToStorageKeys(["dita_demo_sessions"], sessions);
+    }
+  }, [sessions, authUser, isDemoMode]);
+
+  useEffect(() => {
+    if (authUser) {
+      const key = `dita_teacher_${authUser.uid}_daily_reports`;
+      syncToStorageKeys([key], dailyReports);
+    } else if (isDemoMode) {
+      syncToStorageKeys(["dita_demo_daily_reports"], dailyReports);
+    }
+  }, [dailyReports, authUser, isDemoMode]);
+
+  useEffect(() => {
+    if (authUser) {
+      const key = `dita_teacher_${authUser.uid}_monthly_reports`;
+      syncToStorageKeys([key], monthlyReports);
+    } else if (isDemoMode) {
+      syncToStorageKeys(["dita_demo_monthly_reports"], monthlyReports);
+    }
+  }, [monthlyReports, authUser, isDemoMode]);
+
+  useEffect(() => {
+    if (authUser) {
+      const key = `dita_teacher_${authUser.uid}_memories`;
+      syncToStorageKeys([key], memories);
+    } else if (isDemoMode) {
+      syncToStorageKeys(["dita_demo_memories"], memories);
+    }
+  }, [memories, authUser, isDemoMode]);
+
+  useEffect(() => {
+    if (authUser) {
+      const key = `dita_teacher_${authUser.uid}_settings`;
+      syncToStorageKeys([key], settings);
+    } else if (isDemoMode) {
+      syncToStorageKeys(["dita_demo_settings"], settings);
+    }
+  }, [settings, authUser, isDemoMode]);
+
+  // Session Builder & Report Preview Modal state
+  const [isSessionBuilderOpen, setIsSessionBuilderOpen] = useState(false);
+  const [preselectedStudentIdForSession, setPreselectedStudentIdForSession] = useState<string | undefined>(undefined);
+  const [selectedReportForPreview, setSelectedReportForPreview] = useState<DailyReport | null>(null);
+  const [selectedStudentForMemory, setSelectedStudentForMemory] = useState<string | undefined>(undefined);
+
+  // Helper utilities for clean data deduplication
+  const cleanAndDeduplicateStudents = (studentsList: Student[]): Student[] => {
+    if (!Array.isArray(studentsList)) return [];
+    const map = new Map<string, Student>();
+    const normNameMap = new Map<string, Student>();
+
+    studentsList.forEach(s => {
+      if (!s || !s.id) return;
+      const normName = (s.fullName || "").trim().toLowerCase();
+
+      if (map.has(s.id)) {
+        map.set(s.id, { ...map.get(s.id)!, ...s });
+        return;
+      }
+
+      if (normName && normNameMap.has(normName)) {
+        const existing = normNameMap.get(normName)!;
+        const merged: Student = {
+          ...existing,
+          ...s,
+          id: existing.id,
+          parentName: s.parentName || existing.parentName,
+          parentContact: s.parentContact || existing.parentContact,
+          currentLevel: s.currentLevel || existing.currentLevel,
+          subjects: (s.subjects && s.subjects.length > 0) ? s.subjects : existing.subjects,
+        };
+        map.set(existing.id, merged);
+        normNameMap.set(normName, merged);
+        return;
+      }
+
+      map.set(s.id, s);
+      if (normName) {
+        normNameMap.set(normName, s);
+      }
+    });
+
+    return Array.from(map.values());
+  };
+
+  const cleanAndDeduplicateItems = <T extends { id: string }>(items: T[]): T[] => {
+    if (!Array.isArray(items)) return [];
+    const map = new Map<string, T>();
+    items.forEach(i => {
+      if (!i || typeof i !== "object") return;
+      if ((i as any).error) return; // Ignore error responses like { error: "Session not found" }
+      if (!i.id || typeof i.id !== "string" || i.id.trim().length === 0) return;
+      // Filter out invalid or corrupted report stubs
+      if ("reportType" in i) {
+        const r = i as any;
+        if (!r.title && !r.contentArabic && !r.contentEnglish) return;
+      }
+      map.set(i.id, i);
+    });
+    return Array.from(map.values());
+  };
+
+  // Initial Data Fetcher - Merges Firestore & local state cleanly
+  const refreshAllData = async () => {
     try {
       // 1. Fetch from Firestore
       const fsData = await loadInitialFirestoreData();
 
-      // 2. Fetch from Express API
-      const [stRes, seRes, drRes, mrRes, setRes] = await Promise.all([
-        safeFetch("/api/students"),
-        safeFetch("/api/sessions"),
-        safeFetch("/api/reports/daily"),
-        safeFetch("/api/reports/monthly"),
-        safeFetch("/api/settings")
-      ]);
+      // 2. ONLY fetch sample Express mock data if user is in Demo Mode
+      let apiStudents: Student[] | null = null;
+      let apiSessions: Session[] | null = null;
+      let apiDailyReports: DailyReport[] | null = null;
+      let apiMonthlyReports: MonthlyReport[] | null = null;
+      let apiSettings: AppSettings | null = null;
 
-      const mergeItems = <T extends { id: string }>(
-        currentLocal: T[],
-        fsItems: T[],
-        apiItems: T[] | null
-      ): T[] => {
-        const map = new Map<string, T>();
-        if (Array.isArray(apiItems)) {
-          apiItems.forEach(i => map.set(i.id, i));
-        }
-        fsItems.forEach(i => map.set(i.id, i));
-        currentLocal.forEach(i => map.set(i.id, i));
-        return Array.from(map.values());
-      };
+      if (!authUser && isDemoMode) {
+        const safeFetch = async (url: string) => {
+          try {
+            const res = await fetch(url);
+            if (!res.ok) return null;
+            return await res.json();
+          } catch {
+            return null;
+          }
+        };
+
+        const [stRes, seRes, drRes, mrRes, setRes] = await Promise.all([
+          safeFetch("/api/students"),
+          safeFetch("/api/sessions"),
+          safeFetch("/api/reports/daily"),
+          safeFetch("/api/reports/monthly"),
+          safeFetch("/api/settings")
+        ]);
+
+        apiStudents = stRes;
+        apiSessions = seRes;
+        apiDailyReports = drRes;
+        apiMonthlyReports = mrRes;
+        apiSettings = setRes;
+      }
+
+      // Filter Firestore items by teacherId if an authenticated user is active
+      const fsStudents = authUser
+        ? (fsData.students || []).filter(s => !s.teacherId || s.teacherId === authUser.uid)
+        : (fsData.students || []);
+      const fsSessions = authUser
+        ? (fsData.sessions || []).filter(s => s.teacherId === authUser.uid)
+        : (fsData.sessions || []);
+      const fsDailyReports = authUser
+        ? (fsData.dailyReports || []).filter(r => r.teacherId === authUser.uid)
+        : (fsData.dailyReports || []);
+      const fsMonthlyReports = authUser
+        ? (fsData.monthlyReports || []).filter(r => r.teacherId === authUser.uid)
+        : (fsData.monthlyReports || []);
 
       setStudents(prev => {
-        const merged = mergeItems(prev, fsData.students, stRes);
-        return merged.length > 0 ? merged : prev;
+        const rawMerged = [
+          ...prev,
+          ...fsStudents,
+          ...(isDemoMode && !authUser ? (apiStudents || []) : [])
+        ];
+        return cleanAndDeduplicateStudents(rawMerged);
       });
 
       setSessions(prev => {
-        const merged = mergeItems(prev, fsData.sessions, seRes);
-        return merged.length > 0 ? merged : prev;
+        const rawMerged = [
+          ...prev,
+          ...fsSessions,
+          ...(isDemoMode && !authUser ? (apiSessions || []) : [])
+        ];
+        return cleanAndDeduplicateItems(rawMerged);
       });
 
       setDailyReports(prev => {
-        const merged = mergeItems(prev, fsData.dailyReports, drRes);
-        return merged.length > 0 ? merged : prev;
+        const rawMerged = [
+          ...prev,
+          ...fsDailyReports,
+          ...(isDemoMode && !authUser ? (apiDailyReports || []) : [])
+        ];
+        return cleanAndDeduplicateItems(rawMerged);
       });
 
       setMonthlyReports(prev => {
-        const merged = mergeItems(prev, fsData.monthlyReports, mrRes);
-        return merged.length > 0 ? merged : prev;
+        const rawMerged = [
+          ...prev,
+          ...fsMonthlyReports,
+          ...(isDemoMode && !authUser ? (apiMonthlyReports || []) : [])
+        ];
+        return cleanAndDeduplicateItems(rawMerged);
       });
 
       const mergeSettings = (local: AppSettings, incoming?: AppSettings | null): AppSettings => {
@@ -261,8 +467,8 @@ export function App() {
         if (fsData.settings) {
           merged = mergeSettings(merged, fsData.settings);
         }
-        if (setRes && typeof setRes === "object" && !("error" in setRes) && setRes.preferredLanguage) {
-          merged = mergeSettings(merged, setRes);
+        if (apiSettings && typeof apiSettings === "object" && !("error" in apiSettings) && apiSettings.preferredLanguage) {
+          merged = mergeSettings(merged, apiSettings);
         }
         try {
           localStorage.setItem("dita_settings_store_v2", JSON.stringify(merged));
@@ -289,29 +495,63 @@ export function App() {
 
   // --- Student Actions ---
   const handleAddStudent = async (studentData: Omit<Student, "id" | "teacherId" | "createdAt">) => {
-    const tempId = `std_${Date.now()}`;
+    const normName = (studentData.fullName || "").trim().toLowerCase();
+    const existing = students.find(s => (s.fullName || "").trim().toLowerCase() === normName);
+
+    if (existing) {
+      // Update existing student instead of creating a duplicate record
+      const updatedSt: Student = {
+        ...existing,
+        ...studentData,
+        parentName: studentData.parentName || existing.parentName,
+        parentContact: studentData.parentContact || existing.parentContact,
+        currentLevel: studentData.currentLevel || existing.currentLevel,
+        subjects: (studentData.subjects && studentData.subjects.length > 0) ? studentData.subjects : existing.subjects
+      };
+      setStudents(prev => prev.map(s => s.id === existing.id ? updatedSt : s));
+      showNotification(
+        settings.preferredLanguage === "ar"
+          ? `تم تحديث ملف الطالب الموجود بالفعل: ${existing.fullName}`
+          : `Updated existing student profile: ${existing.fullName}`
+      );
+      await saveStudentToFirestore(updatedSt);
+      try {
+        await fetch(`/api/students/${existing.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updatedSt)
+        });
+      } catch (e) {}
+      return;
+    }
+
+    const studentId = (studentData as any).id || `std_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const currentTeacherId = authUser ? authUser.uid : "teacher_001";
+
     const newSt: Student = {
       ...studentData,
-      id: tempId,
-      teacherId: "teacher_001",
-      createdAt: new Date().toISOString()
+      id: studentId,
+      teacherId: currentTeacherId,
+      createdAt: new Date().toISOString(),
+      status: studentData.status || "Active"
     };
-    setStudents(prev => [newSt, ...prev]);
-    showNotification(settings.preferredLanguage === "ar" ? `تم إضافة الطالب: ${newSt.fullName}` : `Added new student: ${newSt.fullName}`);
 
-    saveStudentToFirestore(newSt);
+    setStudents(prev => cleanAndDeduplicateStudents([newSt, ...prev]));
+    showNotification(
+      settings.preferredLanguage === "ar"
+        ? `تم إضافة الطالب: ${newSt.fullName}`
+        : `Added new student: ${newSt.fullName}`
+    );
+
+    // Save directly to Firestore using canonical studentId
+    await saveStudentToFirestore(newSt);
 
     try {
-      const res = await fetch("/api/students", {
+      await fetch("/api/students", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(studentData)
+        body: JSON.stringify(newSt)
       });
-      if (res.ok) {
-        const created = await res.json();
-        setStudents(prev => prev.map(s => s.id === tempId ? created : s));
-        saveStudentToFirestore(created);
-      }
     } catch (err) {
       console.warn("Server sync skipped - student stored in local state & Firestore:", err);
     }
@@ -344,6 +584,7 @@ export function App() {
         : `Student "${student?.fullName || ""}" deleted`
     );
     try {
+      await deleteStudentFromFirestore(id);
       await fetch(`/api/students/${id}`, { method: "DELETE" });
     } catch (err) {
       console.warn("Delete student sync:", err);
@@ -384,33 +625,84 @@ export function App() {
   ) => {
     try {
       setIsSessionBuilderOpen(false);
-      showNotification(settings.preferredLanguage === "ar" ? "جاري تسجيل الحصة وتوليد التقرير بالذكاء الاصطناعي..." : "Recording session & generating AI report...", "info");
+      showNotification(
+        settings.preferredLanguage === "ar"
+          ? "جاري تسجيل الحصة وتوليد التقرير بالذكاء الاصطناعي..."
+          : "Recording session & generating AI report...",
+        "info"
+      );
 
-      // 1. Create Session
-      const sesRes = await fetch("/api/sessions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(sessionData)
-      });
-      const newSession = await sesRes.json();
-      setSessions(prev => [newSession, ...prev]);
-      saveSessionToFirestore(newSession);
+      const targetStudent = students.find(s => s.id === sessionData.studentId);
+      let newSession: Session;
 
-      // 2. Generate AI Daily Report
-      const repRes = await fetch("/api/reports/daily/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId: newSession.id, targetLanguage: settings.preferredLanguage })
-      });
-      const reportData: DailyReport = await repRes.json();
+      // 1. Create/Register Session
+      try {
+        const sesRes = await fetch("/api/sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(sessionData)
+        });
+        if (sesRes.ok) {
+          newSession = await sesRes.json();
+        } else {
+          throw new Error("API session creation failed");
+        }
+      } catch (err) {
+        newSession = {
+          ...sessionData,
+          id: `ses_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          teacherId: authUser ? authUser.uid : "teacher_001",
+          createdAt: new Date().toISOString()
+        };
+      }
 
-      setDailyReports(prev => [reportData, ...prev]);
-      saveDailyReportToFirestore(reportData);
-      setSelectedReportForPreview(reportData);
-      showNotification(settings.preferredLanguage === "ar" ? "تم توليد التقرير اليومي بالذكاء الاصطناعي بنجاح!" : "AI Daily Report generated successfully!");
+      setSessions(prev => cleanAndDeduplicateItems([newSession, ...prev]));
+      await saveSessionToFirestore(newSession);
+
+      // 2. Generate AI Daily Report with payload fallbacks
+      let reportData: DailyReport | null = null;
+      try {
+        const repRes = await fetch("/api/reports/daily/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionId: newSession.id,
+            session: newSession,
+            student: targetStudent,
+            targetLanguage: settings.preferredLanguage,
+            customAiRules: settings.aiRules
+          })
+        });
+        if (repRes.ok) {
+          const resJson = await repRes.json();
+          if (resJson && !resJson.error && resJson.id) {
+            reportData = resJson;
+          }
+        }
+      } catch (err) {
+        console.warn("AI report generation endpoint unreachable, generating local report:", err);
+      }
+
+      // If server response was invalid or failed, use client generator fallback
+      if (!reportData || (reportData as any).error) {
+        reportData = generateClientSideDailyReport(newSession, targetStudent, settings);
+      }
+
+      setDailyReports(prev => cleanAndDeduplicateItems([reportData!, ...prev]));
+      await saveDailyReportToFirestore(reportData!);
+      setSelectedReportForPreview(reportData!);
+      showNotification(
+        settings.preferredLanguage === "ar"
+          ? "تم توليد التقرير اليومي بالذكاء الاصطناعي بنجاح!"
+          : "AI Daily Report generated successfully!",
+        "success"
+      );
     } catch (err) {
       console.error(err);
-      showNotification(settings.preferredLanguage === "ar" ? "تعذر الاتصال بخادم الذكاء الاصطناعي" : "Failed to generate AI report", "error");
+      showNotification(
+        settings.preferredLanguage === "ar" ? "حدث خطأ أثناء إنشاء التقرير" : "Failed to generate report",
+        "error"
+      );
     }
   };
 
@@ -536,30 +828,92 @@ export function App() {
   };
 
   const handleDeleteReport = async (id: string) => {
-    if (!confirm(settings.preferredLanguage === "ar" ? "هل أنت تأكد من حذف هذا التقرير؟" : "Are you sure you want to delete this report?")) return;
     setDailyReports(prev => prev.filter(r => r.id !== id));
-    showNotification(settings.preferredLanguage === "ar" ? "تم حذف التقرير" : "Report removed");
+    showNotification(settings.preferredLanguage === "ar" ? "تم حذف التقرير بنجاح" : "Report removed successfully");
     try {
+      await deleteDailyReportFromFirestore(id);
       await fetch(`/api/reports/${id}`, { method: "DELETE" });
     } catch (err) {
       console.warn("Delete report sync:", err);
     }
   };
 
+  const handleDeleteMonthlyReport = async (id: string) => {
+    setMonthlyReports(prev => prev.filter(r => r.id !== id));
+    showNotification(settings.preferredLanguage === "ar" ? "تم حذف التقرير الشهري بنجاح" : "Monthly report removed successfully");
+    try {
+      await deleteMonthlyReportFromFirestore(id);
+      await fetch(`/api/reports/monthly/${id}`, { method: "DELETE" });
+    } catch (err) {
+      console.warn("Delete monthly report sync:", err);
+    }
+  };
+
   const handleGenerateMonthlyReport = async (studentId: string, month: string, year: number) => {
     try {
-      showNotification(settings.preferredLanguage === "ar" ? "جاري تجميع التقرير الشهري من السجلات المعمدة..." : "Synthesizing monthly report from approved daily records...", "info");
-      const res = await fetch("/api/reports/monthly/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ studentId, month, year, targetLanguage: settings.preferredLanguage })
-      });
-      const monthlyData = await res.json();
-      setMonthlyReports(prev => [monthlyData, ...prev]);
-      saveMonthlyReportToFirestore(monthlyData);
-      showNotification(settings.preferredLanguage === "ar" ? `تم إنشاء التقرير الشهري للطالب: ${monthlyData.studentName}` : `Monthly Report for ${monthlyData.studentName} created!`);
+      showNotification(
+        settings.preferredLanguage === "ar"
+          ? "جاري تجميع التقرير الشهري من السجلات المعتمدة..."
+          : "Synthesizing monthly report from approved daily records...",
+        "info"
+      );
+
+      const targetStudent = students.find(s => s.id === studentId);
+      if (!targetStudent) {
+        showNotification(
+          settings.preferredLanguage === "ar" ? "تعذر العثور على الطالب" : "Student not found",
+          "error"
+        );
+        return;
+      }
+
+      const approvedDailyReports = dailyReports.filter(
+        r => r && (r.studentId === studentId || (r.studentName || "").trim().toLowerCase() === (targetStudent.fullName || "").trim().toLowerCase()) && r.isApproved
+      );
+
+      let monthlyData: MonthlyReport | null = null;
+      try {
+        const res = await fetch("/api/reports/monthly/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            studentId,
+            student: targetStudent,
+            approvedReports: approvedDailyReports,
+            month,
+            year,
+            targetLanguage: settings.preferredLanguage,
+            customAiRules: settings.aiRules
+          })
+        });
+        if (res.ok) {
+          const resJson = await res.json();
+          if (resJson && !resJson.error && resJson.id) {
+            monthlyData = resJson;
+          }
+        }
+      } catch (err) {
+        console.warn("Server monthly report generation endpoint unreachable, using fallback:", err);
+      }
+
+      if (!monthlyData || (monthlyData as any).error) {
+        monthlyData = generateClientSideMonthlyReport(targetStudent, month, year, approvedDailyReports, settings);
+      }
+
+      setMonthlyReports(prev => cleanAndDeduplicateItems([monthlyData!, ...prev]));
+      await saveMonthlyReportToFirestore(monthlyData!);
+      showNotification(
+        settings.preferredLanguage === "ar"
+          ? `تم إنشاء التقرير الشهري للطالب: ${monthlyData.studentName}`
+          : `Monthly Report for ${monthlyData.studentName} created!`,
+        "success"
+      );
     } catch (err) {
-      showNotification(settings.preferredLanguage === "ar" ? "فشل إنشاء التقرير الشهري" : "Failed to generate monthly report", "error");
+      console.error(err);
+      showNotification(
+        settings.preferredLanguage === "ar" ? "فشل إنشاء التقرير الشهري" : "Failed to generate monthly report",
+        "error"
+      );
     }
   };
 
@@ -853,7 +1207,7 @@ export function App() {
     document.documentElement.lang = isArabic ? "ar" : "en";
   }, [isArabic]);
 
-  if (loading) {
+  if (loading || !authChecked) {
     return (
       <div dir={isArabic ? "rtl" : "ltr"} className="min-h-screen bg-[#f6f9f6] text-slate-800 flex flex-col items-center justify-center space-y-4">
         <Sparkles className="w-10 h-10 text-emerald-600 animate-spin" />
@@ -861,6 +1215,20 @@ export function App() {
           {isArabic ? "جاري تحميل مساعد المعلم الإسلامي اليومي (DITA)..." : "Loading Daily Islamic Teacher Assistant..."}
         </p>
       </div>
+    );
+  }
+
+  // ENTRY GATE: If no active teacher session and not in quick demo mode, render AuthLandingGate
+  if (!authUser && !isDemoMode) {
+    return (
+      <AuthLandingGate
+        onEnterDemo={handleEnterDemoMode}
+        onAuthSuccess={(user) => {
+          setAuthUser(user);
+          setIsDemoMode(false);
+          try { sessionStorage.removeItem("dita_is_demo_mode"); } catch (e) {}
+        }}
+      />
     );
   }
 
@@ -893,7 +1261,9 @@ export function App() {
         }}
         settings={settings}
         authUser={authUser}
+        isDemoMode={isDemoMode}
         onOpenAuthModal={() => setIsAuthModalOpen(true)}
+        onSwitchToAuthLanding={handleSwitchToAuthLanding}
         pendingReportsCount={Array.isArray(dailyReports) ? dailyReports.filter(r => !r.isApproved).length : 0}
         onLanguageToggle={lang => handleUpdateSettings({ ...settings, preferredLanguage: lang })}
         onStartNewSession={() => {
@@ -993,7 +1363,7 @@ export function App() {
                         <div>
                           <h3 className="font-bold text-slate-900">{student?.fullName || "Student"}</h3>
                           <p className="text-xs text-slate-500">
-                            {isArabic ? `الحصة رقم #${s.sessionNumber} • ${s.date} (${s.time}) • ${s.durationMinutes} دقيقة` : `Session #${s.sessionNumber} • ${s.date} (${s.time}) • ${s.durationMinutes} mins`}
+                            {isArabic ? `الحصة رقم #${s.sessionNumber} • ${s.date} • ${s.durationMinutes} دقيقة` : `Session #${s.sessionNumber} • ${s.date} • ${s.durationMinutes} mins`}
                           </p>
                           <div className="flex gap-1 mt-1.5">
                             {s.subjectRecords.map(sr => (
@@ -1033,6 +1403,7 @@ export function App() {
                 settings={settings}
                 onSelectReport={rep => setSelectedReportForPreview(rep)}
                 onDeleteReport={handleDeleteReport}
+                onDeleteMonthlyReport={handleDeleteMonthlyReport}
                 onGenerateMonthlyReport={handleGenerateMonthlyReport}
               />
             )}

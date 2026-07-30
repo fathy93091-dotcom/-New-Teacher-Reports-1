@@ -70,11 +70,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
               {isArabic ? "أهلاً بك، معلم القرآن الكريم والعلوم الإسلامية" : "Welcome back, Teacher!"}
             </h1>
-            <p className="text-emerald-100 text-sm mt-1 max-w-2xl font-medium leading-relaxed">
-              {isArabic
-                ? "إدارة الحصص والطلاب وتوليد التقارير التعليمية المعتمدة للوالدين بدقة عالية ودون عناء."
-                : "Manage students, record multi-subject lessons, and generate verified parent reports in seconds."}
-            </p>
           </div>
 
           <div className="flex flex-wrap gap-2 sm:gap-3">
@@ -245,7 +240,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 font-medium">
-                      <span>{session.date} ({session.time})</span>
+                      <span>{session.date}</span>
                       <span>•</span>
                       <span>{session.durationMinutes} {isArabic ? "دقيقة" : "mins"}</span>
                       <span>•</span>

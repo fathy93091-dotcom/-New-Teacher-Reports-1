@@ -110,11 +110,26 @@ app.get("/api/reports/:id", (req, res) => {
 
 app.post("/api/reports/daily/generate", async (req, res) => {
   try {
-    const { sessionId, targetLanguage, customAiRules } = req.body;
-    const session = db.getSessionById(sessionId);
+    const { sessionId, session: payloadSession, student: payloadStudent, targetLanguage, customAiRules } = req.body;
+    
+    let session = db.getSessionById(sessionId);
+    if (!session && payloadSession) {
+      try {
+        session = db.createSession(payloadSession);
+      } catch (e) {
+        session = payloadSession;
+      }
+    }
     if (!session) return res.status(404).json({ error: "Session not found" });
 
-    const student = db.getStudentById(session.studentId);
+    let student = db.getStudentById(session.studentId);
+    if (!student && payloadStudent) {
+      try {
+        student = db.createStudent(payloadStudent);
+      } catch (e) {
+        student = payloadStudent;
+      }
+    }
     if (!student) return res.status(404).json({ error: "Student not found" });
 
     const user = db.getUser();
@@ -176,8 +191,16 @@ app.get("/api/reports/monthly", (req, res) => {
 
 app.post("/api/reports/monthly/generate", async (req, res) => {
   try {
-    const { studentId, month, year, targetLanguage, customAiRules } = req.body;
-    const student = db.getStudentById(studentId);
+    const { studentId, student: payloadStudent, approvedReports: payloadApproved, month, year, targetLanguage, customAiRules } = req.body;
+    
+    let student = db.getStudentById(studentId);
+    if (!student && payloadStudent) {
+      try {
+        student = db.createStudent(payloadStudent);
+      } catch (e) {
+        student = payloadStudent;
+      }
+    }
     if (!student) return res.status(404).json({ error: "Student not found" });
 
     const user = db.getUser();
@@ -186,7 +209,11 @@ app.post("/api/reports/monthly/generate", async (req, res) => {
       db.updateSettings({ aiRules: customAiRules });
     }
 
-    const approvedReports = db.getReports(studentId).filter(r => r.isApproved);
+    let approvedReports = db.getReports(student.id).filter(r => r.isApproved);
+    if ((!approvedReports || approvedReports.length === 0) && Array.isArray(payloadApproved)) {
+      approvedReports = payloadApproved;
+    }
+
     const activeAiRules = Array.isArray(customAiRules) && customAiRules.length > 0
       ? customAiRules.filter((r: any) => r && r.isActive)
       : db.getAIRules().filter(r => r.isActive);

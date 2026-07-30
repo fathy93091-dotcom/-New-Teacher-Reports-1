@@ -95,11 +95,6 @@ export const StudentMemoryView: React.FC<StudentMemoryViewProps> = ({
             <Brain className="w-6 h-6 text-amber-300" />
             <span>{isArabic ? "نظام ذاكرة الطالب التعليمية" : "Student Memory System"}</span>
           </h1>
-          <p className="text-xs text-emerald-100 font-medium mt-1">
-            {isArabic
-              ? "استمرارية التعليم طويلة المدى، متابعة التقدم التاريخي، وتوثيق نقاط القوة والتكرارات"
-              : "Long-term educational continuity, chronological history, strengths & weakness tracking (SRS Chapter 7)"}
-          </p>
         </div>
 
         {/* Student Selector Switcher */}
