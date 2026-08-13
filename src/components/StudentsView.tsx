@@ -27,7 +27,9 @@ import {
   ChevronDown,
   ChevronUp,
   Paperclip,
-  FileUp
+  FileUp,
+  Calculator,
+  Layers
 } from "lucide-react";
 import {
   Student,
@@ -42,6 +44,7 @@ import {
   SubscriptionType,
   PaymentPlan
 } from "../types";
+import { calculateStudentFinancials } from "../lib/financeUtils";
 
 interface StudentsViewProps {
   settings: AppSettings;
@@ -437,8 +440,9 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
         ) : (
           filteredStudents.map(student => {
             const isStopped = student.status === "stopped";
-            const isUnpaid = student.paymentStatus === "unpaid";
-            const isLowBalance = student.paymentStatus === "paid" && student.remainingLessons <= 1;
+            const finSummary = calculateStudentFinancials(student, attendanceRecords);
+            const isUnpaid = !finSummary.isFullyPaid || finSummary.amountDue > 0;
+            const isLowBalance = student.subscriptionType === "lessons_count" && finSummary.remainingLessons === 1;
 
             return (
               <div
@@ -466,18 +470,16 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 
                     <span
                       className={`px-1.5 py-0.2 rounded text-[8px] sm:text-[9px] font-black shrink-0 ${
-                        isUnpaid
-                          ? "bg-rose-100 text-rose-800"
-                          : isLowBalance
+                        finSummary.statusBadge.color === "emerald"
+                          ? "bg-emerald-100 text-emerald-800"
+                          : finSummary.statusBadge.color === "amber"
                           ? "bg-amber-100 text-amber-800"
-                          : "bg-teal-100 text-teal-800"
+                          : finSummary.statusBadge.color === "blue"
+                          ? "bg-blue-100 text-blue-800"
+                          : "bg-rose-100 text-rose-800"
                       }`}
                     >
-                      {isUnpaid
-                        ? (isArabic ? "غير مدفوع" : "Unpaid")
-                        : isLowBalance
-                        ? (isArabic ? "منخفض" : "Low")
-                        : (isArabic ? "تم الدفع" : "Paid")}
+                      {isArabic ? finSummary.statusBadge.labelAr : finSummary.statusBadge.labelEn}
                     </span>
                   </div>
 
@@ -508,21 +510,31 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                     <div className="flex items-center justify-between text-[9.5px] sm:text-[11px]">
                       <span className="font-medium text-slate-400">{isArabic ? "سعر الحصة:" : "Cost:"}</span>
                       <span className="font-bold text-slate-800">
-                        {student.lessonCost || 0} {isArabic ? "ج.م" : "EGP"}
+                        {finSummary.lessonCost} {isArabic ? "ج.م" : "EGP"}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-[9.5px] sm:text-[11px]">
+                      <span className="font-medium text-slate-400">{isArabic ? "الحصص المنفذة:" : "Attended:"}</span>
+                      <span className="font-bold text-blue-700">
+                        {finSummary.totalAttendedLessons} {isArabic ? "حصة" : "lss"} ({finSummary.totalAccruedCost} ج.م)
                       </span>
                     </div>
                     {student.subscriptionType === "lessons_count" ? (
                       <div className="flex items-center justify-between text-[9.5px] sm:text-[11px]">
                         <span className="font-medium text-slate-400">{isArabic ? "المتبقي بالباقة:" : "Pack Rem:"}</span>
-                        <span className="font-black text-blue-700">
-                          {student.remainingLessons} {isArabic ? "حصة" : "lss"}
+                        <span className="font-black text-emerald-700">
+                          {finSummary.remainingLessons} {isArabic ? "حصة" : "lss"} ({finSummary.remainingBalance} ج.م)
                         </span>
                       </div>
                     ) : (
                       <div className="flex items-center justify-between text-[9.5px] sm:text-[11px]">
-                        <span className="font-medium text-slate-400">{isArabic ? "طريقة الحساب:" : "Billing:"}</span>
-                        <span className="font-bold text-slate-600">
-                          {isArabic ? "حسب الحضور الفعلي" : "By actual sessions"}
+                        <span className="font-medium text-slate-400">{isArabic ? "الصافي:" : "Net:"}</span>
+                        <span className={`font-black ${finSummary.amountDue > 0 ? "text-rose-600" : "text-emerald-700"}`}>
+                          {finSummary.amountDue > 0
+                            ? `مستحق ${finSummary.amountDue} ج.م`
+                            : finSummary.creditRemaining > 0
+                            ? `رصيد +${finSummary.creditRemaining} ج.م`
+                            : (isArabic ? "مسدد بالكامل" : "Settled")}
                         </span>
                       </div>
                     )}
@@ -951,80 +963,84 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
             {profileTab === "finance" && (
               <div className="space-y-4">
                 {/* Subscription & Payment Plan Summary Card */}
-                <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-50/80 via-slate-50 to-indigo-50/80 border border-blue-100 flex flex-wrap items-center justify-between gap-3 text-xs">
-                  <div className="space-y-1">
-                    <span className="text-[11px] font-bold text-slate-500 block">{isArabic ? "نظام الاشتراك والدفع الطالب:" : "Subscription & Payment Plan:"}</span>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="px-2.5 py-1 rounded-xl bg-blue-600 text-white font-bold text-xs shadow-2xs">
-                        {getSubscriptionLabel(selectedStudent.subscriptionType)}
-                      </span>
-                      <span className="px-2.5 py-1 rounded-xl bg-emerald-600 text-white font-bold text-xs shadow-2xs">
-                        {getPaymentPlanLabel(selectedStudent.paymentPlan)}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="text-slate-600 text-[11px] font-medium max-w-sm">
-                    {selectedStudent.subscriptionType === "monthly" ? (
-                      isArabic
-                        ? "💡 اشتراك شهري: يتم حصر وحساب عدد الحصص المستحقة نهاية الشهر بناءً على الحصص الحاضرة والمقطوعة بالفعل."
-                        : "💡 Monthly: Lessons calculated at month end based on attendance."
-                    ) : (
-                      isArabic
-                        ? `💡 اشتراك بعدد الحصص: باقة محددة بـ ${selectedStudent.totalPurchasedLessons || 8} حصص. متبقي ${selectedStudent.remainingLessons} حصة.`
-                        : `💡 Fixed Package: ${selectedStudent.totalPurchasedLessons || 8} lessons package. ${selectedStudent.remainingLessons} left.`
-                    )}
-                  </div>
-                </div>
-
-                <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-5 grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
-                  <div>
-                    <p className="text-[11px] font-bold text-slate-500">{isArabic ? "حالة الدفع" : "Status"}</p>
-                    <p className="text-sm font-black text-blue-600 mt-1">
-                      {selectedStudent.paymentStatus === "paid" ? (isArabic ? "تم الدفع" : "Paid") : (isArabic ? "لم يدفع" : "Unpaid")}
-                    </p>
-                  </div>
-
-                  <div>
-                    <p className="text-[11px] font-bold text-slate-500">{isArabic ? "سعر الحصة" : "Lesson Cost"}</p>
-                    <p className="text-sm font-black text-slate-800 mt-1">
-                      {selectedStudent.lessonCost} {isArabic ? "ج.م" : "EGP"}
-                    </p>
-                  </div>
-
-                  {selectedStudent.subscriptionType === "monthly" ? (
+                {(() => {
+                  const finSummary = calculateStudentFinancials(selectedStudent, attendanceRecords);
+                  return (
                     <>
-                      <div>
-                        <p className="text-[11px] font-bold text-slate-500">{isArabic ? "إجمالي المدفوع" : "Total Paid"}</p>
-                        <p className="text-sm font-black text-emerald-600 mt-1">
-                          {selectedStudent.totalPaidAmount || 0} {isArabic ? "ج.م" : "EGP"}
-                        </p>
+                      <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-50/80 via-slate-50 to-indigo-50/80 border border-blue-100 flex flex-wrap items-center justify-between gap-3 text-xs">
+                        <div className="space-y-1">
+                          <span className="text-[11px] font-bold text-slate-500 block">{isArabic ? "نظام الاشتراك والدفع للطالب:" : "Subscription & Payment Plan:"}</span>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="px-2.5 py-1 rounded-xl bg-blue-600 text-white font-bold text-xs shadow-2xs">
+                              {getSubscriptionLabel(selectedStudent.subscriptionType)}
+                            </span>
+                            <span className="px-2.5 py-1 rounded-xl bg-emerald-600 text-white font-bold text-xs shadow-2xs">
+                              {getPaymentPlanLabel(selectedStudent.paymentPlan)}
+                            </span>
+                            <span className={`px-2.5 py-1 rounded-xl font-bold text-xs shadow-2xs ${
+                              finSummary.statusBadge.color === "emerald"
+                                ? "bg-emerald-100 text-emerald-800"
+                                : finSummary.statusBadge.color === "amber"
+                                ? "bg-amber-100 text-amber-800"
+                                : finSummary.statusBadge.color === "blue"
+                                ? "bg-blue-100 text-blue-800"
+                                : "bg-rose-100 text-rose-800"
+                            }`}>
+                              {isArabic ? finSummary.statusBadge.labelAr : finSummary.statusBadge.labelEn}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="text-slate-700 text-[11px] font-semibold max-w-md bg-white/80 p-2.5 rounded-xl border border-blue-100">
+                          {isArabic ? finSummary.detailsExplanationAr : finSummary.detailsExplanationEn}
+                        </div>
                       </div>
 
-                      <div>
-                        <p className="text-[11px] font-bold text-slate-500">{isArabic ? "نظام الحصص" : "Plan Type"}</p>
-                        <p className="text-sm font-black text-indigo-600 mt-1">
-                          {isArabic ? "شهري مفتوح" : "Monthly Open"}
-                        </p>
+                      <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-5 grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
+                        <div className="bg-white p-3 rounded-xl border border-slate-100">
+                          <p className="text-[11px] font-bold text-slate-500">{isArabic ? "سعر الحصة" : "Lesson Cost"}</p>
+                          <p className="text-sm font-black text-slate-800 mt-1">
+                            {finSummary.lessonCost} {isArabic ? "ج.م" : "EGP"}
+                          </p>
+                        </div>
+
+                        <div className="bg-white p-3 rounded-xl border border-slate-100">
+                          <p className="text-[11px] font-bold text-slate-500">{isArabic ? "الحصص المنفذة" : "Attended"}</p>
+                          <p className="text-sm font-black text-blue-700 mt-1">
+                            {finSummary.totalAttendedLessons} {isArabic ? "حصة" : "lessons"}
+                          </p>
+                          <p className="text-[9.5px] text-slate-400 font-bold mt-0.5">
+                            ({finSummary.totalAccruedCost} ج.م)
+                          </p>
+                        </div>
+
+                        <div className="bg-white p-3 rounded-xl border border-slate-100">
+                          <p className="text-[11px] font-bold text-slate-500">{isArabic ? "إجمالي المدفوع" : "Total Paid"}</p>
+                          <p className="text-sm font-black text-emerald-600 mt-1">
+                            {finSummary.totalPaidAmount} {isArabic ? "ج.م" : "EGP"}
+                          </p>
+                        </div>
+
+                        <div className="bg-white p-3 rounded-xl border border-slate-100">
+                          <p className="text-[11px] font-bold text-slate-500">
+                            {selectedStudent.subscriptionType === "lessons_count"
+                              ? (isArabic ? "الحصص المتبقية" : "Lessons Left")
+                              : (finSummary.amountDue > 0 ? (isArabic ? "المستحق للسداد" : "Due Amount") : (isArabic ? "الرصيد المتبقي" : "Credit Left"))}
+                          </p>
+                          <p className={`text-sm font-black mt-1 ${finSummary.amountDue > 0 ? "text-rose-600" : "text-indigo-600"}`}>
+                            {selectedStudent.subscriptionType === "lessons_count"
+                              ? `${finSummary.remainingLessons} ${isArabic ? "حصة" : "lss"}`
+                              : (finSummary.amountDue > 0 ? `${finSummary.amountDue} ج.م` : `${finSummary.creditRemaining} ج.م`)}
+                          </p>
+                          {selectedStudent.subscriptionType === "lessons_count" && (
+                            <p className="text-[9.5px] text-slate-400 font-bold mt-0.5">
+                              ({finSummary.remainingBalance} ج.م)
+                            </p>
+                          )}
+                        </div>
                       </div>
                     </>
-                  ) : (
-                    <>
-                      <div>
-                        <p className="text-[11px] font-bold text-slate-500">{isArabic ? "الحصص المتبقية" : "Lessons Left"}</p>
-                        <p className="text-sm font-black text-emerald-600 mt-1">
-                          {selectedStudent.remainingLessons} {isArabic ? "حصص" : "lessons"}
-                        </p>
-                      </div>
-
-                      <div>
-                        <p className="text-[11px] font-bold text-slate-500">{isArabic ? "الرصيد المتبقي" : "Balance"}</p>
-                        <p className="text-sm font-black text-indigo-600 mt-1">
-                          {selectedStudent.remainingBalance} {isArabic ? "ج.م" : "EGP"}
-                        </p>
-                      </div>
-                    </>
-                  )}
-                </div>
+                  );
+                })()}
 
                 <div className="flex items-center justify-between">
                   <h3 className="font-bold text-slate-800 text-xs">

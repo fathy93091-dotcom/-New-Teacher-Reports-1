@@ -53,18 +53,24 @@ export function App() {
 
   // One-time automatic purge of demo mock data if present
   useEffect(() => {
-    if (students.some(s => s.id === "std_101" || s.id === "std_102" || s.id === "std_103")) {
-      StorageEngine.purgeAllData();
-      setStudents([]);
-      setGroups([]);
-      setPrivateLessons([]);
-      setLessons([]);
-      setAttendanceRecords([]);
-      setExamRecords([]);
-      setPaymentTransactions([]);
-      setReports([]);
+    const cleanedSettings = StorageEngine.cleanSettings(settings, currentUser?.displayName || "");
+    if (JSON.stringify(cleanedSettings) !== JSON.stringify(settings)) {
+      setSettings(cleanedSettings);
+      StorageEngine.saveSettings(cleanedSettings);
     }
-  }, [students]);
+
+    if (students.some(s => s.id.startsWith("std_10") || s.id.startsWith("demo_"))) {
+      StorageEngine.purgeAllData();
+      setStudents(prev => prev.filter(s => !s.id.startsWith("std_10") && !s.id.startsWith("demo_")));
+      setGroups(prev => prev.filter(g => !g.id.startsWith("grp_10") && !g.id.startsWith("demo_")));
+      setPrivateLessons(prev => prev.filter(p => !p.id.startsWith("prv_10") && !p.id.startsWith("demo_")));
+      setLessons(prev => prev.filter(l => !l.id.startsWith("les_10") && !l.id.startsWith("demo_")));
+      setAttendanceRecords(prev => prev.filter(a => !a.id.startsWith("att_10") && !a.id.startsWith("demo_")));
+      setExamRecords(prev => prev.filter(e => !e.id.startsWith("ex_10") && !e.id.startsWith("demo_")));
+      setPaymentTransactions(prev => prev.filter(p => !p.id.startsWith("pay_10") && !p.id.startsWith("demo_")));
+      setReports(prev => prev.filter(r => !r.id.startsWith("rep_10") && !r.id.startsWith("demo_")));
+    }
+  }, [students, currentUser]);
 
   // Flag to prevent triggering Firestore write loop during incoming remote state update
   const isSyncingFromRemoteRef = useRef(false);
@@ -82,27 +88,72 @@ export function App() {
   useEffect(() => {
     if (!currentUser) return;
 
+    // Sanitize local settings first
+    const cleanedLocalSettings = StorageEngine.cleanSettings(settings, currentUser.displayName || "");
+    if (JSON.stringify(cleanedLocalSettings) !== JSON.stringify(settings)) {
+      setSettings(cleanedLocalSettings);
+      StorageEngine.saveSettings(cleanedLocalSettings);
+    }
+
     const unsubscribe = subscribeToUserData(currentUser.uid, remoteData => {
       if (remoteData) {
         isSyncingFromRemoteRef.current = true;
-        if (remoteData.settings) setSettings(remoteData.settings);
-        if (Array.isArray(remoteData.students)) setStudents(remoteData.students);
-        if (Array.isArray(remoteData.groups)) setGroups(remoteData.groups);
-        if (Array.isArray(remoteData.privateLessons)) setPrivateLessons(remoteData.privateLessons);
-        if (Array.isArray(remoteData.lessons)) setLessons(remoteData.lessons);
-        if (Array.isArray(remoteData.attendanceRecords)) setAttendanceRecords(remoteData.attendanceRecords);
-        if (Array.isArray(remoteData.examRecords)) setExamRecords(remoteData.examRecords);
-        if (Array.isArray(remoteData.paymentTransactions)) setPaymentTransactions(remoteData.paymentTransactions);
-        if (Array.isArray(remoteData.reports)) setReports(remoteData.reports);
+        if (remoteData.settings) {
+          const cleanedRemote = StorageEngine.cleanSettings(remoteData.settings, currentUser.displayName || "");
+          setSettings(cleanedRemote);
+          StorageEngine.saveSettings(cleanedRemote);
+        }
+        if (Array.isArray(remoteData.students)) {
+          const valid = remoteData.students.filter(s => !s.id.startsWith("std_10") && !s.id.startsWith("demo_"));
+          setStudents(valid);
+          StorageEngine.saveStudents(valid);
+        }
+        if (Array.isArray(remoteData.groups)) {
+          const valid = remoteData.groups.filter(g => !g.id.startsWith("grp_10") && !g.id.startsWith("demo_"));
+          setGroups(valid);
+          StorageEngine.saveGroups(valid);
+        }
+        if (Array.isArray(remoteData.privateLessons)) {
+          const valid = remoteData.privateLessons.filter(p => !p.id.startsWith("prv_10") && !p.id.startsWith("demo_"));
+          setPrivateLessons(valid);
+          StorageEngine.savePrivateLessons(valid);
+        }
+        if (Array.isArray(remoteData.lessons)) {
+          const valid = remoteData.lessons.filter(l => !l.id.startsWith("les_10") && !l.id.startsWith("demo_"));
+          setLessons(valid);
+          StorageEngine.saveLessons(valid);
+        }
+        if (Array.isArray(remoteData.attendanceRecords)) {
+          const valid = remoteData.attendanceRecords.filter(a => !a.id.startsWith("att_10") && !a.id.startsWith("demo_"));
+          setAttendanceRecords(valid);
+          StorageEngine.saveAttendanceRecords(valid);
+        }
+        if (Array.isArray(remoteData.examRecords)) {
+          const valid = remoteData.examRecords.filter(e => !e.id.startsWith("ex_10") && !e.id.startsWith("demo_"));
+          setExamRecords(valid);
+          StorageEngine.saveExams(valid);
+        }
+        if (Array.isArray(remoteData.paymentTransactions)) {
+          const valid = remoteData.paymentTransactions.filter(p => !p.id.startsWith("pay_10") && !p.id.startsWith("demo_"));
+          setPaymentTransactions(valid);
+          StorageEngine.savePayments(valid);
+        }
+        if (Array.isArray(remoteData.reports)) {
+          const valid = remoteData.reports.filter(r => !r.id.startsWith("rep_10") && !r.id.startsWith("demo_"));
+          setReports(valid);
+          StorageEngine.saveReports(valid);
+        }
         setTimeout(() => {
           isSyncingFromRemoteRef.current = false;
         }, 500);
       } else {
-        // First login: upload current initial data to Firestore
+        // First login: upload current clean initial data to Firestore
+        const cleanInitial = StorageEngine.cleanSettings(settings, currentUser.displayName || "");
+        setSettings(cleanInitial);
         saveUserDataToFirestore(currentUser.uid, {
           version: "1.0",
           exportedAt: new Date().toISOString(),
-          settings,
+          settings: cleanInitial,
           students,
           groups,
           privateLessons,
@@ -450,6 +501,7 @@ export function App() {
             settings={settings}
             students={students}
             lessons={lessons}
+            attendanceRecords={attendanceRecords}
             onOpenLessonDetails={() => setActiveTab("groups")}
             onNavigateToTab={setActiveTab}
           />
@@ -504,6 +556,7 @@ export function App() {
           <FinanceView
             settings={settings}
             students={students}
+            attendanceRecords={attendanceRecords}
             paymentTransactions={paymentTransactions}
             onRecordPayment={handleRecordPayment}
           />

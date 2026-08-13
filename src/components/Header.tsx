@@ -64,10 +64,10 @@ export const Header: React.FC<HeaderProps> = ({
     { id: "finance" as NavTab, label: isArabic ? "المالية" : "Finance", icon: DollarSign }
   ];
 
-  // Calculate alerts: unpaid students + low balance (< 2 lessons)
+  // Calculate alerts: unpaid students + low balance for package subscriptions (<= 1 lesson left)
   const unpaidStudents = students.filter(s => s.paymentStatus === "unpaid" && s.status === "active");
   const lowBalanceStudents = students.filter(
-    s => s.paymentStatus === "paid" && s.remainingLessons <= 1 && s.status === "active"
+    s => s.paymentStatus === "paid" && s.subscriptionType === "lessons_count" && s.remainingLessons <= 1 && s.status === "active"
   );
   const alertCount = unpaidStudents.length + lowBalanceStudents.length;
 

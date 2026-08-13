@@ -11,13 +11,15 @@ import {
   UserCheck,
   ChevronRight
 } from "lucide-react";
-import { Student, Lesson, AppSettings } from "../types";
+import { Student, Lesson, AppSettings, AttendanceRecord } from "../types";
 import { sanitizeTeacherName } from "../lib/storage";
+import { calculateStudentFinancials } from "../lib/financeUtils";
 
 interface DashboardViewProps {
   settings: AppSettings;
   students: Student[];
   lessons: Lesson[];
+  attendanceRecords?: AttendanceRecord[];
   onOpenLessonDetails: (lesson: Lesson) => void;
   onNavigateToTab: (tab: "groups" | "students" | "schedule" | "finance") => void;
 }
@@ -26,6 +28,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   settings,
   students,
   lessons,
+  attendanceRecords = [],
   onOpenLessonDetails,
   onNavigateToTab
 }) => {
@@ -37,10 +40,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const activeStudents = students.filter(s => s.status === "active");
   const presentStudentsToday = students.filter(s => s.status === "active" && s.paymentStatus === "paid");
   
-  const unpaidStudents = students.filter(s => s.status === "active" && s.paymentStatus === "unpaid");
-  const lowBalanceStudents = students.filter(
-    s => s.status === "active" && s.paymentStatus === "paid" && s.remainingLessons <= 1
+  // Calculate real-time financials for each active student
+  const studentFinancialSummaries = activeStudents.map(student => ({
+    student,
+    summary: calculateStudentFinancials(student, attendanceRecords)
+  }));
+
+  const unpaidStudents = studentFinancialSummaries.filter(
+    item => item.summary.amountDue > 0
   );
+
+  const lowBalanceStudents = studentFinancialSummaries.filter(
+    item => item.student.subscriptionType === "lessons_count" && item.summary.remainingLessons <= 1 && item.summary.amountDue === 0
+  );
+
   const paymentAlertsCount = unpaidStudents.length + lowBalanceStudents.length;
 
   return (
@@ -263,7 +276,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </div>
               ) : (
                 <>
-                  {unpaidStudents.map(student => (
+                  {unpaidStudents.map(({ student, summary }) => (
                     <div
                       key={student.id}
                       onClick={() => onNavigateToTab("finance")}
@@ -272,14 +285,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       <div>
                         <p className="font-bold text-rose-900 text-xs">{student.fullName}</p>
                         <p className="text-[10px] text-rose-700 font-semibold mt-0.5">
-                          {isArabic ? "طالب لم يدفع الرسوم" : "Payment Overdue"}
+                          {isArabic
+                            ? `مستحق سداد: ${summary.amountDue} ج.م (${summary.totalAttendedLessons} حصص منفذة)`
+                            : `Due: ${summary.amountDue} EGP (${summary.totalAttendedLessons} attended)`}
                         </p>
                       </div>
                       <ChevronRight className="w-3.5 h-3.5 text-rose-500" />
                     </div>
                   ))}
 
-                  {lowBalanceStudents.map(student => (
+                  {lowBalanceStudents.map(({ student, summary }) => (
                     <div
                       key={student.id}
                       onClick={() => onNavigateToTab("finance")}
@@ -289,8 +304,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         <p className="font-bold text-amber-900 text-xs">{student.fullName}</p>
                         <p className="text-[10px] text-amber-800 font-semibold mt-0.5">
                           {isArabic
-                            ? `رصيد متبقٍ: ${student.remainingLessons} حصة فقط`
-                            : `Low Balance (${student.remainingLessons} left)`}
+                            ? `رصيد متبقٍ: ${summary.remainingLessons} حصة فقط (${summary.remainingBalance} ج.م)`
+                            : `Low Balance (${summary.remainingLessons} left)`}
                         </p>
                       </div>
                       <ChevronRight className="w-3.5 h-3.5 text-amber-500" />

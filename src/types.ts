@@ -39,6 +39,7 @@ export interface Student {
   paymentStatus: PaymentStatus;
   totalPaidAmount: number; // e.g. 800
   totalPurchasedLessons: number; // e.g. 8
+  totalAttendedLessons?: number; // Total lessons passed and attended by student
   lessonCost: number; // calculated = totalPaidAmount / totalPurchasedLessons
   remainingLessons: number; // e.g. 5
   remainingBalance: number; // calculated = remainingLessons * lessonCost

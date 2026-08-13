@@ -52,10 +52,43 @@ function setItem<T>(key: string, value: T): void {
   }
 }
 
+const DEMO_TEACHER_NAMES = [
+  "أستاذ أحمد",
+  "استاذ احمد",
+  "أحمد محمود",
+  "احمد محمود",
+  "أستاذ أحمد محمود",
+  "استاذ احمد محمود",
+  "الأستاذ أحمد",
+  "الاستاذ احمد",
+  "أحمد",
+  "احمد",
+  "مستر أحمد",
+  "مستر احمد",
+  "أ / أحمد",
+  "أ/ أحمد",
+  "أ/احمد",
+  "Mr. Ahmed",
+  "Ahmed Mahmoud",
+  "Teacher Ahmed"
+];
+
+export function isDemoTeacherName(rawName?: string): boolean {
+  if (!rawName) return false;
+  const trimmed = rawName.trim().toLowerCase();
+  if (!trimmed) return false;
+
+  return DEMO_TEACHER_NAMES.some(demo => {
+    const demoClean = demo.toLowerCase();
+    return trimmed === demoClean || trimmed === `أ. ${demoClean}` || trimmed === `د. ${demoClean}`;
+  });
+}
+
 export function sanitizeTeacherName(rawName?: string): string {
   if (!rawName) return "";
+  if (isDemoTeacherName(rawName)) return "";
+
   const trimmed = rawName.trim();
-  if (trimmed === "أستاذ أحمد" || trimmed === "أحمد محمود" || trimmed === "أستاذ أحمد محمود") return "";
   const cleaned = trimmed
     .replace(/القائد\s*/g, "")
     .replace(/^د\.\s*/g, "")
@@ -63,42 +96,41 @@ export function sanitizeTeacherName(rawName?: string): string {
     .replace(/^دكتور\s*/g, "")
     .replace(/^د\s+/g, "")
     .trim();
-  return (cleaned === "أستاذ أحمد" || cleaned === "أحمد محمود" || cleaned === "أستاذ أحمد محمود") ? "" : cleaned;
+
+  return isDemoTeacherName(cleaned) ? "" : cleaned;
+}
+
+export function cleanSettings(s: AppSettings, defaultFallbackName?: string): AppSettings {
+  const copy: AppSettings = { ...s };
+  
+  if (isDemoTeacherName(copy.teacherName)) {
+    copy.teacherName = defaultFallbackName && !isDemoTeacherName(defaultFallbackName) ? defaultFallbackName : "";
+  } else if (copy.teacherName) {
+    copy.teacherName = sanitizeTeacherName(copy.teacherName);
+  }
+
+  if (copy.defaultSubject === "الرياضيات والفيزياء" || copy.defaultSubject === "الرياضيات والفيزياء (تجريبي)") {
+    copy.defaultSubject = "";
+  }
+
+  if (!copy.subjectDefaults) {
+    copy.subjectDefaults = [];
+  }
+
+  return copy;
 }
 
 export const StorageEngine = {
+  cleanSettings,
+
   // Settings
   getSettings(): AppSettings {
     const s = getItem<AppSettings>(STORAGE_KEYS.SETTINGS, initialSettings);
-    let updated = false;
-
-    if (s) {
-      if (s.teacherName === "أستاذ أحمد" || s.teacherName === "أحمد محمود" || s.teacherName === "أستاذ أحمد محمود") {
-        s.teacherName = "";
-        updated = true;
-      } else if (s.teacherName) {
-        const sanitized = sanitizeTeacherName(s.teacherName);
-        if (sanitized !== s.teacherName) {
-          s.teacherName = sanitized;
-          updated = true;
-        }
-      }
-
-      if (s.defaultSubject === "الرياضيات والفيزياء") {
-        s.defaultSubject = "";
-        updated = true;
-      }
-
-      if (!s.subjectDefaults) {
-        s.subjectDefaults = [];
-        updated = true;
-      }
+    const cleaned = cleanSettings(s);
+    if (JSON.stringify(cleaned) !== JSON.stringify(s)) {
+      setItem(STORAGE_KEYS.SETTINGS, cleaned);
     }
-
-    if (updated) {
-      setItem(STORAGE_KEYS.SETTINGS, s);
-    }
-    return s;
+    return cleaned;
   },
   saveSettings(settings: AppSettings): void {
     setItem(STORAGE_KEYS.SETTINGS, settings);

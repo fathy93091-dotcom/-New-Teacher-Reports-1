@@ -11,14 +11,12 @@ import {
   getFirestore,
   doc,
   setDoc,
-  getDoc,
-  onSnapshot,
-  disableNetwork
+  onSnapshot
 } from "firebase/firestore";
 import firebaseConfig from "../../firebase-applet-config.json";
 import { GoStarsBackupData } from "../types";
 
-// Initialize Firebase
+// Initialize Firebase App
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApps()[0];
 
 export const auth = getAuth(app);
@@ -28,7 +26,7 @@ googleProvider.setCustomParameters({ prompt: "select_account" });
 // Custom database ID from firebase-applet-config.json if specified
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId || "(default)");
 
-// Google Sign-In Only
+// Google Sign-In
 export async function signInWithGoogle(): Promise<User> {
   try {
     const result = await signInWithPopup(auth, googleProvider);
@@ -48,36 +46,23 @@ export async function logoutFirebase(): Promise<void> {
   }
 }
 
-// Firestore User Data Sync
+// Sanitize object for Firestore (recursively strip undefined and non-serializable fields)
+function cleanPayloadForFirestore<T>(data: T): any {
+  if (data === null || data === undefined) return null;
+  return JSON.parse(
+    JSON.stringify(data, (_, value) => (value === undefined ? null : value))
+  );
+}
+
+// Firestore User Data Sync Engine
 let saveTimeout: ReturnType<typeof setTimeout> | null = null;
 let lastSavedHash: string = "";
-let isQuotaExhausted = typeof window !== "undefined" && (
-  sessionStorage.getItem("firestore_quota_exhausted") === "true" ||
-  localStorage.getItem("firestore_quota_exhausted") === "true"
-);
-
-if (isQuotaExhausted) {
-  disableNetwork(db).catch(() => {});
-}
-
-function markQuotaExhausted() {
-  if (!isQuotaExhausted) {
-    isQuotaExhausted = true;
-    if (typeof window !== "undefined") {
-      try {
-        sessionStorage.setItem("firestore_quota_exhausted", "true");
-        localStorage.setItem("firestore_quota_exhausted", "true");
-      } catch (_) {}
-    }
-    disableNetwork(db).catch(() => {});
-  }
-}
 
 export function subscribeToUserData(
   userId: string,
   onData: (data: GoStarsBackupData | null) => void
 ) {
-  if (isQuotaExhausted || !userId) return () => {};
+  if (!userId) return () => {};
 
   try {
     const userDocRef = doc(db, "users", userId);
@@ -91,18 +76,12 @@ export function subscribeToUserData(
         }
       },
       error => {
-        if (error?.code === "resource-exhausted" || error?.message?.includes("Quota")) {
-          markQuotaExhausted();
-          console.warn("Firestore subscription quota limit reached. LocalStorage remains active.");
-        } else {
-          console.error("Error subscribing to user data from Firestore:", error);
-        }
+        // Silently handle transient connection/permission errors while user authenticates
+        console.warn("Firestore subscription note:", error?.message || error);
       }
     );
   } catch (err: any) {
-    if (err?.code === "resource-exhausted" || err?.message?.includes("Quota")) {
-      markQuotaExhausted();
-    }
+    console.warn("Firestore listener initialization note:", err?.message || err);
     return () => {};
   }
 }
@@ -111,7 +90,7 @@ export async function saveUserDataToFirestore(
   userId: string,
   data: GoStarsBackupData
 ): Promise<void> {
-  if (!userId || isQuotaExhausted) return;
+  if (!userId) return;
 
   const currentHash = JSON.stringify(data);
   if (currentHash === lastSavedHash) {
@@ -123,25 +102,25 @@ export async function saveUserDataToFirestore(
   }
 
   saveTimeout = setTimeout(async () => {
-    if (isQuotaExhausted) return;
     try {
       lastSavedHash = currentHash;
       const userDocRef = doc(db, "users", userId);
-      await setDoc(userDocRef, {
-        ...data,
-        updatedAt: new Date().toISOString()
-      }, { merge: true });
+      const cleanData = cleanPayloadForFirestore(data);
+      
+      await setDoc(
+        userDocRef,
+        {
+          ...cleanData,
+          updatedAt: new Date().toISOString()
+        },
+        { merge: true }
+      );
     } catch (error: any) {
-      if (error?.code === "resource-exhausted" || error?.message?.includes("Quota")) {
-        markQuotaExhausted();
-        if (saveTimeout) clearTimeout(saveTimeout);
-        console.warn("Firestore daily write quota reached. LocalStorage persistence remains active.");
-      } else {
-        console.error("Error saving data to Firestore:", error);
-      }
+      console.warn("Firestore sync note:", error?.message || error);
     }
-  }, 2000);
+  }, 1500);
 }
 
 export { onAuthStateChanged };
 export type { User };
+

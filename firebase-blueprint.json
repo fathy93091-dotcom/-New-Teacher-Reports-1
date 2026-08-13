@@ -136,9 +136,33 @@
         "notificationPreferences": { "type": "object" }
       },
       "required": ["preferredLanguage", "reportStyle"]
+    },
+    "UserWorkspace": {
+      "title": "UserWorkspace",
+      "description": "Full cloud backup and synchronization workspace for the authenticated teacher",
+      "type": "object",
+      "properties": {
+        "version": { "type": "string", "maxLength": 20 },
+        "exportedAt": { "type": "string", "maxLength": 50 },
+        "updatedAt": { "type": "string", "maxLength": 50 },
+        "settings": { "type": "object" },
+        "students": { "type": "array" },
+        "groups": { "type": "array" },
+        "privateLessons": { "type": "array" },
+        "lessons": { "type": "array" },
+        "attendanceRecords": { "type": "array" },
+        "examRecords": { "type": "array" },
+        "paymentTransactions": { "type": "array" },
+        "reports": { "type": "array" }
+      },
+      "required": ["version"]
     }
   },
   "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserWorkspace" },
+      "description": "Authenticated teacher workspace and synced database"
+    },
     "/students/{studentId}": {
       "schema": { "$ref": "#/entities/Student" },
       "description": "Student records collection"
