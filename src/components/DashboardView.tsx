@@ -1,324 +1,313 @@
 import React from "react";
 import {
-  Users,
-  Calendar,
-  FileText,
-  Clock,
-  Plus,
   Sparkles,
-  CheckCircle,
-  AlertCircle,
-  Code,
-  ArrowRight,
   BookOpen,
-  Brain,
-  Search,
-  CheckSquare
+  Users,
+  CheckCircle2,
+  AlertTriangle,
+  Clock,
+  ArrowRight,
+  Play,
+  UserCheck,
+  ChevronRight
 } from "lucide-react";
-import { Student, Session, DailyReport, AppSettings } from "../types";
-import { ActiveTab } from "./Header";
+import { Student, Lesson, AppSettings } from "../types";
+import { sanitizeTeacherName } from "../lib/storage";
 
 interface DashboardViewProps {
-  students: Student[];
-  sessions: Session[];
-  reports: DailyReport[];
   settings: AppSettings;
-  setActiveTab: (tab: ActiveTab) => void;
-  onStartSession: (studentId?: string) => void;
-  onAddStudent: () => void;
-  onGenerateReportForSession: (session: Session) => void;
-  onSelectReport: (report: DailyReport) => void;
+  students: Student[];
+  lessons: Lesson[];
+  onOpenLessonDetails: (lesson: Lesson) => void;
+  onNavigateToTab: (tab: "groups" | "students" | "schedule" | "finance") => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
-  students = [],
-  sessions = [],
-  reports = [],
   settings,
-  setActiveTab,
-  onStartSession,
-  onAddStudent,
-  onGenerateReportForSession,
-  onSelectReport
+  students,
+  lessons,
+  onOpenLessonDetails,
+  onNavigateToTab
 }) => {
-  const isArabic = settings?.preferredLanguage === "ar";
-
-  const safeStudents = Array.isArray(students) ? students : [];
-  const safeSessions = Array.isArray(sessions) ? sessions : [];
-  const safeReports = Array.isArray(reports) ? reports : [];
-
-  const activeStudents = safeStudents.filter(s => s.status === "Active");
-  const pendingReports = safeReports.filter(r => !r.isApproved);
+  const isArabic = settings.preferredLanguage === "ar";
   const todayStr = new Date().toISOString().split("T")[0];
-  const todaySessions = safeSessions.filter(s => s.date === todayStr || s.date === "2026-07-27" || s.date === "2026-07-26");
 
-  // Homework pending check
-  const totalHomeworkAssigned = safeSessions.flatMap(s => (s.subjectRecords || []).flatMap(sr => sr.homework || []));
-  const pendingHomework = totalHomeworkAssigned.filter(h => h.status !== "Completed");
+  // Calculations
+  const todayLessons = lessons.filter(l => l.date === todayStr || true); // show today's lessons + active
+  const activeStudents = students.filter(s => s.status === "active");
+  const presentStudentsToday = students.filter(s => s.status === "active" && s.paymentStatus === "paid");
+  
+  const unpaidStudents = students.filter(s => s.status === "active" && s.paymentStatus === "unpaid");
+  const lowBalanceStudents = students.filter(
+    s => s.status === "active" && s.paymentStatus === "paid" && s.remainingLessons <= 1
+  );
+  const paymentAlertsCount = unpaidStudents.length + lowBalanceStudents.length;
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-4 pb-12">
       {/* Welcome Banner */}
-      <div className="bg-gradient-to-r from-emerald-800 via-teal-800 to-emerald-900 rounded-2xl p-6 text-white shadow-lg border border-emerald-700/50 relative overflow-hidden">
-        <div className="absolute top-0 right-0 transform translate-x-8 -translate-y-8 w-64 h-64 bg-amber-400/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 border border-slate-800 rounded-2xl p-4 sm:p-5 text-white relative overflow-hidden shadow-xl">
+        <div className="absolute right-0 top-0 translate-x-12 -translate-y-12 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
           <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-400/20 text-amber-300 text-xs font-bold border border-amber-400/30 mb-2">
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>{isArabic ? "محرك الذكاء الاصطناعي جاهز" : "AI Assistant Ready"}</span>
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className="px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-400/30 text-[11px] font-bold flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-blue-400 animate-spin" />
+                {isArabic ? "متابعة دروسك اليومية" : "Daily Overview"}
+              </span>
             </div>
-            <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
-              {isArabic ? "أهلاً بك، معلم القرآن الكريم والعلوم الإسلامية" : "Welcome back, Teacher!"}
+            <h1 className="text-xl sm:text-2xl font-black text-slate-100 tracking-tight">
+              {(() => {
+                const clean = sanitizeTeacherName(settings.teacherName);
+                if (!clean) return isArabic ? "أهلاً بك 👋" : "Welcome 👋";
+                return isArabic ? `أهلاً بك، ${clean}` : `Welcome, ${clean}`;
+              })()}
             </h1>
+
           </div>
 
-          <div className="flex flex-wrap gap-2 sm:gap-3">
+          <div className="flex gap-2">
             <button
-              onClick={() => onStartSession()}
-              className="px-4.5 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold text-sm shadow-md flex items-center gap-2 transition"
+              onClick={() => onNavigateToTab("schedule")}
+              className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shadow-md shadow-blue-600/30 transition flex items-center gap-1.5"
             >
-              <Plus className="w-4.5 h-4.5 text-slate-950" />
-              <span>{isArabic ? "بدء حصة جديدة" : "Start Lesson"}</span>
-            </button>
-            <button
-              onClick={onAddStudent}
-              className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/20 text-sm font-bold flex items-center gap-2 transition"
-            >
-              <Users className="w-4 h-4 text-emerald-200" />
-              <span>{isArabic ? "إضافة طالب" : "Add Student"}</span>
+              <span>{isArabic ? "عرض الجدول الأسبوعي" : "Weekly Schedule"}</span>
+              <ChevronRight className="w-4 h-4 dir-rtl:rotate-180" />
             </button>
           </div>
         </div>
       </div>
 
-      {/* KPI Cards Grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Stat 1: Active Students */}
-        <div
-          onClick={() => setActiveTab("students")}
-          className="bg-white hover:bg-emerald-50/40 p-5 rounded-2xl border border-emerald-100 shadow-xs cursor-pointer transition transform hover:-translate-y-0.5 group"
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-slate-500 text-xs font-bold uppercase tracking-wider">
-              {isArabic ? "إجمالي الطلاب" : "Active Students"}
-            </span>
-            <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center border border-emerald-200 group-hover:scale-110 transition">
-              <Users className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="text-3xl font-black text-emerald-950 mt-3">{activeStudents.length}</div>
-          <p className="text-slate-500 text-xs mt-1 flex items-center gap-1 font-medium">
-            <span>{students.length - activeStudents.length}</span> {isArabic ? "في الأرشيف" : "archived"}
-          </p>
-        </div>
-
-        {/* Stat 2: Today's Sessions */}
-        <div
-          onClick={() => setActiveTab("sessions")}
-          className="bg-white hover:bg-teal-50/40 p-5 rounded-2xl border border-teal-100 shadow-xs cursor-pointer transition transform hover:-translate-y-0.5 group"
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-slate-500 text-xs font-bold uppercase tracking-wider">
+      {/* Metric Stat Cards Grid - Mobile Compact */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
+        {/* Today's Lessons */}
+        <div className="bg-white border border-slate-200/80 rounded-xl p-2.5 sm:p-4 shadow-2xs hover:shadow-xs transition">
+          <div className="flex items-center justify-between mb-1 sm:mb-2">
+            <span className="text-[10px] sm:text-xs font-bold text-slate-500 truncate">
               {isArabic ? "حصص اليوم" : "Today's Lessons"}
             </span>
-            <div className="w-10 h-10 rounded-xl bg-teal-100 text-teal-700 flex items-center justify-center border border-teal-200 group-hover:scale-110 transition">
-              <Calendar className="w-5 h-5" />
+            <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center font-bold shrink-0">
+              <BookOpen className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
             </div>
           </div>
-          <div className="text-3xl font-black text-slate-900 mt-3">{todaySessions.length}</div>
-          <p className="text-slate-500 text-xs mt-1 flex items-center gap-1 font-medium">
-            <Clock className="w-3.5 h-3.5 text-teal-600" />
-            <span>{isArabic ? "مسجلة لهذا اليوم" : "scheduled / recorded"}</span>
+          <div className="text-xl sm:text-2xl font-black text-slate-900">{todayLessons.length}</div>
+          <p className="text-[9.5px] sm:text-[11px] text-slate-400 mt-0.5 font-medium truncate">
+            {isArabic ? "حصص قادمة ومكتملة" : "Upcoming & completed"}
           </p>
         </div>
 
-        {/* Stat 3: Pending Reports */}
-        <div
-          onClick={() => setActiveTab("reports")}
-          className="bg-white hover:bg-amber-50/40 p-5 rounded-2xl border border-amber-200 shadow-xs cursor-pointer transition transform hover:-translate-y-0.5 group"
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-slate-500 text-xs font-bold uppercase tracking-wider">
-              {isArabic ? "تقارير بانتظار الاعتماد" : "Pending Reports"}
+        {/* Active Students */}
+        <div className="bg-white border border-slate-200/80 rounded-xl p-2.5 sm:p-4 shadow-2xs hover:shadow-xs transition">
+          <div className="flex items-center justify-between mb-1 sm:mb-2">
+            <span className="text-[10px] sm:text-xs font-bold text-slate-500 truncate">
+              {isArabic ? "الطلاب النشطون" : "Active Students"}
             </span>
-            <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center border border-amber-300 group-hover:scale-110 transition">
-              <FileText className="w-5 h-5" />
+            <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-lg bg-teal-50 text-teal-600 flex items-center justify-center font-bold shrink-0">
+              <Users className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
             </div>
           </div>
-          <div className="text-3xl font-black text-amber-900 mt-3">{pendingReports.length}</div>
-          <p className="text-slate-600 text-xs mt-1 flex items-center gap-1 font-medium">
-            <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
-            <span>{isArabic ? "تتطلب مراجعة واعتماد المعلم" : "Requires teacher review"}</span>
+          <div className="text-xl sm:text-2xl font-black text-slate-900">{activeStudents.length}</div>
+          <p className="text-[9.5px] sm:text-[11px] text-teal-600 font-semibold mt-0.5 truncate">
+            {isArabic ? "طالب مقيد للنظام" : "Registered pupils"}
           </p>
         </div>
 
-        {/* Stat 4: Pending Homework */}
-        <div
-          onClick={() => setActiveTab("memory")}
-          className="bg-white hover:bg-emerald-50/40 p-5 rounded-2xl border border-emerald-100 shadow-xs cursor-pointer transition transform hover:-translate-y-0.5 group"
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-slate-500 text-xs font-bold uppercase tracking-wider">
-              {isArabic ? "متابعة الواجبات" : "Pending Homework"}
+        {/* Students Present Today */}
+        <div className="bg-white border border-slate-200/80 rounded-xl p-2.5 sm:p-4 shadow-2xs hover:shadow-xs transition">
+          <div className="flex items-center justify-between mb-1 sm:mb-2">
+            <span className="text-[10px] sm:text-xs font-bold text-slate-500 truncate">
+              {isArabic ? "الحاضرون اليوم" : "Present Today"}
             </span>
-            <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center border border-emerald-200 group-hover:scale-110 transition">
-              <CheckSquare className="w-5 h-5" />
+            <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold shrink-0">
+              <UserCheck className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
             </div>
           </div>
-          <div className="text-3xl font-black text-emerald-950 mt-3">{pendingHomework.length}</div>
-          <p className="text-slate-500 text-xs mt-1 font-medium">
-            {isArabic ? "واجبات لم تكتمل بعد" : "items pending review"}
+          <div className="text-xl sm:text-2xl font-black text-slate-900">{presentStudentsToday.length}</div>
+          <p className="text-[9.5px] sm:text-[11px] text-emerald-600 font-semibold mt-0.5 truncate">
+            {isArabic ? "تم تسجيل حضورهم" : "Attendance recorded"}
+          </p>
+        </div>
+
+        {/* Payment Alerts */}
+        <div
+          onClick={() => onNavigateToTab("finance")}
+          className="bg-white border border-amber-200 rounded-xl p-2.5 sm:p-4 shadow-2xs hover:shadow-xs transition cursor-pointer group"
+        >
+          <div className="flex items-center justify-between mb-1 sm:mb-2">
+            <span className="text-[10px] sm:text-xs font-bold text-amber-700 truncate">
+              {isArabic ? "تنبيهات الدفع" : "Payment Alerts"}
+            </span>
+            <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center font-bold group-hover:scale-105 transition shrink-0">
+              <AlertTriangle className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+            </div>
+          </div>
+          <div className="text-xl sm:text-2xl font-black text-amber-600">{paymentAlertsCount}</div>
+          <p className="text-[9.5px] sm:text-[11px] text-amber-700 font-semibold mt-0.5 flex items-center gap-0.5 truncate">
+            <span className="truncate">{isArabic ? "لم يدفعوا أو رصيد منخفض" : "Overdue/low"}</span>
+            <ArrowRight className="w-2.5 h-2.5 shrink-0" />
           </p>
         </div>
       </div>
 
-      {/* Quick Action Shortcuts Bar */}
-      <div className="p-4 bg-white rounded-2xl border border-emerald-100 shadow-xs flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2 text-sm font-bold text-slate-800">
-          <Sparkles className="w-4 h-4 text-emerald-600" />
-          <span>{isArabic ? "اختصارات سريعة للنظام:" : "Quick Tools:"}</span>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => setActiveTab("apiDocs")}
-            className="px-3 py-1.5 rounded-xl bg-emerald-50/80 hover:bg-emerald-100/80 text-emerald-900 text-xs font-bold border border-emerald-200/80 flex items-center gap-1.5 transition"
-          >
-            <Code className="w-3.5 h-3.5 text-emerald-700" />
-            <span>{isArabic ? "استعراض واجهات API" : "Interactive API Explorer"}</span>
-          </button>
-          <button
-            onClick={() => setActiveTab("unitTests")}
-            className="px-3 py-1.5 rounded-xl bg-emerald-50/80 hover:bg-emerald-100/80 text-emerald-900 text-xs font-bold border border-emerald-200/80 flex items-center gap-1.5 transition"
-          >
-            <CheckCircle className="w-3.5 h-3.5 text-emerald-700" />
-            <span>{isArabic ? "تشغيل اختبارات النظام" : "Run Unit Tests"}</span>
-          </button>
-          <button
-            onClick={() => setActiveTab("memory")}
-            className="px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100/80 text-amber-900 text-xs font-bold border border-amber-200 flex items-center gap-1.5 transition"
-          >
-            <Brain className="w-3.5 h-3.5 text-amber-700" />
-            <span>{isArabic ? "ذاكرة الطلاب" : "Student Memory System"}</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Main Content Grid: Recent Sessions & Approved Reports */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column (2 cols): Today's & Recent Sessions */}
-        <div className="lg:col-span-2 space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-              <Calendar className="w-5 h-5 text-emerald-600" />
-              <span>{isArabic ? "حصص اليوم والحصص الأخيرة" : "Recent & Today's Teaching Sessions"}</span>
-            </h2>
+      {/* Main Grid: Today's Missions vs Important Alerts */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Today's Lessons List (2 cols) */}
+        <div className="lg:col-span-2 bg-white border border-slate-200/80 rounded-2xl p-4 sm:p-5 shadow-2xs">
+          <div className="flex items-center justify-between mb-3 pb-2.5 border-b border-slate-100">
+            <div className="flex items-center gap-2">
+              <Clock className="w-4 h-4 text-blue-600" />
+              <h2 className="text-base font-bold text-slate-900">
+                {isArabic ? "حصص اليوم ومواعيد الدراسة" : "Today's Missions"}
+              </h2>
+            </div>
             <button
-              onClick={() => setActiveTab("sessions")}
-              className="text-xs text-emerald-700 hover:text-emerald-800 font-bold flex items-center gap-1"
+              onClick={() => onNavigateToTab("groups")}
+              className="text-xs font-bold text-blue-600 hover:text-blue-700 transition"
             >
-              <span>{isArabic ? "عرض الكل" : "View All"}</span>
-              <ArrowRight className="w-3.5 h-3.5" />
+              {isArabic ? "إدارة المجموعات والخاصة" : "Manage Classes"}
             </button>
           </div>
 
-          <div className="space-y-3">
-            {sessions.slice(0, 4).map(session => {
-              const student = students.find(s => s.id === session.studentId);
-              return (
-                <div
-                  key={session.id}
-                  className="bg-white border border-emerald-100/80 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:border-emerald-300 shadow-xs transition"
-                >
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-base text-slate-900">
-                        {student ? student.fullName : "Unknown Student"}
-                      </span>
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold">
-                        {isArabic ? `الحصة #${session.sessionNumber}` : `Session #${session.sessionNumber}`}
-                      </span>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 font-medium">
-                      <span>{session.date}</span>
-                      <span>•</span>
-                      <span>{session.durationMinutes} {isArabic ? "دقيقة" : "mins"}</span>
-                      <span>•</span>
-                      <span className="text-teal-700 font-bold">
-                        {session.subjectRecords.map(s => s.subject).join(", ")}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Action buttons */}
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => onGenerateReportForSession(session)}
-                      className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 transition shadow-xs"
-                    >
-                      <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                      <span>
-                        {session.reportStatus === "approved"
-                          ? (isArabic ? "عرض التقرير" : "View Report")
-                          : (isArabic ? "توليد التقرير بالذكاء الاصطناعي" : "Generate Report")}
-                      </span>
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Right Column (1 col): Recent Reports */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-              <FileText className="w-5 h-5 text-teal-600" />
-              <span>{isArabic ? "التقارير الأخيرة" : "Recent Reports"}</span>
-            </h2>
-            <button
-              onClick={() => setActiveTab("reports")}
-              className="text-xs text-emerald-700 hover:text-emerald-800 font-bold flex items-center gap-1"
-            >
-              <span>{isArabic ? "الكل" : "All"}</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          <div className="space-y-3">
-            {reports.slice(0, 3).map(rep => (
-              <div
-                key={rep.id}
-                onClick={() => onSelectReport(rep)}
-                className="bg-white border border-emerald-100 rounded-2xl p-4 hover:border-emerald-400 cursor-pointer transition space-y-2 shadow-xs"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-sm text-slate-900 truncate">{rep.studentName}</span>
-                  {rep.isApproved ? (
-                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] font-bold">
-                      <CheckCircle className="w-3 h-3 text-emerald-600" />
-                      {isArabic ? "معتمد" : "Approved"}
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 text-[10px] font-bold">
-                      <Clock className="w-3 h-3 text-amber-600" />
-                      {isArabic ? "مسودة" : "Draft"}
-                    </span>
-                  )}
-                </div>
-
-                <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed font-normal">
-                  {rep.overallPerformanceSummary}
+          <div className="space-y-2.5">
+            {todayLessons.length === 0 ? (
+              <div className="text-center py-8 text-slate-400">
+                <BookOpen className="w-8 h-8 mx-auto mb-1.5 opacity-40 text-slate-400" />
+                <p className="text-xs font-medium">
+                  {isArabic ? "لا توجد حصص مسجلة لليوم." : "No lessons scheduled for today."}
                 </p>
-
-                <div className="text-[10px] text-slate-500 font-medium flex justify-between pt-2 border-t border-slate-100">
-                  <span>{rep.date}</span>
-                  <span>Session #{rep.sessionNumber}</span>
-                </div>
               </div>
-            ))}
+            ) : (
+              todayLessons.map(lesson => {
+                const isGroup = lesson.studyType === "group";
+                return (
+                  <div
+                    key={lesson.id}
+                    className="p-3 rounded-xl bg-slate-50/80 border border-slate-200/80 hover:border-blue-300 transition flex flex-col sm:flex-row sm:items-center justify-between gap-2.5"
+                  >
+                    <div className="flex items-start gap-2.5">
+                      <div
+                        className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs shrink-0 ${
+                          isGroup ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"
+                        }`}
+                      >
+                        {isGroup ? "👥" : "👤"}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <h3 className="font-bold text-slate-900 text-xs sm:text-sm">
+                            {isGroup ? lesson.groupName : lesson.studentName}
+                          </h3>
+                          <span
+                            className={`px-1.5 py-0.2 rounded text-[9px] font-bold ${
+                              isGroup ? "bg-blue-50 text-blue-600" : "bg-purple-50 text-purple-600"
+                            }`}
+                          >
+                            {isGroup ? (isArabic ? "مجموعة" : "Group") : (isArabic ? "خاص" : "Private")}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+                          {lesson.subject} • {lesson.time} ({lesson.durationMinutes} {isArabic ? "دقيقة" : "mins"})
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between sm:justify-end gap-2 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-200/60">
+                      <span
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                          lesson.status === "completed"
+                            ? "bg-emerald-100 text-emerald-800"
+                            : lesson.status === "starting_soon"
+                            ? "bg-amber-100 text-amber-800 animate-pulse"
+                            : "bg-sky-100 text-sky-800"
+                        }`}
+                      >
+                        {lesson.status === "completed"
+                          ? (isArabic ? "تمت" : "Completed")
+                          : lesson.status === "starting_soon"
+                          ? (isArabic ? "حان وقتها" : "Starting Soon")
+                          : (isArabic ? "قادمة" : "Upcoming")}
+                      </span>
+
+                      <button
+                        onClick={() => onOpenLessonDetails(lesson)}
+                        className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition shadow-2xs flex items-center gap-1"
+                      >
+                        <Play className="w-3 h-3 fill-current" />
+                        <span>{isArabic ? "تسجيل الحضور" : "Attendance"}</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
+        </div>
+
+        {/* Important Alerts Card (1 col) */}
+        <div className="bg-white border border-slate-200/80 rounded-2xl p-4 sm:p-5 shadow-2xs flex flex-col justify-between">
+          <div>
+            <div className="flex items-center gap-2 mb-3 pb-2.5 border-b border-slate-100">
+              <AlertTriangle className="w-4 h-4 text-amber-500" />
+              <h2 className="text-base font-bold text-slate-900">
+                {isArabic ? "التنبيهات المهمة" : "Important Alerts"}
+              </h2>
+            </div>
+
+            <div className="space-y-2">
+              {unpaidStudents.length === 0 && lowBalanceStudents.length === 0 ? (
+                <div className="text-center py-6 text-slate-400">
+                  <CheckCircle2 className="w-7 h-7 mx-auto mb-1 text-emerald-500 opacity-60" />
+                  <p className="text-xs font-semibold">
+                    {isArabic ? "جميع الطلاب سددوا مستحقاتهم ورصيدهم متوفر!" : "No payment issues found!"}
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {unpaidStudents.map(student => (
+                    <div
+                      key={student.id}
+                      onClick={() => onNavigateToTab("finance")}
+                      className="p-2.5 rounded-xl bg-rose-50 border border-rose-200/80 hover:bg-rose-100/60 transition cursor-pointer flex items-center justify-between"
+                    >
+                      <div>
+                        <p className="font-bold text-rose-900 text-xs">{student.fullName}</p>
+                        <p className="text-[10px] text-rose-700 font-semibold mt-0.5">
+                          {isArabic ? "طالب لم يدفع الرسوم" : "Payment Overdue"}
+                        </p>
+                      </div>
+                      <ChevronRight className="w-3.5 h-3.5 text-rose-500" />
+                    </div>
+                  ))}
+
+                  {lowBalanceStudents.map(student => (
+                    <div
+                      key={student.id}
+                      onClick={() => onNavigateToTab("finance")}
+                      className="p-2.5 rounded-xl bg-amber-50 border border-amber-200/80 hover:bg-amber-100/60 transition cursor-pointer flex items-center justify-between"
+                    >
+                      <div>
+                        <p className="font-bold text-amber-900 text-xs">{student.fullName}</p>
+                        <p className="text-[10px] text-amber-800 font-semibold mt-0.5">
+                          {isArabic
+                            ? `رصيد متبقٍ: ${student.remainingLessons} حصة فقط`
+                            : `Low Balance (${student.remainingLessons} left)`}
+                        </p>
+                      </div>
+                      <ChevronRight className="w-3.5 h-3.5 text-amber-500" />
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          </div>
+
+          <button
+            onClick={() => onNavigateToTab("finance")}
+            className="w-full mt-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs transition shadow-2xs flex items-center justify-center gap-1.5"
+          >
+            <span>{isArabic ? "الانتقال إلى الإدارة المالية" : "Open Finance Section"}</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
     </div>

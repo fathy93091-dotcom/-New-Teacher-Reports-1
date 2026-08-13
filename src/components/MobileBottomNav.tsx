@@ -1,112 +1,70 @@
 import React from "react";
-import {
-  BookOpen,
-  Users,
-  PlusCircle,
-  FileText,
-  Brain,
-  Settings,
-} from "lucide-react";
-import { ActiveTab } from "./Header";
-import { AppSettings } from "../types";
+import { Home, Users, GraduationCap, Calendar, DollarSign } from "lucide-react";
+
+export type NavTab = "home" | "groups" | "students" | "schedule" | "finance";
 
 interface MobileBottomNavProps {
-  activeTab: ActiveTab;
-  setActiveTab: (tab: ActiveTab) => void;
-  settings?: AppSettings;
-  pendingReportsCount?: number;
-  onStartNewSession: () => void;
+  activeTab: NavTab;
+  onTabChange: (tab: NavTab) => void;
+  isArabic: boolean;
 }
 
 export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   activeTab,
-  setActiveTab,
-  settings,
-  pendingReportsCount = 0,
-  onStartNewSession,
+  onTabChange,
+  isArabic
 }) => {
-  const isArabic = settings?.preferredLanguage === "ar";
+  const tabs = [
+    {
+      id: "home" as NavTab,
+      label: isArabic ? "الرئيسية" : "Home",
+      icon: Home
+    },
+    {
+      id: "groups" as NavTab,
+      label: isArabic ? "المجموعات" : "Groups",
+      icon: Users
+    },
+    {
+      id: "students" as NavTab,
+      label: isArabic ? "الطلاب" : "Students",
+      icon: GraduationCap
+    },
+    {
+      id: "schedule" as NavTab,
+      label: isArabic ? "الجدول" : "Schedule",
+      icon: Calendar
+    },
+    {
+      id: "finance" as NavTab,
+      label: isArabic ? "المالية" : "Finance",
+      icon: DollarSign
+    }
+  ];
 
   return (
-    <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-lg border-t border-emerald-100 px-2 py-1.5 shadow-lg">
-      <div className="flex items-center justify-around max-w-md mx-auto">
-        {/* Dashboard */}
-        <button
-          onClick={() => setActiveTab("dashboard")}
-          className={`flex flex-col items-center justify-center py-1 px-2.5 rounded-xl transition ${
-            activeTab === "dashboard"
-              ? "text-emerald-800 bg-emerald-50 font-bold"
-              : "text-slate-500 hover:text-slate-800"
-          }`}
-        >
-          <BookOpen className="w-5 h-5 mb-0.5" />
-          <span className="text-[10px]">{isArabic ? "الرئيسية" : "Home"}</span>
-        </button>
-
-        {/* Students */}
-        <button
-          onClick={() => setActiveTab("students")}
-          className={`flex flex-col items-center justify-center py-1 px-2.5 rounded-xl transition ${
-            activeTab === "students"
-              ? "text-emerald-800 bg-emerald-50 font-bold"
-              : "text-slate-500 hover:text-slate-800"
-          }`}
-        >
-          <Users className="w-5 h-5 mb-0.5" />
-          <span className="text-[10px]">{isArabic ? "الطلاب" : "Students"}</span>
-        </button>
-
-        {/* Floating Quick CTA for New Session */}
-        <button
-          onClick={onStartNewSession}
-          className="flex flex-col items-center justify-center -mt-5 bg-gradient-to-tr from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white p-3 rounded-full shadow-lg border-2 border-white transition transform active:scale-90"
-        >
-          <PlusCircle className="w-6 h-6" />
-        </button>
-
-        {/* Reports */}
-        <button
-          onClick={() => setActiveTab("reports")}
-          className={`relative flex flex-col items-center justify-center py-1 px-2.5 rounded-xl transition ${
-            activeTab === "reports"
-              ? "text-emerald-800 bg-emerald-50 font-bold"
-              : "text-slate-500 hover:text-slate-800"
-          }`}
-        >
-          <FileText className="w-5 h-5 mb-0.5" />
-          <span className="text-[10px]">{isArabic ? "التقارير" : "Reports"}</span>
-          {pendingReportsCount > 0 && (
-            <span className="absolute top-0 right-1 w-4 h-4 bg-amber-500 text-slate-950 font-black text-[9px] rounded-full flex items-center justify-center animate-pulse">
-              {pendingReportsCount}
-            </span>
-          )}
-        </button>
-
-        {/* Memory or Settings */}
-        <button
-          onClick={() => setActiveTab("memory")}
-          className={`flex flex-col items-center justify-center py-1 px-2.5 rounded-xl transition ${
-            activeTab === "memory"
-              ? "text-emerald-800 bg-emerald-50 font-bold"
-              : "text-slate-500 hover:text-slate-800"
-          }`}
-        >
-          <Brain className="w-5 h-5 mb-0.5" />
-          <span className="text-[10px]">{isArabic ? "الذاكرة" : "Memory"}</span>
-        </button>
-
-        {/* Settings */}
-        <button
-          onClick={() => setActiveTab("settings")}
-          className={`flex flex-col items-center justify-center py-1 px-2.5 rounded-xl transition ${
-            activeTab === "settings"
-              ? "text-emerald-800 bg-emerald-50 font-bold"
-              : "text-slate-500 hover:text-slate-800"
-          }`}
-        >
-          <Settings className="w-5 h-5 mb-0.5" />
-          <span className="text-[10px]">{isArabic ? "الإعدادات" : "Settings"}</span>
-        </button>
+    <nav className="fixed bottom-0 left-0 right-0 z-40 bg-slate-900/95 backdrop-blur-lg border-t border-slate-800 text-slate-300 px-1 sm:px-2 py-1.5 shadow-2xl">
+      <div className="max-w-xl mx-auto flex items-center justify-between sm:justify-around gap-1">
+        {tabs.map(tab => {
+          const Icon = tab.icon;
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => onTabChange(tab.id)}
+              className={`flex-1 flex flex-col items-center justify-center px-1 sm:px-3 py-1.5 rounded-xl transition-all ${
+                isActive
+                  ? "bg-blue-600 text-white shadow-lg shadow-blue-600/30 font-bold"
+                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
+              }`}
+            >
+              <Icon className={`w-4 h-4 sm:w-5 sm:h-5 ${isActive ? "text-white animate-pulse" : ""}`} />
+              <span className="text-[10px] sm:text-[11px] font-semibold mt-0.5 truncate max-w-[60px] sm:max-w-none text-center">
+                {tab.label}
+              </span>
+            </button>
+          );
+        })}
       </div>
     </nav>
   );

@@ -1,33 +1,18 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Default deny catch-all
+    // Users collection rules: user can read/write their own document and subcollections
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    match /users/{userId}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Default allow for authenticated users
     match /{document=**} {
-      allow read, write: if false;
-    }
-
-    match /students/{studentId} {
-      allow read, write: if true;
-    }
-
-    match /sessions/{sessionId} {
-      allow read, write: if true;
-    }
-
-    match /dailyReports/{reportId} {
-      allow read, write: if true;
-    }
-
-    match /monthlyReports/{monthlyReportId} {
-      allow read, write: if true;
-    }
-
-    match /studentMemories/{studentMemoryId} {
-      allow read, write: if true;
-    }
-
-    match /settings/{settingsId} {
-      allow read, write: if true;
+      allow read, write: if request.auth != null;
     }
   }
 }
+

@@ -1,268 +1,178 @@
 /**
- * Daily Islamic Teacher Assistant (DITA)
- * Type Definitions according to SRS v1.0
+ * GoStars - Teacher Management System
+ * Core Domain Type Definitions
  */
 
-export type SubjectName = 
-  | "Holy Qur'an"
-  | "Tajweed"
-  | "Arabic Language"
-  | "Islamic Studies"
+export type StudyType = "group" | "private";
 
-export type Gender = "Male" | "Female";
+export type StudentStatus = "active" | "stopped";
 
-export type StudentStatus = "Active" | "Archived";
+export type AttendanceStatus = "present" | "absent" | "late";
 
-export interface ParentInfo {
-  name: string;
-  contact: string;
-  email?: string;
-  preferredLanguage?: "English" | "Arabic";
-}
+export type HomeworkStatus = "done" | "not_done" | "late";
+
+export type PaymentStatus = "paid" | "unpaid";
+
+export type LessonStatus = "upcoming" | "starting_soon" | "completed";
+
+export type SubscriptionType = "monthly" | "lessons_count";
+
+export type PaymentPlan = "beginning_of_month" | "end_of_month" | "mixed";
 
 export interface Student {
   id: string;
-  teacherId: string;
   fullName: string;
-  preferredName?: string;
-  gender: Gender;
-  dateOfBirth?: string;
-  age: number;
-  nationality: string;
-  country: string;
-  timeZone: string;
-  parentName: string;
-  parentContact: string;
-  currentLevel: string;
-  subjects: SubjectName[];
+  studentNumber?: string;
+  parentContact: string; // WhatsApp number e.g. "+201000000000"
+  whatsappGroupLink?: string; // WhatsApp group link e.g. "https://chat.whatsapp.com/..."
+  studyType: StudyType;
+  groupId?: string;
+  groupName?: string;
+  subject: string;
   status: StudentStatus;
+  
+  // Subscription & Payment System
+  subscriptionType?: SubscriptionType; // "monthly" (بالشهر) | "lessons_count" (بعدد الحصص)
+  paymentPlan?: PaymentPlan; // "beginning_of_month" (أول الشهر) | "end_of_month" (آخر الشهر) | "mixed" (مختلط)
+
+  // Payment & Lesson Balance
+  paymentStatus: PaymentStatus;
+  totalPaidAmount: number; // e.g. 800
+  totalPurchasedLessons: number; // e.g. 8
+  lessonCost: number; // calculated = totalPaidAmount / totalPurchasedLessons
+  remainingLessons: number; // e.g. 5
+  remainingBalance: number; // calculated = remainingLessons * lessonCost
+  
   notes?: string;
   createdAt: string;
-  lastActiveDate?: string;
 }
 
-export type HomeworkStatus = "Completed" | "Partially Completed" | "Not Completed";
-
-export interface HomeworkItem {
+export interface Group {
   id: string;
-  subject: SubjectName;
-  task: string;
-  category: "Memorization" | "Reading" | "Writing" | "Listening" | "Speaking" | "Revision" | "Research" | "Practice Exercises";
-  status: HomeworkStatus;
-  dueDate?: string;
-  teacherComment?: string;
+  name: string; // e.g., "مجموعة الفيزياء أ"
+  subject: string;
+  days: string[]; // e.g., ["الأحد", "الأربعاء"] or ["Sun", "Wed"]
+  time: string; // e.g., "16:00"
+  durationMinutes: number; // e.g., 90
+  studentIds: string[];
+  status: "active" | "paused";
+  whatsappGroupLink?: string; // WhatsApp group link
+  createdAt: string;
 }
 
-export interface StudentPerformance {
-  participation: number; // 1-5
-  focus: number; // 1-5
-  understanding: number; // 1-5
-  memorization?: number; // 1-5
-  pronunciation?: number; // 1-5
-  reading?: number; // 1-5
-  writing?: number; // 1-5
-  speaking?: number; // 1-5
-  confidence: number; // 1-5
-  behavior: number; // 1-5
-  writtenObservations?: string;
-}
-
-export interface Attachment {
+export interface PrivateLesson {
   id: string;
-  fileName: string;
-  fileType: "PDF" | "DOC" | "DOCX" | "PPT" | "PPTX" | "TXT" | "PNG" | "JPG" | "MP3" | "WAV" | "MP4";
-  fileSize: string;
-  fileUrl: string;
-  uploadedAt: string;
-}
-
-export interface SubjectSessionRecord {
-  subject: SubjectName;
-  teacherNotes: string;
-  homework: HomeworkItem[];
-  performance: StudentPerformance;
-  mistakes: string[];
-  achievements: string[];
-  attachments: Attachment[];
-  customAiInstructions?: string;
-}
-
-export interface Session {
-  id: string;
-  sessionNumber: number;
   studentId: string;
-  teacherId: string;
-  date: string;
+  studentName: string;
+  subject: string;
+  days: string[];
   time: string;
   durationMinutes: number;
-  subjectRecords: SubjectSessionRecord[];
-  status: "completed" | "in_progress" | "cancelled";
-  reportStatus: "none" | "draft" | "pending_approval" | "approved";
-  reportId?: string;
+  status: "active" | "paused";
+  whatsappGroupLink?: string; // WhatsApp group link
   createdAt: string;
 }
 
-export interface DailyReportSection {
-  subject: SubjectName;
-  summary: string;
-  lessonsStudied: string[];
-  surahsRecited?: string[];
-  grammarOrTopics?: string[];
-  vocabularyOrRules?: string[];
-  performanceNotes: string;
-  homework: string[];
-}
-
-export interface MemoryUpdateSuggestion {
+export interface AttendanceRecord {
   id: string;
-  type: "strength" | "areaForImprovement" | "recurringMistake" | "teacherNote";
-  subject?: SubjectName;
-  text: string;
-  status: "pending" | "approved" | "edited" | "rejected";
-}
-
-export interface DailyReport {
-  id: string;
-  sessionId: string;
+  lessonId: string;
   studentId: string;
-  studentName: string;
-  teacherId: string;
-  teacherName: string;
-  reportType: "daily";
-  title: string;
+  studentName?: string;
+  attendance: AttendanceStatus;
+  homeworkStatus: HomeworkStatus;
+  teacherNotes?: string;
+  aiInstructions?: string;
+  generatedReportText?: string;
+  deducted: boolean; // whether 1 lesson was deducted upon "present"
   date: string;
-  sessionNumber: number;
+}
+
+export interface Lesson {
+  id: string;
+  studyType: StudyType;
+  groupId?: string;
+  groupName?: string;
+  studentId?: string;
+  studentName?: string;
+  subject: string;
+  date: string; // YYYY-MM-DD
+  time: string; // HH:mm
   durationMinutes: number;
-  subjectsCovered: DailyReportSection[];
-  overallPerformanceSummary: string;
-  homeworkSummary: HomeworkItem[];
-  teacherRemarks: string;
-  closingMessage: string;
-  contentEnglish: string;
-  contentArabic?: string;
-  suggestedMemoryUpdates?: MemoryUpdateSuggestion[];
-  isApproved: boolean;
-  isDraft: boolean;
+  status: LessonStatus;
+  whatsappGroupLink?: string; // WhatsApp group link
+  teacherNotes?: string; // ماذا حدث في الحصة؟
+  aiInstructions?: string; // تعليمات للذكاء الاصطناعي
+  generatedReport?: string;
   createdAt: string;
-  lastModified: string;
 }
 
-export interface MonthlyReport {
+export interface ExamRecord {
+  id: string;
+  studentId: string;
+  studentName?: string;
+  examName: string;
+  score: number;
+  totalScore: number;
+  date: string;
+}
+
+export interface PaymentTransaction {
   id: string;
   studentId: string;
   studentName: string;
-  teacherId: string;
-  month: string;
-  year: number;
-  reportType: "monthly";
-  title: string;
-  overallProgress: string;
-  totalSessionsCompleted: number;
-  attendanceDays: number;
-  homeworkCompletionRate: number; // Percentage
-  learningDevelopment: string;
-  strengths: string[];
-  areasForImprovement: string[];
-  teacherRecommendations: string;
-  closingMessage: string;
-  contentEnglish: string;
-  contentArabic?: string;
-  isApproved: boolean;
-  createdAt: string;
-}
-
-export interface EducationalMemoryRecord {
-  id: string;
+  amount: number;
+  lessonsCovered: number;
+  lessonCost: number;
   date: string;
-  sessionId: string;
-  sessionNumber: number;
-  summary: string;
-  subjects: SubjectName[];
-  keyAchievements: string[];
-  areasToFocus: string[];
+  notes?: string;
 }
 
-export interface StudentMemory {
+export interface ReportAttachment {
+  fileName?: string;
+  mimeType: string;
+  data: string; // Base64 string without data:mime;base64, prefix
+  previewUrl?: string;
+}
+
+export interface GeneratedReport {
   id: string;
+  lessonId?: string;
   studentId: string;
-  educationalHistory: EducationalMemoryRecord[];
-  homeworkHistory: HomeworkItem[];
-  strengths: string[];
-  areasForImprovement: string[];
-  recurringMistakes: string[];
-  teacherNotes: string[];
-  progressSummary: string;
-  lastUpdated: string;
-}
-
-export interface AIRule {
-  id: string;
-  category: "general" | "subject" | "tone" | "language";
-  name: string;
-  instruction: string;
-  subject?: SubjectName;
-  isActive: boolean;
-}
-
-export interface ReportTemplate {
-  id: string;
-  name: string;
-  description: string;
-  category: "daily" | "monthly" | "memorization" | "tajweed_focus" | "custom";
-  structure: {
-    headerFormat: string;
-    sectionsOrder: string[];
-    placeholders: string[];
-    promptInstructions: string;
-  };
-  isDefault: boolean;
+  studentName: string;
+  date: string;
+  subject: string;
+  teacherNotes: string;
+  aiInstructions: string;
+  reportText?: string;
+  generatedText?: string;
   createdAt: string;
+}
+
+export interface SubjectAiInstruction {
+  subject: string;
+  instruction: string;
 }
 
 export interface AppSettings {
-  teacherName?: string;
-  preferredLanguage: "en" | "ar";
-  reportStyle: "detailed" | "bulleted" | "concise";
-  defaultClosingMessage: string;
-  writingTone: "encouraging" | "formal" | "academic";
-  aiRules: AIRule[];
-  selectedTemplateId?: string;
-  templates?: ReportTemplate[];
-  notificationPreferences: {
-    upcomingSessions: boolean;
-    pendingReports: boolean;
-    incompleteHomework: boolean;
-  };
-  lastUpdated?: string;
+  teacherName: string;
+  preferredLanguage: "ar" | "en";
+  generalAiInstructions: string;
+  defaultSubject?: string;
+  subjectDefaults: SubjectAiInstruction[];
+  notificationMinutesBefore: number; // 5, 10, 15
+  notificationsEnabled: boolean;
 }
 
-export interface UserProfile {
-  id: string;
-  fullName: string;
-  email: string;
-  title: string; // e.g. "Ustadh / Qur'an Teacher"
-  avatarUrl?: string;
-  createdAt: string;
-  lastLogin: string;
-}
-
-export interface UnitTestResult {
-  id: string;
-  name: string;
-  module: string;
-  passed: boolean;
-  message: string;
-  expected: string;
-  actual: string;
-  durationMs: number;
-}
-
-export interface ApiDocEndpoint {
-  path: string;
-  method: "GET" | "POST" | "PUT" | "DELETE";
-  summary: string;
-  description: string;
-  parameters?: { name: string; type: string; required: boolean; description: string }[];
-  requestBodySample?: any;
-  responseSample: any;
+export interface GoStarsBackupData {
+  version: string;
+  exportedAt: string;
+  students: Student[];
+  groups: Group[];
+  privateLessons: PrivateLesson[];
+  lessons: Lesson[];
+  attendanceRecords: AttendanceRecord[];
+  examRecords: ExamRecord[];
+  paymentTransactions: PaymentTransaction[];
+  reports: GeneratedReport[];
+  settings: AppSettings;
 }
