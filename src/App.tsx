@@ -536,7 +536,7 @@ export function App() {
       />
 
       {/* Main Content View Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-2 sm:px-5 lg:px-6 pt-2 sm:pt-3.5 pb-20 md:pb-12">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-2 sm:px-5 lg:px-6 pt-2 sm:pt-3.5 pb-24 lg:pb-12">
         {activeTab === "home" && (
           <DashboardView
             settings={settings}
@@ -604,8 +604,8 @@ export function App() {
         )}
       </main>
 
-      {/* Mobile Bottom Navigation (Only visible on mobile/small screens) */}
-      <div className="md:hidden">
+      {/* Mobile & Tablet Bottom Navigation (Only visible on mobile/tablet <1024px) */}
+      <div className="lg:hidden">
         <MobileBottomNav
           activeTab={activeTab}
           onTabChange={setActiveTab}
