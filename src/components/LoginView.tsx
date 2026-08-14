@@ -20,9 +20,19 @@ export const LoginView: React.FC<LoginViewProps> = ({ isArabic = true }) => {
       if (err?.code === "auth/popup-closed-by-user") {
         setErrorMsg(isArabic ? "تم إغلاق نافذة تسجيل الدخول قبل الإكمال." : "Sign-in popup was closed before completion.");
       } else if (err?.code === "auth/popup-blocked") {
-        setErrorMsg(isArabic ? "تم حظر المنبثقة بواسطة المتصفح. يرجى السماح بالنوافذ المنبثقة." : "Popup blocked by browser. Please allow popups.");
+        setErrorMsg(isArabic ? "تم حظر المنبثقة بواسطة المتصفح. يرجى السماح بالنوافذ المنبثقة من إعدادات المتصفح." : "Popup blocked by browser. Please allow popups.");
+      } else if (err?.code === "auth/unauthorized-domain") {
+        setErrorMsg(
+          isArabic
+            ? "النطاق (Domain) غير مضاف في Firebase. يرجى إضافة رابط Vercel الخاص بك في Firebase Console > Authentication > Settings > Authorized domains."
+            : "Domain not authorized. Please add your Vercel domain to Firebase Console > Authentication > Settings > Authorized domains."
+        );
       } else {
-        setErrorMsg(isArabic ? "تعذر تسجيل الدخول عبر Google. حاول مرة أخرى." : "Failed to sign in with Google. Please try again.");
+        setErrorMsg(
+          isArabic
+            ? `تعذر تسجيل الدخول (${err?.code || "خطأ غير معروف"}). تأكد من إضافة نطاق Vercel في Firebase Authorized Domains.`
+            : `Failed to sign in (${err?.code || "Unknown error"}). Ensure your Vercel domain is in Firebase Authorized Domains.`
+        );
       }
     } finally {
       setLoading(false);

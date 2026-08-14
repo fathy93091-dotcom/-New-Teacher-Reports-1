@@ -23,8 +23,8 @@ export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: "select_account" });
 
-// Custom database ID from firebase-applet-config.json if specified
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId || "(default)");
+// Initialize Firestore Database (default instance)
+export const db = getFirestore(app);
 
 // Google Sign-In
 export async function signInWithGoogle(): Promise<User> {
