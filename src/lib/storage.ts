@@ -22,17 +22,10 @@ import {
   initialReports
 } from "../data/seedData";
 
-const STORAGE_KEYS = {
-  SETTINGS: "gostars_settings",
-  STUDENTS: "gostars_students",
-  GROUPS: "gostars_groups",
-  PRIVATE_LESSONS: "gostars_private_lessons",
-  LESSONS: "gostars_lessons",
-  ATTENDANCE: "gostars_attendance",
-  EXAMS: "gostars_exams",
-  PAYMENTS: "gostars_payments",
-  REPORTS: "gostars_reports"
-};
+function getScopedKey(baseKey: string, userId?: string): string {
+  if (!userId) return `gostars_guest_${baseKey}`;
+  return `gostars_${userId}_${baseKey}`;
+}
 
 function getItem<T>(key: string, fallback: T): T {
   try {
@@ -49,6 +42,14 @@ function setItem<T>(key: string, value: T): void {
     localStorage.setItem(key, JSON.stringify(value));
   } catch (e) {
     console.error(`Error saving ${key} to localStorage:`, e);
+  }
+}
+
+function removeItem(key: string): void {
+  try {
+    localStorage.removeItem(key);
+  } catch (e) {
+    console.error(`Error removing ${key} from localStorage:`, e);
   }
 }
 
@@ -124,123 +125,149 @@ export const StorageEngine = {
   cleanSettings,
 
   // Settings
-  getSettings(): AppSettings {
-    const s = getItem<AppSettings>(STORAGE_KEYS.SETTINGS, initialSettings);
+  getSettings(userId?: string): AppSettings {
+    const key = getScopedKey("settings", userId);
+    const s = getItem<AppSettings>(key, initialSettings);
     const cleaned = cleanSettings(s);
     if (JSON.stringify(cleaned) !== JSON.stringify(s)) {
-      setItem(STORAGE_KEYS.SETTINGS, cleaned);
+      setItem(key, cleaned);
     }
     return cleaned;
   },
-  saveSettings(settings: AppSettings): void {
-    setItem(STORAGE_KEYS.SETTINGS, settings);
+  saveSettings(settings: AppSettings, userId?: string): void {
+    const key = getScopedKey("settings", userId);
+    setItem(key, settings);
   },
 
   // Students
-  getStudents(): Student[] {
-    return getItem(STORAGE_KEYS.STUDENTS, initialStudents);
+  getStudents(userId?: string): Student[] {
+    const key = getScopedKey("students", userId);
+    return getItem(key, initialStudents);
   },
-  saveStudents(students: Student[]): void {
-    setItem(STORAGE_KEYS.STUDENTS, students);
+  saveStudents(students: Student[], userId?: string): void {
+    const key = getScopedKey("students", userId);
+    setItem(key, students);
   },
 
   // Groups
-  getGroups(): Group[] {
-    return getItem(STORAGE_KEYS.GROUPS, initialGroups);
+  getGroups(userId?: string): Group[] {
+    const key = getScopedKey("groups", userId);
+    return getItem(key, initialGroups);
   },
-  saveGroups(groups: Group[]): void {
-    setItem(STORAGE_KEYS.GROUPS, groups);
+  saveGroups(groups: Group[], userId?: string): void {
+    const key = getScopedKey("groups", userId);
+    setItem(key, groups);
   },
 
   // Private Lessons
-  getPrivateLessons(): PrivateLesson[] {
-    return getItem(STORAGE_KEYS.PRIVATE_LESSONS, initialPrivateLessons);
+  getPrivateLessons(userId?: string): PrivateLesson[] {
+    const key = getScopedKey("private_lessons", userId);
+    return getItem(key, initialPrivateLessons);
   },
-  savePrivateLessons(privateLessons: PrivateLesson[]): void {
-    setItem(STORAGE_KEYS.PRIVATE_LESSONS, privateLessons);
+  savePrivateLessons(privateLessons: PrivateLesson[], userId?: string): void {
+    const key = getScopedKey("private_lessons", userId);
+    setItem(key, privateLessons);
   },
 
   // Lessons
-  getLessons(): Lesson[] {
-    return getItem(STORAGE_KEYS.LESSONS, initialLessons);
+  getLessons(userId?: string): Lesson[] {
+    const key = getScopedKey("lessons", userId);
+    return getItem(key, initialLessons);
   },
-  saveLessons(lessons: Lesson[]): void {
-    setItem(STORAGE_KEYS.LESSONS, lessons);
+  saveLessons(lessons: Lesson[], userId?: string): void {
+    const key = getScopedKey("lessons", userId);
+    setItem(key, lessons);
   },
 
   // Attendance Records
-  getAttendanceRecords(): AttendanceRecord[] {
-    return getItem(STORAGE_KEYS.ATTENDANCE, initialAttendanceRecords);
+  getAttendanceRecords(userId?: string): AttendanceRecord[] {
+    const key = getScopedKey("attendance", userId);
+    return getItem(key, initialAttendanceRecords);
   },
-  saveAttendanceRecords(records: AttendanceRecord[]): void {
-    setItem(STORAGE_KEYS.ATTENDANCE, records);
+  saveAttendanceRecords(records: AttendanceRecord[], userId?: string): void {
+    const key = getScopedKey("attendance", userId);
+    setItem(key, records);
   },
 
   // Exams
-  getExams(): ExamRecord[] {
-    return getItem(STORAGE_KEYS.EXAMS, initialExams);
+  getExams(userId?: string): ExamRecord[] {
+    const key = getScopedKey("exams", userId);
+    return getItem(key, initialExams);
   },
-  saveExams(exams: ExamRecord[]): void {
-    setItem(STORAGE_KEYS.EXAMS, exams);
+  saveExams(exams: ExamRecord[], userId?: string): void {
+    const key = getScopedKey("exams", userId);
+    setItem(key, exams);
   },
 
   // Payment Transactions
-  getPayments(): PaymentTransaction[] {
-    return getItem(STORAGE_KEYS.PAYMENTS, initialPaymentTransactions);
+  getPayments(userId?: string): PaymentTransaction[] {
+    const key = getScopedKey("payments", userId);
+    return getItem(key, initialPaymentTransactions);
   },
-  savePayments(payments: PaymentTransaction[]): void {
-    setItem(STORAGE_KEYS.PAYMENTS, payments);
+  savePayments(payments: PaymentTransaction[], userId?: string): void {
+    const key = getScopedKey("payments", userId);
+    setItem(key, payments);
   },
 
   // Reports
-  getReports(): GeneratedReport[] {
-    return getItem(STORAGE_KEYS.REPORTS, initialReports);
+  getReports(userId?: string): GeneratedReport[] {
+    const key = getScopedKey("reports", userId);
+    return getItem(key, initialReports);
   },
-  saveReports(reports: GeneratedReport[]): void {
-    setItem(STORAGE_KEYS.REPORTS, reports);
+  saveReports(reports: GeneratedReport[], userId?: string): void {
+    const key = getScopedKey("reports", userId);
+    setItem(key, reports);
   },
 
-  // Backup Export
-  exportBackupJSON(): GoStarsBackupData {
+  // Get complete isolated user workspace
+  getUserWorkspace(userId?: string): GoStarsBackupData {
     return {
       version: "1.0",
       exportedAt: new Date().toISOString(),
-      settings: this.getSettings(),
-      students: this.getStudents(),
-      groups: this.getGroups(),
-      privateLessons: this.getPrivateLessons(),
-      lessons: this.getLessons(),
-      attendanceRecords: this.getAttendanceRecords(),
-      examRecords: this.getExams(),
-      paymentTransactions: this.getPayments(),
-      reports: this.getReports()
+      settings: this.getSettings(userId),
+      students: this.getStudents(userId),
+      groups: this.getGroups(userId),
+      privateLessons: this.getPrivateLessons(userId),
+      lessons: this.getLessons(userId),
+      attendanceRecords: this.getAttendanceRecords(userId),
+      examRecords: this.getExams(userId),
+      paymentTransactions: this.getPayments(userId),
+      reports: this.getReports(userId)
     };
   },
 
+  // Save complete isolated user workspace
+  saveUserWorkspace(userId: string | undefined, data: GoStarsBackupData): void {
+    if (!data || typeof data !== "object") return;
+    if (data.settings) this.saveSettings(data.settings, userId);
+    if (Array.isArray(data.students)) this.saveStudents(data.students, userId);
+    if (Array.isArray(data.groups)) this.saveGroups(data.groups, userId);
+    if (Array.isArray(data.privateLessons)) this.savePrivateLessons(data.privateLessons, userId);
+    if (Array.isArray(data.lessons)) this.saveLessons(data.lessons, userId);
+    if (Array.isArray(data.attendanceRecords)) this.saveAttendanceRecords(data.attendanceRecords, userId);
+    if (Array.isArray(data.examRecords)) this.saveExams(data.examRecords, userId);
+    if (Array.isArray(data.paymentTransactions)) this.savePayments(data.paymentTransactions, userId);
+    if (Array.isArray(data.reports)) this.saveReports(data.reports, userId);
+  },
+
+  // Backup Export
+  exportBackupJSON(userId?: string): GoStarsBackupData {
+    return this.getUserWorkspace(userId);
+  },
+
   // Backup Restore
-  restoreBackupJSON(data: GoStarsBackupData): boolean {
+  restoreBackupJSON(data: GoStarsBackupData, userId?: string): boolean {
     if (!data || typeof data !== "object") return false;
-    if (data.settings) this.saveSettings(data.settings);
-    if (Array.isArray(data.students)) this.saveStudents(data.students);
-    if (Array.isArray(data.groups)) this.saveGroups(data.groups);
-    if (Array.isArray(data.privateLessons)) this.savePrivateLessons(data.privateLessons);
-    if (Array.isArray(data.lessons)) this.saveLessons(data.lessons);
-    if (Array.isArray(data.attendanceRecords)) this.saveAttendanceRecords(data.attendanceRecords);
-    if (Array.isArray(data.examRecords)) this.saveExams(data.examRecords);
-    if (Array.isArray(data.paymentTransactions)) this.savePayments(data.paymentTransactions);
-    if (Array.isArray(data.reports)) this.saveReports(data.reports);
+    this.saveUserWorkspace(userId, data);
     return true;
   },
 
-  // Wipe Sample Data / Reset to Clean Empty Slate
-  purgeAllData(): void {
-    setItem(STORAGE_KEYS.STUDENTS, []);
-    setItem(STORAGE_KEYS.GROUPS, []);
-    setItem(STORAGE_KEYS.PRIVATE_LESSONS, []);
-    setItem(STORAGE_KEYS.LESSONS, []);
-    setItem(STORAGE_KEYS.ATTENDANCE, []);
-    setItem(STORAGE_KEYS.EXAMS, []);
-    setItem(STORAGE_KEYS.PAYMENTS, []);
-    setItem(STORAGE_KEYS.REPORTS, []);
+  // Wipe User Data / Reset this user to Clean Empty Slate
+  purgeUserData(userId?: string): void {
+    const keys = ["students", "groups", "private_lessons", "lessons", "attendance", "exams", "payments", "reports"];
+    keys.forEach(k => {
+      setItem(getScopedKey(k, userId), []);
+    });
   }
 };
+

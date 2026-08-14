@@ -84,20 +84,20 @@ export const Header: React.FC<HeaderProps> = ({
             <div>
               <div className="flex items-center gap-1 sm:gap-2">
                 <span className="text-base sm:text-xl font-black tracking-tight bg-gradient-to-r from-blue-400 via-sky-300 to-indigo-200 bg-clip-text text-transparent">
-                  GoStars
+                  {isArabic ? "مساعد GoStars" : "GoStars Assistant"}
                 </span>
                 <span className="hidden xs:inline-block px-1.5 sm:px-2 py-0.5 text-[8px] sm:text-[10px] font-bold rounded-full bg-blue-500/20 text-blue-300 border border-blue-400/30">
                   {isArabic ? "منصة المعلم" : "Teacher Pro"}
                 </span>
               </div>
               <p className="text-[10px] sm:text-[11px] font-medium text-slate-400 hidden sm:block">
-                {isArabic ? "نظام إدارة التدريس والمتابعة التعليمية" : "Teacher Management System"}
+                {isArabic ? "نظام إدارة التدريس والتقارير الذكية" : "Teacher Management & AI Reports"}
               </p>
             </div>
           </div>
 
-          {/* DESKTOP CENTER NAVIGATION TABS */}
-          <nav className="hidden lg:flex items-center gap-1 bg-slate-800/90 p-1.5 rounded-2xl border border-slate-700/60 shadow-inner">
+          {/* DESKTOP & TABLET CENTER NAVIGATION TABS */}
+          <nav className="hidden md:flex items-center gap-1 bg-slate-800/90 p-1.5 rounded-2xl border border-slate-700/60 shadow-inner">
             {navTabs.map(tab => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
@@ -321,30 +321,6 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           </div>
         )}
-
-        {/* MOBILE & TABLET TOP NAVIGATION BAR */}
-        <nav className="lg:hidden mt-2 pt-2 border-t border-slate-800/80 grid grid-cols-5 gap-1 w-full">
-          {navTabs.map(tab => {
-            const Icon = tab.icon;
-            const isActive = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => onTabChange(tab.id)}
-                className={`w-full flex flex-col items-center justify-center py-1.5 px-0.5 rounded-xl transition-all ${
-                  isActive
-                    ? "bg-blue-600 text-white shadow-md shadow-blue-600/30 font-bold"
-                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 font-medium"
-                }`}
-              >
-                <Icon className={`w-4 h-4 shrink-0 ${isActive ? "text-white" : "text-slate-400"}`} />
-                <span className="text-[10px] mt-1 whitespace-nowrap text-center leading-none truncate max-w-full">
-                  {tab.label}
-                </span>
-              </button>
-            );
-          })}
-        </nav>
       </div>
     </header>
   );

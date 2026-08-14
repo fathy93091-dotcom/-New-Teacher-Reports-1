@@ -45,23 +45,23 @@ export const LoginView: React.FC<LoginViewProps> = ({ isArabic = true }) => {
           </div>
           <div>
             <h1 className="text-2xl sm:text-3xl font-black bg-gradient-to-r from-blue-400 via-sky-300 to-indigo-200 bg-clip-text text-transparent">
-              GoStars
+              {isArabic ? "مساعد GoStars" : "GoStars Assistant"}
             </h1>
             <p className="text-xs sm:text-sm text-slate-400 font-medium mt-1">
-              {isArabic ? "منصة المعلم لإدارة الطلاب والتقارير" : "Teacher Pro Management System"}
+              {isArabic ? "منصة المعلم لإدارة الطلاب والتقارير الذكية" : "Teacher Pro Management & AI Reports"}
             </p>
           </div>
         </div>
 
         {/* Welcome Text */}
-        <div className="bg-slate-800/60 border border-slate-700/60 p-4 rounded-2xl text-center space-y-1">
+        <div className="bg-slate-800/60 border border-slate-700/60 p-4 rounded-2xl text-center space-y-1.5">
           <p className="text-xs sm:text-sm font-bold text-slate-200">
-            {isArabic ? "أهلاً بك يا معلمنا القدير 👋" : "Welcome Teacher 👋"}
+            {isArabic ? "مساحة عمل خاصة ومنفصلة لكل معلم 🔒" : "Private Isolated Teacher Workspace 🔒"}
           </p>
-          <p className="text-[11px] text-slate-400 leading-relaxed">
+          <p className="text-[11px] text-slate-300 leading-relaxed">
             {isArabic
-              ? "سجّل الدخول بحساب Google للوصول المباشر ومزامنة جميع بيانات طلابك وتقاريرك سحابياً وآمنة 100%"
-              : "Sign in with Google to sync all your student data and AI reports securely via Cloud Firebase"}
+              ? "سجّل الدخول بحساب Google للوصول إلى بياناتك وتعليماتك الخاصة فقط. لن يتمكن أي مستخدم آخر من رؤية أو تعديل طلابك أو تقاريرك إطلاقاً."
+              : "Sign in with your Google account to access your strictly isolated workspace. No other user can see your students, custom instructions, or reports."}
           </p>
         </div>
 

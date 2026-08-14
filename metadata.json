@@ -1,6 +1,6 @@
 {
-  "name": "GoStars – Teacher Management System",
-  "description": "نظام GoStars الشامل لإدارة المعلم: تنظيم المجموعات والدروس الخاصة، متابعة الحضور والغياب، نظام الدفع والخصم التلقائي بالحصة، الجدولة الأسبوعية، والتقارير الذكية عبر الذكاء الاصطناعي.",
+  "name": "مساعد GoStars",
+  "description": "مساعد GoStars الشامل لإدارة المعلم والدروس: تنظيم المجموعات والدروس الخاصة، متابعة الحضور والغياب، الحساب المالي التلقائي للحصص، الجدولة الذكية، وتقارير الذكاء الاصطناعي.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

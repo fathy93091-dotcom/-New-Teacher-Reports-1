@@ -40,7 +40,7 @@ export function App() {
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
-  // App State initialized from LocalStorage
+  // App State initialized from LocalStorage (per user)
   const [settings, setSettings] = useState<AppSettings>(() => StorageEngine.getSettings());
   const [students, setStudents] = useState<Student[]>(() => StorageEngine.getStudents());
   const [groups, setGroups] = useState<Group[]>(() => StorageEngine.getGroups());
@@ -51,27 +51,6 @@ export function App() {
   const [paymentTransactions, setPaymentTransactions] = useState<PaymentTransaction[]>(() => StorageEngine.getPayments());
   const [reports, setReports] = useState<GeneratedReport[]>(() => StorageEngine.getReports());
 
-  // One-time automatic purge of demo mock data if present
-  useEffect(() => {
-    const cleanedSettings = StorageEngine.cleanSettings(settings, currentUser?.displayName || "");
-    if (JSON.stringify(cleanedSettings) !== JSON.stringify(settings)) {
-      setSettings(cleanedSettings);
-      StorageEngine.saveSettings(cleanedSettings);
-    }
-
-    if (students.some(s => s.id.startsWith("std_10") || s.id.startsWith("demo_"))) {
-      StorageEngine.purgeAllData();
-      setStudents(prev => prev.filter(s => !s.id.startsWith("std_10") && !s.id.startsWith("demo_")));
-      setGroups(prev => prev.filter(g => !g.id.startsWith("grp_10") && !g.id.startsWith("demo_")));
-      setPrivateLessons(prev => prev.filter(p => !p.id.startsWith("prv_10") && !p.id.startsWith("demo_")));
-      setLessons(prev => prev.filter(l => !l.id.startsWith("les_10") && !l.id.startsWith("demo_")));
-      setAttendanceRecords(prev => prev.filter(a => !a.id.startsWith("att_10") && !a.id.startsWith("demo_")));
-      setExamRecords(prev => prev.filter(e => !e.id.startsWith("ex_10") && !e.id.startsWith("demo_")));
-      setPaymentTransactions(prev => prev.filter(p => !p.id.startsWith("pay_10") && !p.id.startsWith("demo_")));
-      setReports(prev => prev.filter(r => !r.id.startsWith("rep_10") && !r.id.startsWith("demo_")));
-    }
-  }, [students, currentUser]);
-
   // Flag to prevent triggering Firestore write loop during incoming remote state update
   const isSyncingFromRemoteRef = useRef(false);
 
@@ -80,6 +59,40 @@ export function App() {
     const unsubscribe = onAuthStateChanged(auth, user => {
       setCurrentUser(user);
       setAuthLoading(false);
+
+      if (user) {
+        // Load this specific user's scoped local data immediately
+        const userSettings = StorageEngine.getSettings(user.uid);
+        const userStudents = StorageEngine.getStudents(user.uid);
+        const userGroups = StorageEngine.getGroups(user.uid);
+        const userPrivateLessons = StorageEngine.getPrivateLessons(user.uid);
+        const userLessons = StorageEngine.getLessons(user.uid);
+        const userAttendance = StorageEngine.getAttendanceRecords(user.uid);
+        const userExams = StorageEngine.getExams(user.uid);
+        const userPayments = StorageEngine.getPayments(user.uid);
+        const userReports = StorageEngine.getReports(user.uid);
+
+        setSettings(userSettings);
+        setStudents(userStudents);
+        setGroups(userGroups);
+        setPrivateLessons(userPrivateLessons);
+        setLessons(userLessons);
+        setAttendanceRecords(userAttendance);
+        setExamRecords(userExams);
+        setPaymentTransactions(userPayments);
+        setReports(userReports);
+      } else {
+        // Clear in-memory state on logout so no information is shared between user sessions
+        setSettings(StorageEngine.cleanSettings(StorageEngine.getSettings()));
+        setStudents([]);
+        setGroups([]);
+        setPrivateLessons([]);
+        setLessons([]);
+        setAttendanceRecords([]);
+        setExamRecords([]);
+        setPaymentTransactions([]);
+        setReports([]);
+      }
     });
     return () => unsubscribe();
   }, []);
@@ -87,70 +100,84 @@ export function App() {
   // Listen for Firestore real-time updates when user is logged in
   useEffect(() => {
     if (!currentUser) return;
+    const uid = currentUser.uid;
 
-    // Sanitize local settings first
+    // Sanitize local settings for this user
     const cleanedLocalSettings = StorageEngine.cleanSettings(settings, currentUser.displayName || "");
     if (JSON.stringify(cleanedLocalSettings) !== JSON.stringify(settings)) {
       setSettings(cleanedLocalSettings);
-      StorageEngine.saveSettings(cleanedLocalSettings);
+      StorageEngine.saveSettings(cleanedLocalSettings, uid);
     }
 
-    const unsubscribe = subscribeToUserData(currentUser.uid, remoteData => {
+    const unsubscribe = subscribeToUserData(uid, remoteData => {
       if (remoteData) {
         isSyncingFromRemoteRef.current = true;
         if (remoteData.settings) {
           const cleanedRemote = StorageEngine.cleanSettings(remoteData.settings, currentUser.displayName || "");
           setSettings(cleanedRemote);
-          StorageEngine.saveSettings(cleanedRemote);
+          StorageEngine.saveSettings(cleanedRemote, uid);
         }
         if (Array.isArray(remoteData.students)) {
           const valid = remoteData.students.filter(s => !s.id.startsWith("std_10") && !s.id.startsWith("demo_"));
           setStudents(valid);
-          StorageEngine.saveStudents(valid);
+          StorageEngine.saveStudents(valid, uid);
         }
         if (Array.isArray(remoteData.groups)) {
           const valid = remoteData.groups.filter(g => !g.id.startsWith("grp_10") && !g.id.startsWith("demo_"));
           setGroups(valid);
-          StorageEngine.saveGroups(valid);
+          StorageEngine.saveGroups(valid, uid);
         }
         if (Array.isArray(remoteData.privateLessons)) {
           const valid = remoteData.privateLessons.filter(p => !p.id.startsWith("prv_10") && !p.id.startsWith("demo_"));
           setPrivateLessons(valid);
-          StorageEngine.savePrivateLessons(valid);
+          StorageEngine.savePrivateLessons(valid, uid);
         }
         if (Array.isArray(remoteData.lessons)) {
           const valid = remoteData.lessons.filter(l => !l.id.startsWith("les_10") && !l.id.startsWith("demo_"));
           setLessons(valid);
-          StorageEngine.saveLessons(valid);
+          StorageEngine.saveLessons(valid, uid);
         }
         if (Array.isArray(remoteData.attendanceRecords)) {
           const valid = remoteData.attendanceRecords.filter(a => !a.id.startsWith("att_10") && !a.id.startsWith("demo_"));
           setAttendanceRecords(valid);
-          StorageEngine.saveAttendanceRecords(valid);
+          StorageEngine.saveAttendanceRecords(valid, uid);
         }
         if (Array.isArray(remoteData.examRecords)) {
           const valid = remoteData.examRecords.filter(e => !e.id.startsWith("ex_10") && !e.id.startsWith("demo_"));
           setExamRecords(valid);
-          StorageEngine.saveExams(valid);
+          StorageEngine.saveExams(valid, uid);
         }
         if (Array.isArray(remoteData.paymentTransactions)) {
           const valid = remoteData.paymentTransactions.filter(p => !p.id.startsWith("pay_10") && !p.id.startsWith("demo_"));
           setPaymentTransactions(valid);
-          StorageEngine.savePayments(valid);
+          StorageEngine.savePayments(valid, uid);
         }
         if (Array.isArray(remoteData.reports)) {
           const valid = remoteData.reports.filter(r => !r.id.startsWith("rep_10") && !r.id.startsWith("demo_"));
           setReports(valid);
-          StorageEngine.saveReports(valid);
+          StorageEngine.saveReports(valid, uid);
         }
         setTimeout(() => {
           isSyncingFromRemoteRef.current = false;
         }, 500);
       } else {
-        // First login: upload current clean initial data to Firestore
+        // First login for this email: initialize isolated clean user workspace in Firestore
         const cleanInitial = StorageEngine.cleanSettings(settings, currentUser.displayName || "");
         setSettings(cleanInitial);
-        saveUserDataToFirestore(currentUser.uid, {
+        StorageEngine.saveUserWorkspace(uid, {
+          version: "1.0",
+          exportedAt: new Date().toISOString(),
+          settings: cleanInitial,
+          students,
+          groups,
+          privateLessons,
+          lessons,
+          attendanceRecords,
+          examRecords,
+          paymentTransactions,
+          reports
+        });
+        saveUserDataToFirestore(uid, {
           version: "1.0",
           exportedAt: new Date().toISOString(),
           settings: cleanInitial,
@@ -174,11 +201,23 @@ export function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [showSettingsModal, setShowSettingsModal] = useState(false);
 
-  // Sync to LocalStorage & Firestore on state changes
+  // Sync to LocalStorage & Firestore on state changes for the active logged-in user
   useEffect(() => {
-    StorageEngine.saveSettings(settings);
-    if (currentUser && !isSyncingFromRemoteRef.current) {
-      saveUserDataToFirestore(currentUser.uid, {
+    if (!currentUser) return;
+    const uid = currentUser.uid;
+
+    StorageEngine.saveSettings(settings, uid);
+    StorageEngine.saveStudents(students, uid);
+    StorageEngine.saveGroups(groups, uid);
+    StorageEngine.savePrivateLessons(privateLessons, uid);
+    StorageEngine.saveLessons(lessons, uid);
+    StorageEngine.saveAttendanceRecords(attendanceRecords, uid);
+    StorageEngine.saveExams(examRecords, uid);
+    StorageEngine.savePayments(paymentTransactions, uid);
+    StorageEngine.saveReports(reports, uid);
+
+    if (!isSyncingFromRemoteRef.current) {
+      saveUserDataToFirestore(uid, {
         version: "1.0",
         exportedAt: new Date().toISOString(),
         settings,
@@ -193,6 +232,7 @@ export function App() {
       });
     }
   }, [settings, students, groups, privateLessons, lessons, attendanceRecords, examRecords, paymentTransactions, reports, currentUser]);
+
 
   // Handlers
   const handleAddGroup = (newGroupData: Omit<Group, "id" | "createdAt">) => {
@@ -430,21 +470,22 @@ export function App() {
 
   // Backup & Restore
   const handleExportBackup = (): GoStarsBackupData => {
-    return StorageEngine.exportBackupJSON();
+    return StorageEngine.exportBackupJSON(currentUser?.uid);
   };
 
   const handleRestoreBackup = (data: GoStarsBackupData): boolean => {
-    const success = StorageEngine.restoreBackupJSON(data);
+    const uid = currentUser?.uid;
+    const success = StorageEngine.restoreBackupJSON(data, uid);
     if (success) {
-      setSettings(StorageEngine.getSettings());
-      setStudents(StorageEngine.getStudents());
-      setGroups(StorageEngine.getGroups());
-      setPrivateLessons(StorageEngine.getPrivateLessons());
-      setLessons(StorageEngine.getLessons());
-      setAttendanceRecords(StorageEngine.getAttendanceRecords());
-      setExamRecords(StorageEngine.getExams());
-      setPaymentTransactions(StorageEngine.getPayments());
-      setReports(StorageEngine.getReports());
+      setSettings(StorageEngine.getSettings(uid));
+      setStudents(StorageEngine.getStudents(uid));
+      setGroups(StorageEngine.getGroups(uid));
+      setPrivateLessons(StorageEngine.getPrivateLessons(uid));
+      setLessons(StorageEngine.getLessons(uid));
+      setAttendanceRecords(StorageEngine.getAttendanceRecords(uid));
+      setExamRecords(StorageEngine.getExams(uid));
+      setPaymentTransactions(StorageEngine.getPayments(uid));
+      setReports(StorageEngine.getReports(uid));
     }
     return success;
   };
@@ -495,7 +536,7 @@ export function App() {
       />
 
       {/* Main Content View Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-2 sm:px-5 lg:px-6 pt-2 sm:pt-3.5 pb-16 sm:pb-12">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-2 sm:px-5 lg:px-6 pt-2 sm:pt-3.5 pb-20 md:pb-12">
         {activeTab === "home" && (
           <DashboardView
             settings={settings}
@@ -563,8 +604,8 @@ export function App() {
         )}
       </main>
 
-      {/* Mobile Bottom Navigation */}
-      <div className="sm:hidden">
+      {/* Mobile Bottom Navigation (Only visible on mobile/small screens) */}
+      <div className="md:hidden">
         <MobileBottomNav
           activeTab={activeTab}
           onTabChange={setActiveTab}
