@@ -51,6 +51,44 @@ export function App() {
   const [paymentTransactions, setPaymentTransactions] = useState<PaymentTransaction[]>(() => StorageEngine.getPayments());
   const [reports, setReports] = useState<GeneratedReport[]>(() => StorageEngine.getReports());
 
+  // Dismissed Notifications State (Persisted in localStorage)
+  const [dismissedNotificationIds, setDismissedNotificationIds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem("gostars_dismissed_notifications");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const handleDismissNotification = (id: string) => {
+    setDismissedNotificationIds(prev => {
+      if (prev.includes(id)) return prev;
+      const next = [...prev, id];
+      try {
+        localStorage.setItem("gostars_dismissed_notifications", JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const handleDismissAllNotifications = (ids: string[]) => {
+    setDismissedNotificationIds(prev => {
+      const next = Array.from(new Set([...prev, ...ids]));
+      try {
+        localStorage.setItem("gostars_dismissed_notifications", JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const handleRestoreNotifications = () => {
+    setDismissedNotificationIds([]);
+    try {
+      localStorage.removeItem("gostars_dismissed_notifications");
+    } catch {}
+  };
+
   // Flag to prevent triggering Firestore write loop during incoming remote state update
   const isSyncingFromRemoteRef = useRef(false);
 
@@ -281,6 +319,34 @@ export function App() {
       createdAt: new Date().toISOString()
     };
     setStudents(prev => [newStudent, ...prev]);
+  };
+
+  const handleBatchAddStudents = (
+    newStudentsData: Array<Omit<Student, "id" | "createdAt">>,
+    targetGroupId?: string
+  ) => {
+    const timestamp = Date.now();
+    const createdStudents: Student[] = newStudentsData.map((data, idx) => ({
+      ...data,
+      id: `stu_${timestamp}_${idx}_${Math.random().toString(36).substring(2, 7)}`,
+      createdAt: new Date().toISOString()
+    }));
+
+    setStudents(prev => [...createdStudents, ...prev]);
+
+    if (targetGroupId) {
+      const createdIds = createdStudents.map(s => s.id);
+      setGroups(prev =>
+        prev.map(g =>
+          g.id === targetGroupId
+            ? {
+                ...g,
+                studentIds: Array.from(new Set([...(g.studentIds || []), ...createdIds]))
+              }
+            : g
+        )
+      );
+    }
   };
 
   const handleEditStudent = (studentId: string, updatedData: Partial<Student>) => {
@@ -554,6 +620,22 @@ export function App() {
     setReports(prev => prev.filter(r => r.id !== reportId));
   };
 
+  const handleToggleArchiveReport = (reportId: string) => {
+    setReports(prev =>
+      prev.map(r => {
+        if (r.id === reportId) {
+          const newArchived = !r.archived;
+          return {
+            ...r,
+            archived: newArchived,
+            archivedAt: newArchived ? new Date().toISOString() : undefined
+          };
+        }
+        return r;
+      })
+    );
+  };
+
   // Call Server Gemini API
   const handleGenerateReportAi = async (payload: {
     studentName: string;
@@ -643,18 +725,28 @@ export function App() {
         currentUser={currentUser}
         onLogout={logoutFirebase}
         onToggleLanguage={handleToggleLanguage}
+        dismissedNotificationIds={dismissedNotificationIds}
+        onDismissNotification={handleDismissNotification}
+        onDismissAllNotifications={handleDismissAllNotifications}
+        onRestoreNotifications={handleRestoreNotifications}
       />
 
       {/* Main Content View Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-2 sm:px-5 lg:px-6 pt-2 sm:pt-3.5 pb-24 lg:pb-12">
+      <main className="flex-1 max-w-[1750px] w-full mx-auto px-2 sm:px-4 lg:px-6 pt-2 sm:pt-3 pb-24 lg:pb-8">
         {activeTab === "home" && (
           <DashboardView
             settings={settings}
             students={students}
+            groups={groups}
+            privateLessons={privateLessons}
             lessons={lessons}
             attendanceRecords={attendanceRecords}
             onOpenLessonDetails={() => setActiveTab("groups")}
             onNavigateToTab={setActiveTab}
+            dismissedNotificationIds={dismissedNotificationIds}
+            onDismissNotification={handleDismissNotification}
+            onDismissAllNotifications={handleDismissAllNotifications}
+            onRestoreNotifications={handleRestoreNotifications}
           />
         )}
 
@@ -665,12 +757,23 @@ export function App() {
             privateLessons={privateLessons}
             students={students}
             lessons={lessons}
+            attendanceRecords={attendanceRecords}
+            examRecords={examRecords}
+            paymentTransactions={paymentTransactions}
+            reports={reports}
             onAddGroup={handleAddGroup}
             onAddPrivateLesson={handleAddPrivateLesson}
             onUpdateGroup={handleUpdateGroup}
             onDeleteGroup={handleDeleteGroup}
             onUpdatePrivateLesson={handleUpdatePrivateLesson}
             onDeletePrivateLesson={handleDeletePrivateLesson}
+            onAddStudent={handleAddStudent}
+            onBatchAddStudents={handleBatchAddStudents}
+            onEditStudent={handleEditStudent}
+            onDeleteStudent={handleDeleteStudent}
+            onUpdateStudentStatus={handleUpdateStudentStatus}
+            onRecordPayment={handleRecordPayment}
+            onAddExamRecord={handleAddExamRecord}
             onSaveAttendanceAndNotes={handleSaveAttendanceAndNotes}
             onGenerateReportAi={handleGenerateReportAi}
           />
@@ -693,6 +796,7 @@ export function App() {
             onAddExamRecord={handleAddExamRecord}
             onAddReport={handleAddReport}
             onDeleteReport={handleDeleteReport}
+            onToggleArchiveReport={handleToggleArchiveReport}
             onGenerateReportAi={handleGenerateReportAi}
             onAddPrivateLesson={handleAddPrivateLesson}
             onUpdatePrivateLesson={handleUpdatePrivateLesson}

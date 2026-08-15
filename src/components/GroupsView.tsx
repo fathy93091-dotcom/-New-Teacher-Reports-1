@@ -21,7 +21,10 @@ import {
   BookOpen,
   Paperclip,
   FileUp,
-  FileText
+  FileText,
+  DollarSign,
+  Award,
+  UserPlus
 } from "lucide-react";
 import {
   Group,
@@ -32,9 +35,16 @@ import {
   HomeworkStatus,
   AppSettings,
   ReportAttachment,
-  ScheduleSlot
+  ScheduleSlot,
+  AttendanceRecord,
+  ExamRecord,
+  PaymentTransaction,
+  GeneratedReport,
+  StudentStatus
 } from "../types";
 import { MixedScheduleEditor, formatTime12h } from "./MixedScheduleEditor";
+import { GroupDetailsModal } from "./groups/GroupDetailsModal";
+import { GroupStudentProfileModal } from "./groups/GroupStudentProfileModal";
 
 interface GroupsViewProps {
   settings: AppSettings;
@@ -42,12 +52,23 @@ interface GroupsViewProps {
   privateLessons: PrivateLesson[];
   students: Student[];
   lessons: Lesson[];
+  attendanceRecords?: AttendanceRecord[];
+  examRecords?: ExamRecord[];
+  paymentTransactions?: PaymentTransaction[];
+  reports?: GeneratedReport[];
   onAddGroup: (group: Omit<Group, "id" | "createdAt">) => void;
   onAddPrivateLesson: (lesson: Omit<PrivateLesson, "id" | "createdAt">) => void;
   onUpdateGroup: (id: string, group: Partial<Group>) => void;
   onDeleteGroup?: (id: string) => void;
   onUpdatePrivateLesson?: (id: string, lesson: Partial<PrivateLesson>) => void;
   onDeletePrivateLesson?: (id: string) => void;
+  onAddStudent?: (student: Omit<Student, "id" | "createdAt">) => void;
+  onBatchAddStudents?: (studentsList: Array<Omit<Student, "id" | "createdAt">>, targetGroupId?: string) => void;
+  onEditStudent?: (studentId: string, data: Partial<Student>) => void;
+  onDeleteStudent?: (studentId: string) => void;
+  onUpdateStudentStatus?: (studentId: string, status: StudentStatus) => void;
+  onRecordPayment?: (studentId: string, amount: number, lessonsCount: number, notes?: string) => void;
+  onAddExamRecord?: (studentId: string, examName: string, score: number, totalScore: number, date: string) => void;
   onSaveAttendanceAndNotes: (
     lessonId: string,
     attendanceList: { studentId: string; attendance: AttendanceStatus; homeworkStatus: HomeworkStatus }[],
@@ -70,12 +91,23 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
   privateLessons,
   students,
   lessons,
+  attendanceRecords = [],
+  examRecords = [],
+  paymentTransactions = [],
+  reports = [],
   onAddGroup,
   onAddPrivateLesson,
   onUpdateGroup,
   onDeleteGroup,
   onUpdatePrivateLesson,
   onDeletePrivateLesson,
+  onAddStudent,
+  onBatchAddStudents,
+  onEditStudent,
+  onDeleteStudent,
+  onUpdateStudentStatus,
+  onRecordPayment,
+  onAddExamRecord,
   onSaveAttendanceAndNotes,
   onGenerateReportAi
 }) => {
@@ -86,7 +118,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
   const [showAddModal, setShowAddModal] = useState(false);
   const [addType, setAddType] = useState<"group" | "private">("group");
 
-  // Form State for Add
+  // Form State for Add Group / Private Lesson
   const [name, setName] = useState("");
   const [subject, setSubject] = useState("الرياضيات");
   const [selectedStudentId, setSelectedStudentId] = useState("");
@@ -107,8 +139,41 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
   const [editStudentIds, setEditStudentIds] = useState<string[]>([]);
   const [editWhatsappLink, setEditWhatsappLink] = useState("");
 
-  // Selected Group or Private for Detailed View
-  const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
+  // Group Details & Management View State
+  const [selectedGroupForDetails, setSelectedGroupForDetails] = useState<Group | null>(null);
+
+  // Student Profile Inside Group State
+  const [studentForProfile, setStudentForProfile] = useState<Student | null>(null);
+
+  // Quick Action Modals inside Group
+  const [studentForPayment, setStudentForPayment] = useState<Student | null>(null);
+  const [payAmount, setPayAmount] = useState<number>(400);
+  const [payLessons, setPayLessons] = useState<number>(8);
+  const [payNotes, setPayNotes] = useState<string>("");
+
+  const [studentForExam, setStudentForExam] = useState<Student | null>(null);
+  const [examName, setExamName] = useState<string>("اختبار شهري");
+  const [examScore, setExamScore] = useState<number>(20);
+  const [examTotalScore, setExamTotalScore] = useState<number>(20);
+  const [examDate, setExamDate] = useState<string>(new Date().toISOString().split("T")[0]);
+
+  const [studentToEdit, setStudentToEdit] = useState<Student | null>(null);
+  const [editStudentName, setEditStudentName] = useState<string>("");
+  const [editStudentPhone, setEditStudentPhone] = useState<string>("");
+  const [editParentPhone, setEditParentPhone] = useState<string>("");
+  const [editStudentAcademicYear, setEditStudentAcademicYear] = useState<string>("");
+  const [editStudentSubject, setEditStudentSubject] = useState<string>("");
+  const [editStudentLessonCost, setEditStudentLessonCost] = useState<number>(50);
+
+  // Quick Add Single Student to Group
+  const [groupForQuickAddStudent, setGroupForQuickAddStudent] = useState<Group | null>(null);
+  const [quickStudentName, setQuickStudentName] = useState<string>("");
+  const [quickStudentPhone, setQuickStudentPhone] = useState<string>("");
+  const [quickParentPhone, setQuickParentPhone] = useState<string>("");
+  const [quickStudentAcademicYear, setQuickStudentAcademicYear] = useState<string>("");
+
+  // Confirmation modal for deleting group
+  const [groupToDelete, setGroupToDelete] = useState<Group | null>(null);
 
   // Active Lesson Attendance Session
   const [activeLesson, setActiveLesson] = useState<Lesson | null>(null);
@@ -123,6 +188,8 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
   const [lessonAttachment, setLessonAttachment] = useState<ReportAttachment | null>(null);
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  const activeStudentsList = students.filter(s => s.status === "active");
 
   const handleLessonFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -170,7 +237,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
   const handleCreateSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const effectiveSlots = scheduleSlots.length > 0 ? scheduleSlots : [{ day: isArabic ? "السبت" : "Sat", time: "17:00", durationMinutes: 90 }];
-    const uniqueDays = Array.from(new Set(effectiveSlots.map(s => s.day)));
+    const uniqueDays: string[] = Array.from(new Set(effectiveSlots.map(s => s.day)));
     const primaryTime = effectiveSlots[0]?.time || "17:00";
     const primaryDuration = effectiveSlots[0]?.durationMinutes || 90;
 
@@ -241,11 +308,11 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
     e.preventDefault();
     if (!editingGroup || !editName.trim()) return;
     const effectiveSlots = editScheduleSlots.length > 0 ? editScheduleSlots : [{ day: isArabic ? "السبت" : "Sat", time: "17:00", durationMinutes: 90 }];
-    const uniqueDays = Array.from(new Set(effectiveSlots.map(s => s.day)));
+    const uniqueDays: string[] = Array.from(new Set(effectiveSlots.map(s => s.day)));
     const primaryTime = effectiveSlots[0]?.time || "17:00";
     const primaryDuration = effectiveSlots[0]?.durationMinutes || 90;
 
-    onUpdateGroup(editingGroup.id, {
+    const updatedData: Partial<Group> = {
       name: editName.trim(),
       subject: editSubject.trim() || "عام",
       days: uniqueDays,
@@ -254,7 +321,14 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
       scheduleSlots: effectiveSlots,
       studentIds: editStudentIds,
       whatsappGroupLink: editWhatsappLink.trim() || undefined
-    });
+    };
+
+    onUpdateGroup(editingGroup.id, updatedData);
+
+    if (selectedGroupForDetails && selectedGroupForDetails.id === editingGroup.id) {
+      setSelectedGroupForDetails({ ...selectedGroupForDetails, ...updatedData });
+    }
+
     setEditingGroup(null);
   };
 
@@ -281,7 +355,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
     if (!editingPrivateLesson) return;
     const studentObj = students.find(s => s.id === editStudentId) || { id: editingPrivateLesson.studentId, fullName: editingPrivateLesson.studentName };
     const effectiveSlots = editScheduleSlots.length > 0 ? editScheduleSlots : [{ day: isArabic ? "السبت" : "Sat", time: "17:00", durationMinutes: 90 }];
-    const uniqueDays = Array.from(new Set(effectiveSlots.map(s => s.day)));
+    const uniqueDays: string[] = Array.from(new Set(effectiveSlots.map(s => s.day)));
     const primaryTime = effectiveSlots[0]?.time || "17:00";
     const primaryDuration = effectiveSlots[0]?.durationMinutes || 90;
 
@@ -300,15 +374,16 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
     setEditingPrivateLesson(null);
   };
 
-  const handleDeleteGroupClick = (group: Group) => {
-    const confirmMsg = isArabic
-      ? `هل أنت متأكد من حذف المجموعة "${group.name}"؟`
-      : `Are you sure you want to delete group "${group.name}"?`;
-    if (window.confirm(confirmMsg)) {
-      if (onDeleteGroup) {
-        onDeleteGroup(group.id);
-      }
+  // Handle Delete Group
+  const handleConfirmDeleteGroup = () => {
+    if (!groupToDelete) return;
+    if (onDeleteGroup) {
+      onDeleteGroup(groupToDelete.id);
     }
+    if (selectedGroupForDetails && selectedGroupForDetails.id === groupToDelete.id) {
+      setSelectedGroupForDetails(null);
+    }
+    setGroupToDelete(null);
   };
 
   const handleDeletePrivateLessonClick = (prv: PrivateLesson) => {
@@ -329,42 +404,6 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
         .join(" • ");
     }
     return `${item.days.join("، ")} (${formatTime12h(item.time, isArabic)})`;
-  };
-
-  // Send Report Directly to WhatsApp Group / Chat
-  const handleSendToWhatsappGroup = () => {
-    const report = generatedReportText || teacherNotes;
-    if (!report) return;
-
-    // Copy report text to device clipboard
-    navigator.clipboard.writeText(report);
-    setCopied(true);
-    setWhatsappSentNotice(isArabic ? "تم نسخ التقرير! جارٍ توجيهك إلى الواتساب..." : "Report copied! Opening WhatsApp...");
-    setTimeout(() => {
-      setCopied(false);
-      setWhatsappSentNotice("");
-    }, 4500);
-
-    const targetLink = lessonWhatsappLink.trim();
-    if (targetLink) {
-      let url = targetLink;
-      if (!url.startsWith("http://") && !url.startsWith("https://")) {
-        if (url.match(/^[0-9+]+$/)) {
-          url = `https://api.whatsapp.com/send?phone=${url.replace(/[^0-9]/g, "")}&text=${encodeURIComponent(report)}`;
-        } else {
-          url = `https://${url}`;
-        }
-      } else if (url.includes("wa.me") || url.includes("api.whatsapp.com")) {
-        if (!url.includes("text=")) {
-          const sep = url.includes("?") ? "&" : "?";
-          url = `${url}${sep}text=${encodeURIComponent(report)}`;
-        }
-      }
-      window.open(url, "_blank", "noopener,noreferrer");
-    } else {
-      // Fallback: Open WhatsApp send dialog with text
-      window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(report)}`, "_blank", "noopener,noreferrer");
-    }
   };
 
   // Launch Active Attendance Lesson
@@ -389,7 +428,6 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
         createdAt: new Date().toISOString()
       };
 
-      // Populate default attendance map
       const initialMap: Record<string, { attendance: AttendanceStatus; homeworkStatus: HomeworkStatus }> = {};
       groupObj.studentIds.forEach(stId => {
         initialMap[stId] = { attendance: "present", homeworkStatus: "done" };
@@ -425,7 +463,6 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
     setGeneratedReportText("");
     setLessonAttachment(null);
 
-    // Resolve AI instructions based on lesson subject
     const subjName = newLesson.subject || "";
     const cleanSubj = subjName.trim().toLowerCase();
     const match = settings.subjectDefaults?.find(s => {
@@ -488,7 +525,95 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
     setActiveLesson(null);
   };
 
-  const activeStudentsList = students.filter(s => s.status === "active");
+  // Handle Quick Single Student Addition directly to group
+  const handleQuickAddStudentSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!groupForQuickAddStudent || !quickStudentName.trim()) return;
+
+    const newStudentId = `stu_${Date.now()}`;
+    const newStudentData: Omit<Student, "id" | "createdAt"> = {
+      fullName: quickStudentName.trim(),
+      subject: groupForQuickAddStudent.subject || "عام",
+      academicYear: quickStudentAcademicYear.trim() || undefined,
+      studentPhone: quickStudentPhone.trim() || undefined,
+      parentContact: quickParentPhone.trim() || undefined,
+      status: "active",
+      studyType: "group",
+      subscriptionType: "monthly",
+      lessonCost: 50,
+      remainingLessons: 0,
+      remainingBalance: 0,
+      paymentStatus: "unpaid",
+      totalPaidAmount: 0,
+      totalPurchasedLessons: 0
+    };
+
+    if (onBatchAddStudents) {
+      onBatchAddStudents([newStudentData], groupForQuickAddStudent.id);
+    } else if (onAddStudent) {
+      onAddStudent(newStudentData);
+      const nextIds = [...(groupForQuickAddStudent.studentIds || []), newStudentId];
+      onUpdateGroup(groupForQuickAddStudent.id, { studentIds: nextIds });
+    }
+
+    setGroupForQuickAddStudent(null);
+    setQuickStudentName("");
+    setQuickStudentPhone("");
+    setQuickParentPhone("");
+    setQuickStudentAcademicYear("");
+  };
+
+  // Handle Open Edit Student Modal
+  const handleOpenEditStudent = (student: Student) => {
+    setStudentToEdit(student);
+    setEditStudentName(student.fullName);
+    setEditStudentPhone(student.studentPhone || "");
+    setEditParentPhone(student.parentContact || "");
+    setEditStudentAcademicYear(student.academicYear || "");
+    setEditStudentSubject(student.subject || "");
+    setEditStudentLessonCost(student.lessonCost || 50);
+  };
+
+  const handleSaveEditStudent = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!studentToEdit || !editStudentName.trim()) return;
+
+    if (onEditStudent) {
+      onEditStudent(studentToEdit.id, {
+        fullName: editStudentName.trim(),
+        studentPhone: editStudentPhone.trim() || undefined,
+        parentContact: editParentPhone.trim() || undefined,
+        academicYear: editStudentAcademicYear.trim() || undefined,
+        subject: editStudentSubject.trim() || studentToEdit.subject,
+        lessonCost: Number(editStudentLessonCost) || 50
+      });
+    }
+
+    setStudentToEdit(null);
+  };
+
+  // Handle Record Payment
+  const handleSavePaymentSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!studentForPayment || !onRecordPayment) return;
+    onRecordPayment(studentForPayment.id, Number(payAmount) || 0, Number(payLessons) || 0, payNotes);
+    setStudentForPayment(null);
+    setPayNotes("");
+  };
+
+  // Handle Add Exam
+  const handleSaveExamSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!studentForExam || !onAddExamRecord) return;
+    onAddExamRecord(
+      studentForExam.id,
+      examName.trim() || "اختبار",
+      Number(examScore) || 0,
+      Number(examTotalScore) || 20,
+      examDate
+    );
+    setStudentForExam(null);
+  };
 
   return (
     <div className="space-y-4 pb-12">
@@ -500,8 +625,8 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
           </h1>
           <p className="text-[11px] sm:text-xs text-slate-500 font-medium mt-0.5">
             {isArabic
-              ? "نظام الحصص المباشرة والخصم التلقائي بالحصة بانتظام."
-              : "Manage active group classes and 1:1 private sessions."}
+              ? "إدارة المجموعات، استيراد 50+ طالب دفعة واحدة، والتحكم بالملفات الشخصية للطلاب."
+              : "Manage groups, bulk add 50+ students, and manage student profiles directly."}
           </p>
         </div>
 
@@ -563,127 +688,126 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
         </button>
       </div>
 
-      {/* Grid View - Optimized for Mobile (2 Columns) */}
+      {/* Grid View */}
       {activeTab === "groups" ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5 sm:gap-3.5">
-          {groups.map(group => (
-            <div
-              key={group.id}
-              className="bg-white border border-slate-200/90 hover:border-blue-300 rounded-2xl p-3 sm:p-4 shadow-2xs hover:shadow-md transition-all flex flex-col justify-between"
-            >
-              <div>
-                <div className="flex items-center justify-between gap-1 mb-1.5">
-                  <span className="px-1.5 py-0.5 rounded-lg text-[9px] font-black bg-blue-100 text-blue-800 flex items-center gap-1">
-                    <Users className="w-3 h-3 shrink-0" />
-                    <span>{isArabic ? "مجموعة" : "Group"}</span>
-                  </span>
-                  <span
-                    className={`px-2 py-0.5 rounded-lg text-[9px] font-black shrink-0 ${
-                      group.status === "active" ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-600"
-                    }`}
-                  >
-                    {group.status === "active" ? (isArabic ? "نشطة" : "Active") : (isArabic ? "متوقفة" : "Paused")}
-                  </span>
-                </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-2.5 sm:gap-3">
+          {groups.map(group => {
+            const studentCount = group.studentIds ? group.studentIds.length : 0;
 
-                <h3 className="text-sm sm:text-base font-black text-slate-900 leading-snug">{group.name}</h3>
-                <p className="text-[11px] font-bold text-blue-600 mt-0.5">{group.subject}</p>
-
-                {/* Mixed Schedule Summary Card */}
-                <div className="mt-2.5 pt-2 border-t border-slate-100 space-y-1.5 text-slate-600">
-                  <div className="bg-slate-50/80 p-2 rounded-xl border border-slate-200/70 space-y-1.5">
-                    <div className="flex items-center gap-1 text-[10.5px] font-bold text-slate-700">
-                      <Clock className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                      <span>{isArabic ? "مواعيد الحصص:" : "Class Schedule:"}</span>
-                    </div>
-                    {group.scheduleSlots && group.scheduleSlots.length > 0 ? (
-                      <div className="flex flex-wrap gap-1">
-                        {group.scheduleSlots.map((slot, sIdx) => (
-                          <span
-                            key={sIdx}
-                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-blue-50/90 border border-blue-200/70 text-blue-900 font-bold text-[10px]"
-                          >
-                            <span>📅 {slot.day}</span>
-                            <span className="font-mono text-blue-700">⏰ {formatTime12h(slot.time, isArabic)}</span>
-                            <span className="text-slate-400 font-normal">({slot.durationMinutes || 90}د)</span>
-                          </span>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="text-[11px] font-bold text-slate-800 leading-tight">
-                        {getScheduleSummaryText(group)}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="flex items-center justify-between text-[11px] px-1">
-                    <span className="text-slate-500 font-medium">{isArabic ? "عدد الطلاب:" : "Students:"}</span>
-                    <span className="font-black text-slate-800">
-                      {group.studentIds.length} {isArabic ? "طلاب" : "st"}
+            return (
+              <div
+                key={group.id}
+                className="bg-white border border-slate-200/90 hover:border-blue-400 rounded-2xl p-3.5 sm:p-4 shadow-2xs hover:shadow-md transition-all flex flex-col justify-between group"
+              >
+                <div>
+                  <div className="flex items-center justify-between gap-1 mb-1.5">
+                    <span className="px-1.5 py-0.5 rounded-lg text-[9px] font-black bg-blue-100 text-blue-800 flex items-center gap-1">
+                      <Users className="w-3 h-3 shrink-0" />
+                      <span>{isArabic ? "مجموعة" : "Group"}</span>
+                    </span>
+                    <span
+                      className={`px-2 py-0.5 rounded-lg text-[9px] font-black shrink-0 ${
+                        group.status === "active" ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-600"
+                      }`}
+                    >
+                      {group.status === "active" ? (isArabic ? "نشطة" : "Active") : (isArabic ? "متوقفة" : "Paused")}
                     </span>
                   </div>
-                </div>
-              </div>
 
-              <div className="mt-3 pt-2 border-t border-slate-100 flex items-center justify-between gap-1.5">
-                <button
-                  onClick={() => handleOpenAttendanceSession(group)}
-                  className="flex-1 py-1.5 px-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition shadow-2xs flex items-center justify-center gap-1"
-                >
-                  <Play className="w-3 h-3 fill-current shrink-0" />
-                  <span>{isArabic ? "بدء الحصة" : "Launch"}</span>
-                </button>
-
-                {/* Edit Button */}
-                <button
-                  onClick={() => handleOpenEditGroup(group)}
-                  title={isArabic ? "تعديل المجموعة والمواعيد" : "Edit Group & Schedule"}
-                  className="p-1.5 rounded-xl bg-slate-100 hover:bg-blue-50 text-slate-600 hover:text-blue-700 border border-slate-200 hover:border-blue-200 transition shrink-0"
-                >
-                  <Edit2 className="w-3.5 h-3.5" />
-                </button>
-
-                {group.whatsappGroupLink && (
-                  <a
-                    href={group.whatsappGroupLink.startsWith("http") ? group.whatsappGroupLink : `https://${group.whatsappGroupLink}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    title={isArabic ? "فتح جروب الواتساب" : "Open WhatsApp Group"}
-                    className="p-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 transition shrink-0 flex items-center justify-center"
+                  <h3
+                    onClick={() => setSelectedGroupForDetails(group)}
+                    className="text-sm sm:text-base font-black text-slate-900 leading-snug cursor-pointer hover:text-blue-700 transition"
                   >
-                    <Share2 className="w-3.5 h-3.5" />
-                  </a>
-                )}
+                    {group.name}
+                  </h3>
+                  <p className="text-[11px] font-bold text-blue-600 mt-0.5">{group.subject}</p>
 
-                <button
-                  onClick={() =>
-                    onUpdateGroup(group.id, {
-                      status: group.status === "active" ? "paused" : "active"
-                    })
-                  }
-                  title={group.status === "active" ? (isArabic ? "إيقاف المجموعة" : "Pause") : (isArabic ? "تنشيط" : "Resume")}
-                  className="p-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition shrink-0"
-                >
-                  {group.status === "active" ? (
-                    <PauseCircle className="w-3.5 h-3.5 text-amber-600" />
-                  ) : (
-                    <PlayCircle className="w-3.5 h-3.5 text-emerald-600" />
-                  )}
-                </button>
+                  {/* Mixed Schedule Summary Card */}
+                  <div className="mt-2.5 pt-2 border-t border-slate-100 space-y-1.5 text-slate-600">
+                    <div className="bg-slate-50/80 p-2 rounded-xl border border-slate-200/70 space-y-1.5">
+                      <div className="flex items-center gap-1 text-[10.5px] font-bold text-slate-700">
+                        <Clock className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                        <span>{isArabic ? "مواعيد الحصص:" : "Class Schedule:"}</span>
+                      </div>
+                      {group.scheduleSlots && group.scheduleSlots.length > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {group.scheduleSlots.map((slot, sIdx) => (
+                            <span
+                              key={sIdx}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-blue-50/90 border border-blue-200/70 text-blue-900 font-bold text-[10px]"
+                            >
+                              <span>📅 {slot.day}</span>
+                              <span className="font-mono text-blue-700">⏰ {formatTime12h(slot.time, isArabic)}</span>
+                              <span className="text-slate-400 font-normal">({slot.durationMinutes || 90}د)</span>
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-[11px] font-bold text-slate-800 leading-tight">
+                          {getScheduleSummaryText(group)}
+                        </div>
+                      )}
+                    </div>
 
-                {/* Delete Button */}
-                {onDeleteGroup && (
+                    {/* Student count & quick management button */}
+                    <div
+                      onClick={() => setSelectedGroupForDetails(group)}
+                      className="flex items-center justify-between p-2 rounded-xl bg-blue-50/50 hover:bg-blue-100/60 border border-blue-100 cursor-pointer transition text-[11px]"
+                    >
+                      <span className="text-blue-900 font-bold flex items-center gap-1">
+                        <Users className="w-3.5 h-3.5 text-blue-600" />
+                        <span>{isArabic ? "إدارة طلاب المجموعة:" : "Manage Students:"}</span>
+                      </span>
+                      <span className="font-black text-blue-700 px-2 py-0.5 bg-white rounded-lg border border-blue-200">
+                        {studentCount} {isArabic ? "طلاب" : "students"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-3 pt-2 border-t border-slate-100 flex items-center justify-between gap-1.5">
                   <button
-                    onClick={() => handleDeleteGroupClick(group)}
-                    title={isArabic ? "حذف المجموعة" : "Delete Group"}
-                    className="p-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 transition shrink-0"
+                    onClick={() => handleOpenAttendanceSession(group)}
+                    className="flex-1 py-1.5 px-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition shadow-2xs flex items-center justify-center gap-1"
+                  >
+                    <Play className="w-3 h-3 fill-current shrink-0" />
+                    <span>{isArabic ? "بدء الحصة" : "Launch"}</span>
+                  </button>
+
+                  {/* Edit Button */}
+                  <button
+                    onClick={() => handleOpenEditGroup(group)}
+                    title={isArabic ? "تعديل المجموعة والمواعيد" : "Edit Group & Schedule"}
+                    className="p-1.5 rounded-xl bg-slate-100 hover:bg-blue-50 text-slate-600 hover:text-blue-700 border border-slate-200 transition shrink-0"
+                  >
+                    <Edit2 className="w-3.5 h-3.5" />
+                  </button>
+
+                  {/* WhatsApp Link */}
+                  {group.whatsappGroupLink && (
+                    <a
+                      href={group.whatsappGroupLink.startsWith("http") ? group.whatsappGroupLink : `https://${group.whatsappGroupLink}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title={isArabic ? "فتح جروب الواتساب" : "Open WhatsApp Group"}
+                      className="p-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 transition shrink-0 flex items-center justify-center"
+                    >
+                      <Share2 className="w-3.5 h-3.5" />
+                    </a>
+                  )}
+
+                  {/* Delete Group Button */}
+                  <button
+                    onClick={() => setGroupToDelete(group)}
+                    title={isArabic ? "حذف هذه المجموعة" : "Delete Group"}
+                    className="p-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 transition shrink-0"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
-                )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
 
           {/* Add Group Card Placeholder */}
           <div
@@ -700,17 +824,17 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
               {isArabic ? "مجموعة جديدة" : "New Group"}
             </h4>
             <p className="text-[11px] text-slate-400 mt-0.5 leading-tight">
-              {isArabic ? "تحديد مواعيد مختلقة وطلاب" : "Add schedule & students"}
+              {isArabic ? "تحديد مواعيد مختلفة وقيد الطلاب" : "Add schedule & students"}
             </p>
           </div>
         </div>
       ) : (
         /* Private Lessons Grid */
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5 sm:gap-3.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-2.5 sm:gap-3">
           {privateLessons.map(prv => (
             <div
               key={prv.id}
-              className="bg-white border border-slate-200/90 hover:border-purple-300 rounded-2xl p-3 sm:p-4 shadow-2xs hover:shadow-md transition-all flex flex-col justify-between"
+              className="bg-white border border-slate-200/90 hover:border-purple-300 rounded-2xl p-3.5 sm:p-4 shadow-2xs hover:shadow-md transition-all flex flex-col justify-between"
             >
               <div>
                 <div className="flex items-center justify-between gap-1 mb-1.5">
@@ -768,7 +892,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
                 <button
                   onClick={() => handleOpenEditPrivateLesson(prv)}
                   title={isArabic ? "تعديل المواعيد والتفاصيل" : "Edit Details & Schedule"}
-                  className="p-1.5 rounded-xl bg-slate-100 hover:bg-purple-50 text-slate-600 hover:text-purple-700 border border-slate-200 hover:border-purple-200 transition shrink-0"
+                  className="p-1.5 rounded-xl bg-slate-100 hover:bg-purple-50 text-slate-600 hover:text-purple-700 border border-slate-200 transition shrink-0"
                 >
                   <Edit2 className="w-3.5 h-3.5" />
                 </button>
@@ -790,7 +914,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
                   <button
                     onClick={() => handleDeletePrivateLessonClick(prv)}
                     title={isArabic ? "حذف الموعد" : "Delete"}
-                    className="p-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 transition shrink-0"
+                    className="p-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 transition shrink-0"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
@@ -820,7 +944,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
         </div>
       )}
 
-      {/* Modal: Create Group or Private Lesson with Mixed Schedule Support */}
+      {/* Modal 1: Create Group or Private Lesson */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
           <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 max-w-xl w-full shadow-2xl animate-in fade-in zoom-in-95 duration-150 my-4 max-h-[92vh] overflow-y-auto">
@@ -850,7 +974,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
               </button>
             </div>
 
-            {/* Selection Switcher */}
+            {/* Switcher */}
             <div className="flex bg-slate-100 p-1 rounded-2xl my-3">
               <button
                 type="button"
@@ -937,9 +1061,15 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
 
               {addType === "group" && (
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1 text-[11px]">
-                    {isArabic ? "إضافة طلاب للمجموعة:" : "Add Students to Group:"}
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-bold text-slate-700 text-[11px]">
+                      {isArabic ? "اختيار طلاب للمجموعة:" : "Add Students to Group:"}
+                    </label>
+                    <span className="text-[10.5px] text-blue-700 font-bold">
+                      {isArabic ? `تم تحديد (${selectedStudentIds.length}) طالب` : `${selectedStudentIds.length} selected`}
+                    </span>
+                  </div>
+
                   <div className="max-h-36 overflow-y-auto bg-slate-50 border border-slate-200 rounded-xl p-2 space-y-1">
                     {activeStudentsList.length === 0 ? (
                       <p className="text-[11px] text-slate-400 p-2 text-center">
@@ -975,7 +1105,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
                   type="url"
                   value={whatsappGroupLink}
                   onChange={e => setWhatsappGroupLink(e.target.value)}
-                  placeholder={isArabic ? "مثال: https://chat.whatsapp.com/..." : "https://chat.whatsapp.com/..."}
+                  placeholder="https://chat.whatsapp.com/..."
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-medium focus:outline-none focus:border-blue-500 dir-ltr text-left"
                 />
               </div>
@@ -992,7 +1122,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
                   type="submit"
                   className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-md shadow-blue-600/30"
                 >
-                  {isArabic ? "حفظ وإنشاء الموعد" : "Save & Create"}
+                  {isArabic ? "حفظ وإنشاء" : "Save & Create"}
                 </button>
               </div>
             </form>
@@ -1000,7 +1130,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
         </div>
       )}
 
-      {/* Modal: Edit Group */}
+      {/* Modal 2: Edit Group */}
       {editingGroup && (
         <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
           <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 max-w-xl w-full shadow-2xl animate-in fade-in zoom-in-95 duration-150 my-4 max-h-[92vh] overflow-y-auto">
@@ -1097,27 +1227,41 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
                 />
               </div>
 
-              <div className="pt-3 flex justify-end gap-2 border-t border-slate-100">
+              <div className="pt-3 flex items-center justify-between border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setEditingGroup(null)}
-                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold"
+                  onClick={() => {
+                    setGroupToDelete(editingGroup);
+                    setEditingGroup(null);
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 font-bold text-xs"
                 >
-                  {isArabic ? "إلغاء" : "Cancel"}
+                  <Trash2 className="w-3.5 h-3.5 inline mr-1" />
+                  <span>{isArabic ? "حذف المجموعة" : "Delete Group"}</span>
                 </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-md shadow-blue-600/30"
-                >
-                  {isArabic ? "حفظ التعديلات" : "Save Changes"}
-                </button>
+
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditingGroup(null)}
+                    className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold"
+                  >
+                    {isArabic ? "إلغاء" : "Cancel"}
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-md shadow-blue-600/30"
+                  >
+                    {isArabic ? "حفظ التعديلات" : "Save Changes"}
+                  </button>
+                </div>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* Modal: Edit Private Lesson */}
+      {/* Modal 3: Edit Private Lesson */}
       {editingPrivateLesson && (
         <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
           <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 max-w-xl w-full shadow-2xl animate-in fade-in zoom-in-95 duration-150 my-4 max-h-[92vh] overflow-y-auto">
@@ -1217,7 +1361,435 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
         </div>
       )}
 
-      {/* Modal: Active Lesson Attendance & AI Report Session */}
+      {/* Modal 4: Full Group Details & Student Management View */}
+      {selectedGroupForDetails && (
+        <GroupDetailsModal
+          group={selectedGroupForDetails}
+          settings={settings}
+          students={students}
+          attendanceRecords={attendanceRecords}
+          examRecords={examRecords}
+          paymentTransactions={paymentTransactions}
+          reports={reports}
+          onClose={() => setSelectedGroupForDetails(null)}
+          onLaunchAttendance={grp => {
+            setSelectedGroupForDetails(null);
+            handleOpenAttendanceSession(grp);
+          }}
+          onEditGroup={grp => handleOpenEditGroup(grp)}
+          onDeleteGroup={grp => setGroupToDelete(grp)}
+          onUpdateGroupStudentIds={(groupId, newIds) => {
+            onUpdateGroup(groupId, { studentIds: newIds });
+            if (selectedGroupForDetails && selectedGroupForDetails.id === groupId) {
+              setSelectedGroupForDetails({ ...selectedGroupForDetails, studentIds: newIds });
+            }
+          }}
+          onOpenStudentProfile={st => setStudentForProfile(st)}
+          onOpenQuickAddStudentModal={grp => setGroupForQuickAddStudent(grp)}
+          onOpenPaymentModal={st => {
+            setStudentForPayment(st);
+            setPayAmount(st.lessonCost ? st.lessonCost * 8 : 400);
+          }}
+          onOpenExamModal={st => setStudentForExam(st)}
+          onOpenEditStudentModal={st => handleOpenEditStudent(st)}
+          onDeleteStudent={stId => {
+            if (onDeleteStudent) onDeleteStudent(stId);
+          }}
+        />
+      )}
+
+      {/* Modal 6: Student Profile Modal Inside Group */}
+      {studentForProfile && (
+        <GroupStudentProfileModal
+          student={studentForProfile}
+          settings={settings}
+          attendanceRecords={attendanceRecords}
+          examRecords={examRecords}
+          paymentTransactions={paymentTransactions}
+          reports={reports}
+          onClose={() => setStudentForProfile(null)}
+          onOpenPaymentModal={st => {
+            setStudentForPayment(st);
+            setPayAmount(st.lessonCost ? st.lessonCost * 8 : 400);
+          }}
+          onOpenExamModal={st => setStudentForExam(st)}
+          onRemoveFromGroup={stId => {
+            if (selectedGroupForDetails) {
+              const nextIds = (selectedGroupForDetails.studentIds || []).filter(id => id !== stId);
+              onUpdateGroup(selectedGroupForDetails.id, { studentIds: nextIds });
+              setSelectedGroupForDetails({ ...selectedGroupForDetails, studentIds: nextIds });
+            }
+            setStudentForProfile(null);
+          }}
+          onDeleteStudent={stId => {
+            if (onDeleteStudent) onDeleteStudent(stId);
+            setStudentForProfile(null);
+          }}
+        />
+      )}
+
+      {/* Modal 7: Quick Add Single Student to Group */}
+      {groupForQuickAddStudent && (
+        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white border border-slate-200 rounded-3xl p-5 max-w-md w-full shadow-2xl animate-in fade-in zoom-in-95">
+            <div className="flex justify-between items-center pb-2.5 border-b border-slate-100 mb-3">
+              <h3 className="font-black text-slate-900 text-sm flex items-center gap-2">
+                <UserPlus className="w-4 h-4 text-blue-600" />
+                <span>{isArabic ? `إضافة طالب جديد في: ${groupForQuickAddStudent.name}` : "Add New Student to Group"}</span>
+              </h3>
+              <button onClick={() => setGroupForQuickAddStudent(null)} className="text-slate-400 hover:text-slate-700">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleQuickAddStudentSubmit} className="space-y-3 text-xs">
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">{isArabic ? "اسم الطالب بالكامل *" : "Full Name *"}</label>
+                <input
+                  type="text"
+                  required
+                  value={quickStudentName}
+                  onChange={e => setQuickStudentName(e.target.value)}
+                  placeholder={isArabic ? "مثال: حسام علي حسن" : "e.g. John Smith"}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold text-slate-800"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">{isArabic ? "هاتف الطالب:" : "Student Phone:"}</label>
+                  <input
+                    type="tel"
+                    value={quickStudentPhone}
+                    onChange={e => setQuickStudentPhone(e.target.value)}
+                    placeholder="010..."
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 font-mono text-slate-800"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">{isArabic ? "هاتف ولي الأمر:" : "Parent Phone:"}</label>
+                  <input
+                    type="tel"
+                    value={quickParentPhone}
+                    onChange={e => setQuickParentPhone(e.target.value)}
+                    placeholder="011..."
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 font-mono text-slate-800"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">{isArabic ? "الصف الدراسي / المرحلة:" : "Grade / Stage:"}</label>
+                <input
+                  type="text"
+                  value={quickStudentAcademicYear}
+                  onChange={e => setQuickStudentAcademicYear(e.target.value)}
+                  placeholder={isArabic ? "مثال: الصف الأول الثانوي" : "e.g. Grade 10"}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-slate-800 font-medium"
+                />
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setGroupForQuickAddStudent(null)}
+                  className="px-3.5 py-1.5 rounded-xl bg-slate-100 text-slate-700 font-bold"
+                >
+                  {isArabic ? "إلغاء" : "Cancel"}
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-xs"
+                >
+                  {isArabic ? "إضافة وقيد بالمجموعة" : "Add & Enroll"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 8: Quick Edit Student Info */}
+      {studentToEdit && (
+        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white border border-slate-200 rounded-3xl p-5 max-w-md w-full shadow-2xl animate-in fade-in zoom-in-95">
+            <div className="flex justify-between items-center pb-2.5 border-b border-slate-100 mb-3">
+              <h3 className="font-black text-slate-900 text-sm flex items-center gap-2">
+                <Edit2 className="w-4 h-4 text-blue-600" />
+                <span>{isArabic ? `تعديل بيانات: ${studentToEdit.fullName}` : "Edit Student Info"}</span>
+              </h3>
+              <button onClick={() => setStudentToEdit(null)} className="text-slate-400 hover:text-slate-700">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditStudent} className="space-y-3 text-xs">
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">{isArabic ? "الاسم بالكامل *" : "Full Name *"}</label>
+                <input
+                  type="text"
+                  required
+                  value={editStudentName}
+                  onChange={e => setEditStudentName(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold text-slate-800"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">{isArabic ? "هاتف الطالب:" : "Student Phone:"}</label>
+                  <input
+                    type="tel"
+                    value={editStudentPhone}
+                    onChange={e => setEditStudentPhone(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 font-mono text-slate-800"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">{isArabic ? "هاتف ولي الأمر:" : "Parent Phone:"}</label>
+                  <input
+                    type="tel"
+                    value={editParentPhone}
+                    onChange={e => setEditParentPhone(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 font-mono text-slate-800"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">{isArabic ? "الصف الدراسي:" : "Grade:"}</label>
+                  <input
+                    type="text"
+                    value={editStudentAcademicYear}
+                    onChange={e => setEditStudentAcademicYear(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-slate-800"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">{isArabic ? "تكلفة الحصة (ج.م):" : "Lesson Cost:"}</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={editStudentLessonCost}
+                    onChange={e => setEditStudentLessonCost(Number(e.target.value))}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 font-bold text-slate-800"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setStudentToEdit(null)}
+                  className="px-3.5 py-1.5 rounded-xl bg-slate-100 text-slate-700 font-bold"
+                >
+                  {isArabic ? "إلغاء" : "Cancel"}
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-xs"
+                >
+                  {isArabic ? "حفظ التعديلات" : "Save Changes"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 9: Quick Payment Modal */}
+      {studentForPayment && (
+        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white border border-slate-200 rounded-3xl p-5 max-w-md w-full shadow-2xl animate-in fade-in zoom-in-95">
+            <div className="flex justify-between items-center pb-2.5 border-b border-slate-100 mb-3">
+              <h3 className="font-black text-slate-900 text-sm flex items-center gap-2">
+                <DollarSign className="w-4 h-4 text-emerald-600" />
+                <span>{isArabic ? `تسجيل دفعة: ${studentForPayment.fullName}` : "Record Payment"}</span>
+              </h3>
+              <button onClick={() => setStudentForPayment(null)} className="text-slate-400 hover:text-slate-700">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSavePaymentSubmit} className="space-y-3 text-xs">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">{isArabic ? "المبلغ المسدد (ج.م) *" : "Amount (EGP) *"}</label>
+                  <input
+                    type="number"
+                    min="1"
+                    required
+                    value={payAmount}
+                    onChange={e => setPayAmount(Number(e.target.value))}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold text-slate-800 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">{isArabic ? "عدد الحصص المشحونة:" : "Lessons Count:"}</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={payLessons}
+                    onChange={e => setPayLessons(Number(e.target.value))}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold text-slate-800 text-sm"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">{isArabic ? "ملاحظات الدفعة (اختياري):" : "Notes (Optional):"}</label>
+                <input
+                  type="text"
+                  value={payNotes}
+                  onChange={e => setPayNotes(e.target.value)}
+                  placeholder={isArabic ? "مثال: سداد شهر أكتوبر / تحويل فودافون كاش" : "Payment notes"}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800"
+                />
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setStudentForPayment(null)}
+                  className="px-3.5 py-1.5 rounded-xl bg-slate-100 text-slate-700 font-bold"
+                >
+                  {isArabic ? "إلغاء" : "Cancel"}
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-xs"
+                >
+                  {isArabic ? "حفظ الدفعة وتحديث الرصيد" : "Record Payment"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 10: Quick Exam Modal */}
+      {studentForExam && (
+        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white border border-slate-200 rounded-3xl p-5 max-w-md w-full shadow-2xl animate-in fade-in zoom-in-95">
+            <div className="flex justify-between items-center pb-2.5 border-b border-slate-100 mb-3">
+              <h3 className="font-black text-slate-900 text-sm flex items-center gap-2">
+                <Award className="w-4 h-4 text-purple-600" />
+                <span>{isArabic ? `إضافة اختبار: ${studentForExam.fullName}` : "Add Exam Score"}</span>
+              </h3>
+              <button onClick={() => setStudentForExam(null)} className="text-slate-400 hover:text-slate-700">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveExamSubmit} className="space-y-3 text-xs">
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">{isArabic ? "عنوان الاختبار *" : "Exam Name *"}</label>
+                <input
+                  type="text"
+                  required
+                  value={examName}
+                  onChange={e => setExamName(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold text-slate-800"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">{isArabic ? "درجة الطالب *" : "Student Score *"}</label>
+                  <input
+                    type="number"
+                    min="0"
+                    required
+                    value={examScore}
+                    onChange={e => setExamScore(Number(e.target.value))}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold text-slate-800 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">{isArabic ? "الدرجة النهائية *" : "Total Score *"}</label>
+                  <input
+                    type="number"
+                    min="1"
+                    required
+                    value={examTotalScore}
+                    onChange={e => setExamTotalScore(Number(e.target.value))}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold text-slate-800 text-sm"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">{isArabic ? "تاريخ الاختبار:" : "Date:"}</label>
+                <input
+                  type="date"
+                  required
+                  value={examDate}
+                  onChange={e => setExamDate(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800"
+                />
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setStudentForExam(null)}
+                  className="px-3.5 py-1.5 rounded-xl bg-slate-100 text-slate-700 font-bold"
+                >
+                  {isArabic ? "إلغاء" : "Cancel"}
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold shadow-xs"
+                >
+                  {isArabic ? "حفظ نتيجة الاختبار" : "Save Exam Score"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 11: Confirmation Dialog for Deleting Group */}
+      {groupToDelete && (
+        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white border border-slate-200 rounded-3xl p-5 max-w-md w-full shadow-2xl animate-in fade-in zoom-in-95 space-y-3">
+            <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+
+            <div className="text-center">
+              <h3 className="font-black text-slate-900 text-base">
+                {isArabic ? `حذف مجموعة: "${groupToDelete.name}"؟` : `Delete Group "${groupToDelete.name}"?`}
+              </h3>
+              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                {isArabic
+                  ? "سيتم حذف المجموعة ومواعيدها من الجدول، مع الإبقاء على ملفات الطلاب وسجلاتهم المالية بأمان تام في النظام."
+                  : "The group schedule will be deleted. Student records and finances remain safely in the system."}
+              </p>
+            </div>
+
+            <div className="pt-2 flex items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={() => setGroupToDelete(null)}
+                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs"
+              >
+                {isArabic ? "إلغاء وتراجع" : "Cancel"}
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteGroup}
+                className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-md shadow-rose-600/30"
+              >
+                {isArabic ? "نعم، احذف المجموعة الآن" : "Yes, Delete Group"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 12: Active Lesson Attendance & AI Report Session */}
       {activeLesson && (
         <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white border border-slate-200 rounded-3xl p-6 max-w-2xl w-full shadow-2xl my-8 space-y-6 max-h-[90vh] overflow-y-auto">
@@ -1301,42 +1873,43 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
                           >
                             {isArabic ? "غائب" : "Absent"}
                           </button>
+                        </div>
+
+                        {/* Homework status */}
+                        <div className="flex bg-slate-200/80 p-0.5 rounded-xl">
                           <button
                             type="button"
                             onClick={() =>
                               setAttendanceMap({
                                 ...attendanceMap,
-                                [stId]: { ...stData, attendance: "late" }
+                                [stId]: { ...stData, homeworkStatus: "done" }
                               })
                             }
                             className={`px-3 py-1 rounded-lg font-bold transition ${
-                              stData.attendance === "late"
-                                ? "bg-amber-500 text-white shadow-sm"
+                              stData.homeworkStatus === "done"
+                                ? "bg-blue-600 text-white shadow-sm"
                                 : "text-slate-600"
                             }`}
                           >
-                            {isArabic ? "متأخر" : "Late"}
+                            {isArabic ? "حل الواجب" : "HW Done"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setAttendanceMap({
+                                ...attendanceMap,
+                                [stId]: { ...stData, homeworkStatus: "not_done" }
+                              })
+                            }
+                            className={`px-3 py-1 rounded-lg font-bold transition ${
+                              stData.homeworkStatus === "not_done"
+                                ? "bg-amber-600 text-white shadow-sm"
+                                : "text-slate-600"
+                            }`}
+                          >
+                            {isArabic ? "لم يحل" : "No HW"}
                           </button>
                         </div>
-
-                        {/* Homework status */}
-                        <select
-                          value={stData.homeworkStatus}
-                          onChange={e =>
-                            setAttendanceMap({
-                              ...attendanceMap,
-                              [stId]: {
-                                ...stData,
-                                homeworkStatus: e.target.value as HomeworkStatus
-                              }
-                            })
-                          }
-                          className="bg-white border border-slate-300 rounded-xl px-2 py-1 font-semibold text-slate-700"
-                        >
-                          <option value="done">{isArabic ? "الواجب: تم" : "HW: Done"}</option>
-                          <option value="not_done">{isArabic ? "الواجب: لم يتم" : "HW: Not Done"}</option>
-                          <option value="late">{isArabic ? "الواجب: متأخر" : "HW: Late"}</option>
-                        </select>
                       </div>
                     </div>
                   );
@@ -1344,11 +1917,10 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
               </div>
             </div>
 
-            {/* Field 1: Teacher Notes */}
-            <div className="space-y-1">
-              <label className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
-                <BookOpen className="w-4 h-4 text-blue-600" />
-                <span>📝 {isArabic ? "ماذا حدث في الحصة؟" : "What happened in the lesson?"}</span>
+            {/* Teacher notes */}
+            <div className="space-y-1.5">
+              <label className="block font-bold text-slate-800 text-xs">
+                {isArabic ? "ملاحظات المعلم ونقاط الحصة:" : "Teacher Notes:"}
               </label>
               <textarea
                 rows={3}
@@ -1356,90 +1928,35 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
                 onChange={e => setTeacherNotes(e.target.value)}
                 placeholder={
                   isArabic
-                    ? "اكتب تفاصيل الدرس، ما تم انجازه، والواجبات المطلوبة..."
-                    : "Write lesson summary, topics covered, homework assigned..."
+                    ? "اكتب تفاصيل ما تم شرحه، أداء الطلاب، أو التكليفات القادمة..."
+                    : "Enter session topics, student performance..."
                 }
                 className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-3 text-xs text-slate-800 focus:outline-none focus:border-blue-500"
               />
             </div>
 
-            {/* Field 2: AI Instructions */}
+            {/* AI Report Generator */}
             <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
+              <label className="block font-bold text-slate-800 text-xs flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
                   <Sparkles className="w-4 h-4 text-indigo-600" />
-                  <span>🤖 {isArabic ? "تعليمات للذكاء الاصطناعي" : "Instructions for AI"}</span>
-                </label>
-                {activeLesson?.subject && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const cleanSubj = (activeLesson.subject || "").trim().toLowerCase();
-                      const match = settings.subjectDefaults?.find(s => {
-                        const sClean = s.subject.trim().toLowerCase();
-                        return sClean === cleanSubj || cleanSubj.includes(sClean) || sClean.includes(cleanSubj);
-                      });
-                      setAiInstructions(match ? match.instruction : (settings.generalAiInstructions || ""));
-                    }}
-                    className="text-[10px] text-indigo-600 hover:text-indigo-800 font-bold underline"
-                  >
-                    {isArabic ? "إعادة تعيين لتعليمات المادة" : "Reset to subject prompt"}
-                  </button>
-                )}
-              </div>
-
-              {/* Subject Prompt Badge */}
-              {activeLesson?.subject && (
-                (() => {
-                  const cleanSubj = activeLesson.subject.trim().toLowerCase();
-                  const match = settings.subjectDefaults?.find(s => {
-                    const sClean = s.subject.trim().toLowerCase();
-                    return sClean === cleanSubj || cleanSubj.includes(sClean) || sClean.includes(cleanSubj);
-                  });
-                  if (match) {
-                    return (
-                      <div className="px-2.5 py-1 rounded-xl bg-indigo-50 border border-indigo-100 text-indigo-900 text-[11px] font-medium flex items-center gap-1.5">
-                        <Sparkles className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                        <span>
-                          {isArabic
-                            ? `تم جلب تعليمات مادة (${match.subject}) تلقائياً`
-                            : `Loaded instructions for subject (${match.subject})`}
-                        </span>
-                      </div>
-                    );
-                  }
-                  return (
-                    <div className="px-2.5 py-1 rounded-xl bg-slate-100 text-slate-600 text-[10px] font-medium">
-                      {isArabic
-                        ? `ℹ️ تعتمد على التعليمات العامة (يمكنك تخصيص حقل مادة ${activeLesson.subject} من الإعدادات)`
-                        : `Using general prompt (you can set custom prompt for ${activeLesson.subject} in settings)`}
-                    </div>
-                  );
-                })()
-              )}
-
+                  <span>{isArabic ? "توجيهات الذكاء الاصطناعي (AI Prompt):" : "AI Instructions:"}</span>
+                </span>
+              </label>
               <textarea
                 rows={2}
                 value={aiInstructions}
                 onChange={e => setAiInstructions(e.target.value)}
-                placeholder={
-                  isArabic
-                    ? "مثال: اكتب تقريراً مشجعاً لولي الأمر، ابدأ بنقطة إيجابية..."
-                    : "e.g., Write an encouraging report starting with a positive point..."
-                }
                 className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-3 text-xs text-slate-800 focus:outline-none focus:border-indigo-500"
               />
             </div>
 
-            {/* Field 3: Image / Document Attachment */}
+            {/* Attachment */}
             <div className="space-y-1.5">
               <label className="block font-bold text-slate-800 text-xs flex items-center justify-between">
                 <span className="flex items-center gap-1.5">
                   <Paperclip className="w-4 h-4 text-indigo-600" />
-                  <span>{isArabic ? "إرفاق صورة أو مستند للحصة (اختبار / ورقة عمل / واجب):" : "Attach Image / Document:"}</span>
-                </span>
-                <span className="text-[10px] font-medium text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full">
-                  {isArabic ? "اختياري" : "Optional"}
+                  <span>{isArabic ? "إرفاق صورة أو مستند للحصة:" : "Attach Image / Document:"}</span>
                 </span>
               </label>
 
@@ -1455,32 +1972,15 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
                     <FileUp className="w-4 h-4 text-indigo-600 group-hover:scale-110 transition" />
                     <span>{isArabic ? "اضغط هنا لإرفاق صورة أو ملف الحصة" : "Click to attach image or document"}</span>
                   </div>
-                  <p className="text-[10px] text-slate-400 mt-0.5">
-                    {isArabic
-                      ? "يتيح للذكاء الاصطناعي قراءة ورقة الاختبار أو التمارين وإضافتها للتقرير"
-                      : "Allows AI to analyze worksheets or exam photos for the report"}
-                  </p>
                 </label>
               ) : (
                 <div className="p-3 bg-white border border-indigo-200 rounded-2xl flex items-center justify-between gap-3 shadow-2xs">
                   <div className="flex items-center gap-3 overflow-hidden">
-                    {lessonAttachment.previewUrl ? (
-                      <img
-                        src={lessonAttachment.previewUrl}
-                        alt="Attachment Preview"
-                        className="w-11 h-11 object-cover rounded-lg border border-indigo-100 shrink-0"
-                      />
-                    ) : (
-                      <div className="w-10 h-10 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0 font-bold text-xs">
-                        <FileText className="w-5 h-5" />
-                      </div>
-                    )}
+                    <div className="w-10 h-10 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0 font-bold text-xs">
+                      <FileText className="w-5 h-5" />
+                    </div>
                     <div className="min-w-0">
                       <p className="font-bold text-slate-800 text-xs truncate">{lessonAttachment.fileName || "ملف مرفق"}</p>
-                      <p className="text-[10px] text-indigo-600 font-semibold flex items-center gap-1 mt-0.5">
-                        <Sparkles className="w-3 h-3 text-amber-500" />
-                        <span>{isArabic ? "سيتم تحليله بالذكاء الاصطناعي" : "Will be analyzed by AI"}</span>
-                      </p>
                     </div>
                   </div>
 
@@ -1488,7 +1988,6 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
                     type="button"
                     onClick={() => setLessonAttachment(null)}
                     className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition shrink-0"
-                    title={isArabic ? "إزالة المرفق" : "Remove attachment"}
                   >
                     <X className="w-4 h-4" />
                   </button>
@@ -1496,7 +1995,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
               )}
             </div>
 
-            {/* AI Report Generation Action */}
+            {/* AI Generate Button */}
             <div className="space-y-3">
               <button
                 type="button"
@@ -1511,28 +2010,6 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
                     : (isArabic ? "✨ إنشاء التقرير بالذكاء الاصطناعي" : "✨ Generate AI Report")}
                 </span>
               </button>
-
-              {/* WhatsApp Group Link Input */}
-              <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3 space-y-1.5">
-                <label className="block font-bold text-slate-700 text-xs flex items-center gap-1.5">
-                  <Share2 className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>{isArabic ? "رابط جروب الواتساب لإرسال التقرير" : "WhatsApp Group Link for Report"}</span>
-                </label>
-                <input
-                  type="url"
-                  value={lessonWhatsappLink}
-                  onChange={e => setLessonWhatsappLink(e.target.value)}
-                  placeholder={isArabic ? "https://chat.whatsapp.com/..." : "https://chat.whatsapp.com/..."}
-                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-emerald-500 text-left dir-ltr"
-                />
-              </div>
-
-              {whatsappSentNotice && (
-                <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center gap-2 animate-in fade-in">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span>{whatsappSentNotice}</span>
-                </div>
-              )}
 
               {generatedReportText && (
                 <div className="p-4 rounded-2xl bg-slate-900 text-slate-100 text-xs space-y-3">
@@ -1559,15 +2036,6 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
                     onChange={e => setGeneratedReportText(e.target.value)}
                     className="w-full bg-slate-800/80 border border-slate-700 rounded-xl p-3 text-slate-200 text-xs focus:outline-none leading-relaxed"
                   />
-
-                  <button
-                    type="button"
-                    onClick={handleSendToWhatsappGroup}
-                    className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md shadow-emerald-600/30 transition flex items-center justify-center gap-2"
-                  >
-                    <Share2 className="w-4 h-4" />
-                    <span>{isArabic ? "📱 إرسال التقرير المباشر لجروب الواتساب" : "📱 Send Report to WhatsApp Group"}</span>
-                  </button>
                 </div>
               )}
             </div>

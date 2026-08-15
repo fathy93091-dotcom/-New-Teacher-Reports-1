@@ -33,7 +33,14 @@ import {
   BookOpen,
   Smartphone,
   Globe,
-  ExternalLink
+  ExternalLink,
+  Archive,
+  ArchiveRestore,
+  FolderArchive,
+  Filter,
+  History,
+  LayoutGrid,
+  List
 } from "lucide-react";
 import {
   Student,
@@ -67,6 +74,36 @@ const COMMON_SUBJECT_SUGGESTIONS = [
   "الفرنساوي"
 ];
 
+export const COMMON_CURRICULUMS = [
+  { label: "منهج مصري (عربي)", flag: "🇪🇬" },
+  { label: "منهج مصري (لغات / تجريبي)", flag: "🇪🇬" },
+  { label: "منهج سعودي", flag: "🇸🇦" },
+  { label: "منهج إماراتي", flag: "🇦🇪" },
+  { label: "منهج كويتي", flag: "🇰🇼" },
+  { label: "منهج قطري", flag: "🇶🇦" },
+  { label: "منهج عماني", flag: "🇴🇲" },
+  { label: "منهج أردني", flag: "🇯🇴" },
+  { label: "دولي (IGCSE / SAT / American)", flag: "🌐" },
+  { label: "أزهري (مصر)", flag: "🕌" },
+  { label: "منهج عام / حر", flag: "📚" }
+];
+
+export const COMMON_GRADES = [
+  "الصف الأول الابتدائي",
+  "الصف الثاني الابتدائي",
+  "الصف الثالث الابتدائي",
+  "الصف الرابع الابتدائي",
+  "الصف الخامس الابتدائي",
+  "الصف السادس الابتدائي",
+  "الصف الأول الإعدادي",
+  "الصف الثاني الإعدادي",
+  "الصف الثالث الإعدادي",
+  "الصف الأول الثانوي",
+  "الصف الثاني الثانوي",
+  "الصف الثالث الثانوي",
+  "المرحلة الجامعية"
+];
+
 interface StudentsViewProps {
   settings: AppSettings;
   students: Student[];
@@ -82,6 +119,7 @@ interface StudentsViewProps {
   onAddExamRecord?: (studentId: string, examName: string, score: number, totalScore: number, date: string) => void;
   onAddReport: (report: Omit<GeneratedReport, "id" | "createdAt">) => void;
   onDeleteReport: (reportId: string) => void;
+  onToggleArchiveReport?: (reportId: string) => void;
   onGenerateReportAi: (payload: {
     studentName: string;
     subject: string;
@@ -106,15 +144,24 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   onAddExamRecord,
   onAddReport,
   onDeleteReport,
+  onToggleArchiveReport,
   onGenerateReportAi
 }) => {
   const isArabic = settings.preferredLanguage === "ar";
   const [filterStatus, setFilterStatus] = useState<"all" | "active" | "stopped">("all");
+  const [filterCurriculum, setFilterCurriculum] = useState("all");
+  const [filterGrade, setFilterGrade] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [viewLayout, setViewLayout] = useState<"grid" | "table">("grid");
 
   // Selected Student for Profile View
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [profileTab, setProfileTab] = useState<"finance" | "attendance" | "reports">("reports");
+
+  // Report Archive Filter State (+6 months auto-archiving)
+  const [reportArchiveFilter, setReportArchiveFilter] = useState<"active" | "archived" | "all">("active");
+  const [archiveSearchQuery, setArchiveSearchQuery] = useState("");
+  const [archiveSubjectFilter, setArchiveSubjectFilter] = useState("all");
 
   // AI Report State inside Student Profile
   const [showCreateReportForm, setShowCreateReportForm] = useState(false);
@@ -337,6 +384,9 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   const [showAddStudentModal, setShowAddStudentModal] = useState(false);
   const [fullName, setFullName] = useState("");
   const [studentNumber, setStudentNumber] = useState("");
+  const [studentPhone, setStudentPhone] = useState("");
+  const [academicYear, setAcademicYear] = useState("");
+  const [curriculum, setCurriculum] = useState("منهج مصري (عربي)");
   const [parentContact, setParentContact] = useState("+20");
   const [whatsappGroupLink, setWhatsappGroupLink] = useState("");
   const [notes, setNotes] = useState("");
@@ -408,6 +458,9 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   const [showEditStudentModal, setShowEditStudentModal] = useState(false);
   const [editFullName, setEditFullName] = useState("");
   const [editStudentNumber, setEditStudentNumber] = useState("");
+  const [editStudentPhone, setEditStudentPhone] = useState("");
+  const [editAcademicYear, setEditAcademicYear] = useState("");
+  const [editCurriculum, setEditCurriculum] = useState("");
   const [editParentContact, setEditParentContact] = useState("+20");
   const [editWhatsappGroupLink, setEditWhatsappGroupLink] = useState("");
   const [editNotes, setEditNotes] = useState("");
@@ -416,6 +469,9 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   const handleOpenEditStudent = (st: Student) => {
     setEditFullName(st.fullName || "");
     setEditStudentNumber(st.studentNumber || "");
+    setEditStudentPhone(st.studentPhone || "");
+    setEditAcademicYear(st.academicYear || "");
+    setEditCurriculum(st.curriculum || "");
     setEditParentContact(st.parentContact || "+20");
     setEditWhatsappGroupLink(st.whatsappGroupLink || "");
     setEditNotes(st.notes || "");
@@ -472,6 +528,9 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     const updatedData: Partial<Student> = {
       fullName: editFullName.trim(),
       studentNumber: editStudentNumber.trim() || undefined,
+      studentPhone: editStudentPhone.trim() || undefined,
+      academicYear: editAcademicYear.trim() || undefined,
+      curriculum: editCurriculum.trim() || undefined,
       parentContact: editParentContact.trim(),
       whatsappGroupLink: editWhatsappGroupLink.trim() || undefined,
       studyType: primaryStudyType,
@@ -506,11 +565,16 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   const filteredStudents = students.filter(s => {
     if (filterStatus === "active" && s.status !== "active") return false;
     if (filterStatus === "stopped" && s.status !== "stopped") return false;
+    if (filterCurriculum !== "all" && s.curriculum !== filterCurriculum) return false;
+    if (filterGrade !== "all" && s.academicYear !== filterGrade) return false;
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       return (
         s.fullName.toLowerCase().includes(q) ||
         s.subject.toLowerCase().includes(q) ||
+        (s.academicYear && s.academicYear.toLowerCase().includes(q)) ||
+        (s.curriculum && s.curriculum.toLowerCase().includes(q)) ||
+        (s.studentPhone && s.studentPhone.includes(q)) ||
         (s.parentContact && s.parentContact.includes(q))
       );
     }
@@ -552,6 +616,9 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     onAddStudent({
       fullName: fullName.trim(),
       studentNumber: studentNumber.trim() || undefined,
+      studentPhone: studentPhone.trim() || undefined,
+      academicYear: academicYear.trim() || undefined,
+      curriculum: curriculum.trim() || undefined,
       parentContact: parentContact.trim(),
       whatsappGroupLink: whatsappGroupLink.trim() || undefined,
       studyType: primaryStudyType,
@@ -576,6 +643,9 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   const resetAddStudentForm = () => {
     setFullName("");
     setStudentNumber("");
+    setStudentPhone("");
+    setAcademicYear("");
+    setCurriculum("منهج مصري (عربي)");
     setParentContact("+20");
     setWhatsappGroupLink("");
     setNotes("");
@@ -633,35 +703,77 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   };
 
   return (
-    <div className="space-y-6 pb-20">
+    <div className="space-y-3 pb-8">
       {/* Top Header & Search */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white border border-slate-200/80 rounded-2xl p-4 sm:p-5 shadow-2xs">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
-            {isArabic ? "دليل الطلاب والمتابعة" : "Student Directory"}
-          </h1>
-          <p className="text-[11px] sm:text-xs text-slate-500 font-medium mt-0.5">
-            {isArabic
-              ? "متابعة مستمرة لدرجات الطلاب، الحضور والغياب، وحساب الحصص المتبقية والمواد."
-              : "Manage and track student progress, attendance, fees and subjects."}
-          </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 bg-white border border-slate-200/80 rounded-2xl p-3 sm:p-4 shadow-2xs">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 border border-blue-100 flex items-center justify-center font-bold shrink-0">
+            <GraduationCap className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-base sm:text-lg font-black text-slate-900 tracking-tight">
+                {isArabic ? "دليل الطلاب والمتابعة" : "Student Directory"}
+              </h1>
+              <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-bold text-[10px]">
+                {filteredStudents.length} / {students.length} {isArabic ? "طالب" : "students"}
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+              {isArabic
+                ? "متابعة شاملة لبيانات الطلاب، الحضور والغياب، المناهج، والوضع المالي."
+                : "Manage student records, attendance, curriculum, and financial balances."}
+            </p>
+          </div>
         </div>
 
-        <button
-          onClick={() => setShowAddStudentModal(true)}
-          className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md shadow-blue-600/25 transition flex items-center gap-1.5 self-start sm:self-auto shrink-0"
-        >
-          <Plus className="w-4 h-4" />
-          <span>{isArabic ? "إضافة طالب جديد" : "Add Student"}</span>
-        </button>
+        <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+          {/* View Mode Switcher */}
+          <div className="flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200">
+            <button
+              type="button"
+              onClick={() => setViewLayout("grid")}
+              title={isArabic ? "عرض البطاقات الشبكية" : "Grid View"}
+              className={`p-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1 ${
+                viewLayout === "grid"
+                  ? "bg-white text-slate-900 shadow-2xs"
+                  : "text-slate-500 hover:text-slate-800"
+              }`}
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline text-[11px]">{isArabic ? "بطاقات" : "Grid"}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewLayout("table")}
+              title={isArabic ? "عرض الجدول التفصيلي" : "Table View"}
+              className={`p-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1 ${
+                viewLayout === "table"
+                  ? "bg-white text-slate-900 shadow-2xs"
+                  : "text-slate-500 hover:text-slate-800"
+              }`}
+            >
+              <List className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline text-[11px]">{isArabic ? "جدول" : "Table"}</span>
+            </button>
+          </div>
+
+          <button
+            onClick={() => setShowAddStudentModal(true)}
+            className="px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md shadow-blue-600/25 transition flex items-center gap-1.5"
+          >
+            <Plus className="w-4 h-4" />
+            <span>{isArabic ? "إضافة طالب" : "Add Student"}</span>
+          </button>
+        </div>
       </div>
 
       {/* Filter Tabs & Search */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+      <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 flex-wrap">
           <button
             onClick={() => setFilterStatus("all")}
-            className={`px-3 py-1.5 rounded-xl font-bold text-xs transition ${
+            className={`px-2.5 py-1 rounded-xl font-bold text-xs transition ${
               filterStatus === "all"
                 ? "bg-slate-900 text-white shadow-2xs"
                 : "bg-white text-slate-600 border border-slate-200 hover:border-slate-300"
@@ -671,7 +783,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
           </button>
           <button
             onClick={() => setFilterStatus("active")}
-            className={`px-3 py-1.5 rounded-xl font-bold text-xs transition flex items-center gap-1.5 ${
+            className={`px-2.5 py-1 rounded-xl font-bold text-xs transition flex items-center gap-1.5 ${
               filterStatus === "active"
                 ? "bg-emerald-600 text-white shadow-2xs"
                 : "bg-white text-slate-600 border border-slate-200 hover:border-slate-300"
@@ -682,7 +794,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
           </button>
           <button
             onClick={() => setFilterStatus("stopped")}
-            className={`px-3 py-1.5 rounded-xl font-bold text-xs transition flex items-center gap-1.5 ${
+            className={`px-2.5 py-1 rounded-xl font-bold text-xs transition flex items-center gap-1.5 ${
               filterStatus === "stopped"
                 ? "bg-slate-700 text-white shadow-2xs"
                 : "bg-white text-slate-600 border border-slate-200 hover:border-slate-300"
@@ -691,45 +803,74 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
             <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
             <span>{isArabic ? "المتوقفون" : "Stopped"}</span>
           </button>
+
+          {/* Curriculum Filter */}
+          <select
+            value={filterCurriculum}
+            onChange={e => setFilterCurriculum(e.target.value)}
+            className="px-2.5 py-1 rounded-xl text-xs font-bold bg-white text-slate-700 border border-slate-200 focus:outline-none focus:border-blue-500"
+          >
+            <option value="all">{isArabic ? "🌍 كل المناهج" : "All Curricula"}</option>
+            {COMMON_CURRICULUMS.map(c => (
+              <option key={c.label} value={c.label}>
+                {c.flag} {c.label}
+              </option>
+            ))}
+          </select>
+
+          {/* Grade Filter */}
+          <select
+            value={filterGrade}
+            onChange={e => setFilterGrade(e.target.value)}
+            className="px-2.5 py-1 rounded-xl text-xs font-bold bg-white text-slate-700 border border-slate-200 focus:outline-none focus:border-blue-500"
+          >
+            <option value="all">{isArabic ? "🎓 كل الصفوف" : "All Grades"}</option>
+            {COMMON_GRADES.map(g => (
+              <option key={g} value={g}>
+                {g}
+              </option>
+            ))}
+          </select>
         </div>
 
-        <div className="relative flex-1 max-w-xs">
+        <div className="relative flex-1 max-w-sm">
           <Search className="w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             type="text"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            placeholder={isArabic ? "ابحث باسم الطالب، رقم الموبايل..." : "Search student..."}
+            placeholder={isArabic ? "بحث بالاسم، المنهج، الصف، الهاتف..." : "Search student, curriculum, grade, phone..."}
             className="w-full bg-white border border-slate-200 rounded-xl pr-8 pl-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500"
           />
         </div>
       </div>
 
-      {/* Student Cards Grid - Highly Space-Optimized Bento */}
-      <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-2.5 sm:gap-3">
-        {filteredStudents.length === 0 ? (
-          <div className="col-span-full text-center py-8 bg-white border border-slate-200/80 rounded-2xl">
-            <GraduationCap className="w-8 h-8 mx-auto text-slate-300 mb-1.5" />
-            <p className="text-xs font-bold text-slate-600">
-              {isArabic ? "لا يوجد طلاب يطابقون خيارات البحث." : "No students found."}
-            </p>
-          </div>
-        ) : (
-          filteredStudents.map(student => {
+      {/* View Rendering: Grid vs Table */}
+      {filteredStudents.length === 0 ? (
+        <div className="text-center py-10 bg-white border border-slate-200/80 rounded-2xl">
+          <GraduationCap className="w-8 h-8 mx-auto text-slate-300 mb-1.5" />
+          <p className="text-xs font-bold text-slate-600">
+            {isArabic ? "لا يوجد طلاب يطابقون خيارات البحث." : "No students found."}
+          </p>
+        </div>
+      ) : viewLayout === "grid" ? (
+        /* Student Cards Grid - High Density Multi-Col Responsive Bento */
+        <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2 sm:gap-2.5">
+          {filteredStudents.map(student => {
             const isStopped = student.status === "stopped";
             const finSummary = calculateStudentFinancials(student, attendanceRecords);
 
             return (
               <div
                 key={student.id}
-                className={`bg-white border rounded-2xl p-2.5 sm:p-3.5 shadow-2xs hover:shadow-md transition-all flex flex-col justify-between ${
+                className={`bg-white border rounded-2xl p-2.5 sm:p-3 shadow-2xs hover:shadow-md transition-all flex flex-col justify-between ${
                   isStopped ? "border-slate-200 opacity-75 bg-slate-50/60" : "border-slate-200/90 hover:border-blue-300"
                 }`}
               >
                 <div>
                   <div className="flex items-center justify-between gap-1 mb-1">
                     <span
-                      className={`px-1.5 py-0.5 rounded-md text-[8.5px] sm:text-[9px] font-black flex items-center gap-1 truncate ${
+                      className={`px-1.5 py-0.5 rounded-md text-[8.5px] font-black flex items-center gap-1 truncate ${
                         isStopped
                           ? "bg-slate-100 text-slate-600 border border-slate-200"
                           : "bg-emerald-50 text-emerald-700 border border-emerald-200"
@@ -744,7 +885,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                     </span>
 
                     <span
-                      className={`px-1.5 py-0.5 rounded-md text-[8.5px] sm:text-[9px] font-black shrink-0 ${
+                      className={`px-1.5 py-0.5 rounded-md text-[8.5px] font-black shrink-0 ${
                         finSummary.statusBadge.color === "emerald"
                           ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
                           : finSummary.statusBadge.color === "amber"
@@ -761,6 +902,24 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                   <h3 className="text-xs sm:text-sm font-black text-slate-900 truncate leading-snug">
                     {student.fullName}
                   </h3>
+
+                  {/* Academic Year & Curriculum Badges */}
+                  {(student.academicYear || student.curriculum) && (
+                    <div className="flex flex-wrap items-center gap-1 mt-1">
+                      {student.academicYear && (
+                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-amber-50 border border-amber-200/80 text-amber-900 text-[8.5px] font-bold">
+                          <span>🎓</span>
+                          <span className="truncate max-w-[95px]">{student.academicYear}</span>
+                        </span>
+                      )}
+                      {student.curriculum && (
+                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-indigo-50 border border-indigo-200/80 text-indigo-900 text-[8.5px] font-bold">
+                          <span>📖</span>
+                          <span className="truncate max-w-[80px]">{student.curriculum}</span>
+                        </span>
+                      )}
+                    </div>
+                  )}
                   
                   {student.subjects && student.subjects.length > 0 ? (
                     <div className="flex flex-wrap gap-1 mt-1">
@@ -781,11 +940,18 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                     </div>
                   )}
 
-                  <div className="mt-2 pt-1.5 border-t border-slate-100 space-y-1 text-slate-600 text-[9.5px] sm:text-[10.5px]">
+                  <div className="mt-1.5 pt-1.5 border-t border-slate-100 space-y-1 text-slate-600 text-[9.5px]">
                     <div className="flex items-center justify-between">
                       <span className="text-slate-400">{isArabic ? "ولي الأمر:" : "Parent:"}</span>
-                      <span className="font-mono font-bold text-slate-800 dir-ltr truncate max-w-[85px] sm:max-w-none">{student.parentContact}</span>
+                      <span className="font-mono font-bold text-slate-800 dir-ltr truncate max-w-[85px]">{student.parentContact}</span>
                     </div>
+
+                    {student.studentPhone && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400">{isArabic ? "هاتف الطالب:" : "Student:"}</span>
+                        <span className="font-mono font-bold text-slate-700 dir-ltr truncate max-w-[85px]">{student.studentPhone}</span>
+                      </div>
+                    )}
 
                     <div className="flex items-center justify-between">
                       <span className="text-slate-400">{isArabic ? "الحصص المنفذة:" : "Attended:"}</span>
@@ -801,7 +967,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                           ? `مستحق ${finSummary.amountDue} ج.م`
                           : finSummary.creditRemaining > 0
                           ? `رصيد +${finSummary.creditRemaining} ج.م`
-                          : (isArabic ? "مسدد بالكامل" : "Settled")}
+                          : (isArabic ? "مسدد" : "Settled")}
                       </span>
                     </div>
                   </div>
@@ -813,7 +979,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                       setSelectedStudent(student);
                       setProfileTab("finance");
                     }}
-                    className="flex-1 py-1 px-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-bold text-[10px] sm:text-xs transition shadow-2xs text-center truncate"
+                    className="flex-1 py-1 px-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-bold text-[10px] transition shadow-2xs text-center truncate"
                   >
                     {isArabic ? "ملف الطالب" : "Profile"}
                   </button>
@@ -828,9 +994,172 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                 </div>
               </div>
             );
-          })
-        )}
-      </div>
+          })}
+        </div>
+      ) : (
+        /* Full-Width Spreadsheet Table View */
+        <div className="bg-white border border-slate-200/90 rounded-2xl overflow-hidden shadow-2xs">
+          <div className="overflow-x-auto">
+            <table className="w-full text-right border-collapse text-xs">
+              <thead>
+                <tr className="bg-slate-50/90 border-b border-slate-200 text-slate-600 font-bold text-[11px]">
+                  <th className="py-2.5 px-3 text-center w-10">#</th>
+                  <th className="py-2.5 px-3">{isArabic ? "اسم الطالب" : "Student Name"}</th>
+                  <th className="py-2.5 px-3">{isArabic ? "الصف والمنهج" : "Grade & Curriculum"}</th>
+                  <th className="py-2.5 px-3">{isArabic ? "المواد والنوع" : "Subjects"}</th>
+                  <th className="py-2.5 px-3">{isArabic ? "الهواتف والاتصال" : "Contact Numbers"}</th>
+                  <th className="py-2.5 px-3 text-center">{isArabic ? "الحصص المنفذة" : "Attended"}</th>
+                  <th className="py-2.5 px-3 text-center">{isArabic ? "الموقف المالي" : "Financial Status"}</th>
+                  <th className="py-2.5 px-3 text-center">{isArabic ? "الحالة" : "Status"}</th>
+                  <th className="py-2.5 px-3 text-center">{isArabic ? "الإجراءات" : "Actions"}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filteredStudents.map((student, idx) => {
+                  const isStopped = student.status === "stopped";
+                  const finSummary = calculateStudentFinancials(student, attendanceRecords);
+
+                  return (
+                    <tr
+                      key={student.id}
+                      className={`hover:bg-blue-50/40 transition ${
+                        isStopped ? "bg-slate-50/50 text-slate-500" : ""
+                      }`}
+                    >
+                      <td className="py-2 px-3 text-center font-mono text-[10px] text-slate-400 font-bold">
+                        {idx + 1}
+                      </td>
+
+                      <td className="py-2 px-3">
+                        <div className="font-bold text-slate-900 text-xs">
+                          {student.fullName}
+                        </div>
+                        {student.studentNumber && (
+                          <div className="text-[10px] text-slate-400 font-mono">
+                            #{student.studentNumber}
+                          </div>
+                        )}
+                      </td>
+
+                      <td className="py-2 px-3">
+                        <div className="flex flex-wrap items-center gap-1">
+                          {student.academicYear ? (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-amber-50 text-amber-900 border border-amber-200/70 text-[9.5px] font-bold">
+                              <span>🎓</span>
+                              <span>{student.academicYear}</span>
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-slate-400">-</span>
+                          )}
+                          {student.curriculum && (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-900 border border-indigo-200/70 text-[9.5px] font-bold">
+                              <span>📖</span>
+                              <span>{student.curriculum}</span>
+                            </span>
+                          )}
+                        </div>
+                      </td>
+
+                      <td className="py-2 px-3">
+                        {student.subjects && student.subjects.length > 0 ? (
+                          <div className="flex flex-wrap gap-1">
+                            {student.subjects.map((sub, sIdx) => (
+                              <span
+                                key={sub.id || sIdx}
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-100 text-slate-800 text-[10px] font-medium"
+                              >
+                                <span>{sub.studyType === "group" ? "👥" : "👤"}</span>
+                                <span className="font-bold">{sub.subject}</span>
+                                <span className="text-blue-600 font-mono text-[9px]">({sub.lessonCost} ج.م)</span>
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-slate-700 font-bold">{student.subject}</span>
+                        )}
+                      </td>
+
+                      <td className="py-2 px-3 font-mono text-[11px]">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] text-slate-400 font-sans">{isArabic ? "ولي الأمر:" : "Parent:"}</span>
+                          <span className="font-bold text-slate-800 dir-ltr">{student.parentContact}</span>
+                        </div>
+                        {student.studentPhone && (
+                          <div className="flex items-center gap-1.5 text-slate-600">
+                            <span className="text-[10px] text-slate-400 font-sans">{isArabic ? "الطالب:" : "Student:"}</span>
+                            <span className="dir-ltr">{student.studentPhone}</span>
+                          </div>
+                        )}
+                      </td>
+
+                      <td className="py-2 px-3 text-center">
+                        <span className="font-bold text-blue-700">
+                          {finSummary.totalAttendedLessons} {isArabic ? "حصة" : "lss"}
+                        </span>
+                        <div className="text-[10px] text-slate-400 font-mono">
+                          {finSummary.totalAccruedCost} ج.م
+                        </div>
+                      </td>
+
+                      <td className="py-2 px-3 text-center">
+                        <span
+                          className={`inline-block px-2 py-0.5 rounded-lg text-[10px] font-black ${
+                            finSummary.amountDue > 0
+                              ? "bg-rose-50 text-rose-700 border border-rose-200"
+                              : finSummary.creditRemaining > 0
+                              ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                              : "bg-blue-50 text-blue-700 border border-blue-200"
+                          }`}
+                        >
+                          {finSummary.amountDue > 0
+                            ? `مستحق ${finSummary.amountDue} ج.م`
+                            : finSummary.creditRemaining > 0
+                            ? `رصيد +${finSummary.creditRemaining} ج.م`
+                            : (isArabic ? "مسدد بالكامل" : "Settled")}
+                        </span>
+                      </td>
+
+                      <td className="py-2 px-3 text-center">
+                        <span
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            isStopped
+                              ? "bg-slate-100 text-slate-600"
+                              : "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                          }`}
+                        >
+                          <span className={`w-1.5 h-1.5 rounded-full ${isStopped ? "bg-slate-400" : "bg-emerald-500"}`} />
+                          <span>{isStopped ? (isArabic ? "متوقف" : "Stopped") : (isArabic ? "نشط" : "Active")}</span>
+                        </span>
+                      </td>
+
+                      <td className="py-2 px-3 text-center">
+                        <div className="flex items-center justify-center gap-1">
+                          <button
+                            onClick={() => {
+                              setSelectedStudent(student);
+                              setProfileTab("finance");
+                            }}
+                            className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-bold text-[10.5px] transition shadow-2xs"
+                          >
+                            {isArabic ? "الملف" : "Profile"}
+                          </button>
+                          <button
+                            onClick={() => openWhatsApp(student.parentContact)}
+                            title={isArabic ? "واتساب" : "WhatsApp"}
+                            className="p-1 rounded-lg bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition"
+                          >
+                            <MessageSquare className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Modal: Create Student - Ultra Space Optimized Bento Layout */}
       {showAddStudentModal && (
@@ -860,8 +1189,8 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 
             <form onSubmit={handleCreateStudent} className="space-y-3 text-xs mt-3">
               {/* Top Compact Student Info Grid */}
-              <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2.5">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <div>
                     <label className="block font-bold text-slate-700 mb-1 text-[11px]">
                       {isArabic ? "اسم الطالب بالكامل *" : "Student Full Name *"}
@@ -891,10 +1220,100 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {/* Grade & Curriculum Section */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2 border-t border-slate-200/70">
                   <div>
                     <label className="block font-bold text-slate-700 mb-1 text-[11px]">
-                      {isArabic ? "رقم/كود الطالب (اختياري)" : "Student ID (Optional)"}
+                      🎓 {isArabic ? "الصف الدراسي / المرحلة" : "Academic Grade / Year"}
+                    </label>
+                    <div className="space-y-1.5">
+                      <select
+                        value={COMMON_GRADES.includes(academicYear) ? academicYear : (academicYear ? "other" : "")}
+                        onChange={e => {
+                          if (e.target.value === "other") {
+                            setAcademicYear("");
+                          } else {
+                            setAcademicYear(e.target.value);
+                          }
+                        }}
+                        className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 font-bold focus:outline-none focus:border-blue-500"
+                      >
+                        <option value="">{isArabic ? "-- اختر الصف الدراسي --" : "-- Select Grade --"}</option>
+                        {COMMON_GRADES.map(g => (
+                          <option key={g} value={g}>
+                            {g}
+                          </option>
+                        ))}
+                        <option value="other">{isArabic ? "✏️ كتابة صف آخر يدوياً..." : "✏️ Custom Grade..."}</option>
+                      </select>
+
+                      {(!COMMON_GRADES.includes(academicYear) || academicYear === "") && (
+                        <input
+                          type="text"
+                          value={academicYear}
+                          onChange={e => setAcademicYear(e.target.value)}
+                          placeholder={isArabic ? "أو اكتب الصف (مثال: الصف الثاني الثانوي - علمي)" : "Or type custom grade..."}
+                          className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-blue-500"
+                        />
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                      🌍 {isArabic ? "المنهج الدراسي (مصري، سعودي...)" : "Curriculum System"}
+                    </label>
+                    <div className="space-y-1.5">
+                      <select
+                        value={COMMON_CURRICULUMS.some(c => c.label === curriculum) ? curriculum : (curriculum ? "other" : "")}
+                        onChange={e => {
+                          if (e.target.value === "other") {
+                            setCurriculum("");
+                          } else {
+                            setCurriculum(e.target.value);
+                          }
+                        }}
+                        className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 font-bold focus:outline-none focus:border-blue-500"
+                      >
+                        <option value="">{isArabic ? "-- اختر المنهج --" : "-- Select Curriculum --"}</option>
+                        {COMMON_CURRICULUMS.map(c => (
+                          <option key={c.label} value={c.label}>
+                            {c.flag} {c.label}
+                          </option>
+                        ))}
+                        <option value="other">{isArabic ? "✏️ كتابة منهج آخر يدوياً..." : "✏️ Custom Curriculum..."}</option>
+                      </select>
+
+                      {(!COMMON_CURRICULUMS.some(c => c.label === curriculum) || curriculum === "") && (
+                        <input
+                          type="text"
+                          value={curriculum}
+                          onChange={e => setCurriculum(e.target.value)}
+                          placeholder={isArabic ? "اكتب اسم المنهج (مثال: منهج سعودي - مقررات)" : "Or type custom curriculum..."}
+                          className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-blue-500"
+                        />
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2 border-t border-slate-200/70">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                      📱 {isArabic ? "هاتف الطالب (اختياري)" : "Student Phone"}
+                    </label>
+                    <input
+                      type="text"
+                      value={studentPhone}
+                      onChange={e => setStudentPhone(e.target.value)}
+                      placeholder="+201..."
+                      className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 font-mono font-bold focus:outline-none focus:border-blue-500 dir-ltr text-right"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                      {isArabic ? "كود الطالب (اختياري)" : "Student ID (Optional)"}
                     </label>
                     <input
                       type="text"
@@ -1176,13 +1595,35 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
             {/* Profile Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center font-black text-lg">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center font-black text-lg shadow-sm">
                   {selectedStudent.fullName.charAt(0)}
                 </div>
                 <div>
-                  <h2 className="text-xl font-black text-slate-900">{selectedStudent.fullName}</h2>
-                  <p className="text-xs font-bold text-blue-600 mt-0.5">
-                    {selectedStudent.subject} • {selectedStudent.parentContact}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h2 className="text-xl font-black text-slate-900">{selectedStudent.fullName}</h2>
+                    {selectedStudent.academicYear && (
+                      <span className="px-2 py-0.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-[11px] font-bold">
+                        🎓 {selectedStudent.academicYear}
+                      </span>
+                    )}
+                    {selectedStudent.curriculum && (
+                      <span className="px-2 py-0.5 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-900 text-[11px] font-bold">
+                        🌍 {selectedStudent.curriculum}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs font-bold text-blue-600 mt-0.5 flex items-center gap-2 flex-wrap">
+                    <span>{selectedStudent.subject}</span>
+                    <span>•</span>
+                    <span className="font-mono text-slate-700 dir-ltr">{selectedStudent.parentContact}</span>
+                    {selectedStudent.studentPhone && (
+                      <>
+                        <span>•</span>
+                        <span className="text-slate-500 font-normal">
+                          {isArabic ? "هاتف الطالب:" : "Student:"} <span className="font-mono font-bold text-slate-700 dir-ltr">{selectedStudent.studentPhone}</span>
+                        </span>
+                      </>
+                    )}
                   </p>
                 </div>
               </div>
@@ -2119,42 +2560,212 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                   </div>
                 )}
 
-                {/* List of Past Reports */}
-                <div className="space-y-3">
-                  {(() => {
-                    const studentReports = reports.filter(
-                      r => r.studentId === selectedStudent.id || r.studentName === selectedStudent.fullName
-                    );
+                {/* Reports Header & Archive Filter Tabs (+6 Months Auto-Archiving) */}
+                {(() => {
+                  // Helper function to detect reports older than 6 months
+                  const isReportOlderThan6Months = (dateStr: string): boolean => {
+                    if (!dateStr) return false;
+                    const rDate = new Date(dateStr);
+                    if (isNaN(rDate.getTime())) return false;
+                    const sixMonthsAgo = new Date();
+                    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+                    return rDate < sixMonthsAgo;
+                  };
 
-                    // Also gather attendance records with reports
-                    const studentAttendanceReports = attendanceRecords
-                      .filter(ar => ar.studentId === selectedStudent.id && (ar.generatedReportText || ar.teacherNotes))
-                      .map(ar => ({
-                        id: ar.id,
-                        studentId: ar.studentId,
-                        studentName: selectedStudent.fullName,
-                        subject: ar.subject || selectedStudent.subject,
-                        lessonNumber: ar.lessonNumber,
-                        attendance: ar.attendance,
-                        deductCost: ar.deducted,
-                        date: ar.date,
-                        teacherNotes: ar.teacherNotes || "",
-                        aiInstructions: ar.aiInstructions || "",
-                        reportText: ar.generatedReportText || ar.teacherNotes || "",
-                        generatedText: ar.generatedReportText || ar.teacherNotes || "",
-                        createdAt: ar.date
-                      }));
+                  const studentReports = reports.filter(
+                    r => r.studentId === selectedStudent.id || r.studentName === selectedStudent.fullName
+                  );
 
-                    // Merge and deduplicate
-                    const allPastReports = [...studentReports];
-                    studentAttendanceReports.forEach(arRep => {
-                      if (!allPastReports.some(r => r.id === arRep.id || (r.date === arRep.date && r.reportText === arRep.reportText))) {
-                        allPastReports.push(arRep);
+                  // Also gather attendance records with reports
+                  const studentAttendanceReports = attendanceRecords
+                    .filter(ar => ar.studentId === selectedStudent.id && (ar.generatedReportText || ar.teacherNotes))
+                    .map(ar => ({
+                      id: ar.id,
+                      studentId: ar.studentId,
+                      studentName: selectedStudent.fullName,
+                      subject: ar.subject || selectedStudent.subject,
+                      lessonNumber: ar.lessonNumber,
+                      attendance: ar.attendance,
+                      deductCost: ar.deducted,
+                      date: ar.date,
+                      teacherNotes: ar.teacherNotes || "",
+                      aiInstructions: ar.aiInstructions || "",
+                      reportText: ar.generatedReportText || ar.teacherNotes || "",
+                      generatedText: ar.generatedReportText || ar.teacherNotes || "",
+                      archived: undefined as boolean | undefined,
+                      createdAt: ar.date
+                    }));
+
+                  // Merge and deduplicate
+                  const allPastReports = [...studentReports];
+                  studentAttendanceReports.forEach(arRep => {
+                    if (!allPastReports.some(r => r.id === arRep.id || (r.date === arRep.date && r.reportText === arRep.reportText))) {
+                      allPastReports.push(arRep);
+                    }
+                  });
+
+                  // Classify reports as Active or Archived
+                  const classifiedReports = allPastReports.map(rep => {
+                    const isOld = isReportOlderThan6Months(rep.date || rep.createdAt);
+                    const isArchived = rep.archived === true || (rep.archived !== false && isOld);
+                    const archiveReason: "auto_6_months" | "manual" | null = isArchived
+                      ? isOld
+                        ? "auto_6_months"
+                        : "manual"
+                      : null;
+
+                    return {
+                      ...rep,
+                      isArchived,
+                      archiveReason
+                    };
+                  });
+
+                  const activeCount = classifiedReports.filter(r => !r.isArchived).length;
+                  const archivedCount = classifiedReports.filter(r => r.isArchived).length;
+                  const totalCount = classifiedReports.length;
+
+                  // Get list of unique subjects for filter
+                  const availableSubjects = Array.from(
+                    new Set(classifiedReports.map(r => r.subject || selectedStudent.subject).filter(Boolean))
+                  );
+
+                  // Filter for rendering based on active tab and search query
+                  const filteredDisplayReports = classifiedReports.filter(rep => {
+                    if (reportArchiveFilter === "active" && rep.isArchived) return false;
+                    if (reportArchiveFilter === "archived" && !rep.isArchived) return false;
+
+                    if (reportArchiveFilter === "archived") {
+                      if (archiveSubjectFilter !== "all" && (rep.subject || selectedStudent.subject) !== archiveSubjectFilter) {
+                        return false;
                       }
-                    });
+                      if (archiveSearchQuery.trim()) {
+                        const q = archiveSearchQuery.toLowerCase();
+                        const content = (rep.generatedText || rep.reportText || rep.teacherNotes || "").toLowerCase();
+                        const subj = (rep.subject || "").toLowerCase();
+                        const d = (rep.date || "").toLowerCase();
+                        if (!content.includes(q) && !subj.includes(q) && !d.includes(q)) {
+                          return false;
+                        }
+                      }
+                    }
 
-                    if (allPastReports.length === 0) {
-                      return (
+                    return true;
+                  });
+
+                  return (
+                    <div className="space-y-3">
+                      {/* Archive / Active Tabs Bar */}
+                      {totalCount > 0 && (
+                        <div className="p-2 rounded-2xl bg-slate-100/90 border border-slate-200/80 space-y-2">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center gap-1.5 p-1 bg-white rounded-xl border border-slate-200 shadow-2xs">
+                              {/* Tab 1: Active Reports (< 6 months) */}
+                              <button
+                                type="button"
+                                onClick={() => setReportArchiveFilter("active")}
+                                className={`px-3 py-1.5 rounded-lg font-black text-xs transition flex items-center gap-1.5 ${
+                                  reportArchiveFilter === "active"
+                                    ? "bg-purple-600 text-white shadow-xs"
+                                    : "text-slate-600 hover:text-purple-600 hover:bg-slate-50"
+                                }`}
+                              >
+                                <Sparkles className="w-3.5 h-3.5" />
+                                <span>{isArabic ? "التقارير النشطة" : "Active"}</span>
+                                <span className={`px-1.5 py-0.2 text-[10px] rounded-full font-black ${
+                                  reportArchiveFilter === "active"
+                                    ? "bg-purple-800 text-purple-100"
+                                    : "bg-slate-200 text-slate-700"
+                                }`}>
+                                  {activeCount}
+                                </span>
+                              </button>
+
+                              {/* Tab 2: Archived Reports (> 6 months) */}
+                              <button
+                                type="button"
+                                onClick={() => setReportArchiveFilter("archived")}
+                                className={`px-3 py-1.5 rounded-lg font-black text-xs transition flex items-center gap-1.5 ${
+                                  reportArchiveFilter === "archived"
+                                    ? "bg-slate-800 text-white shadow-xs"
+                                    : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+                                }`}
+                              >
+                                <FolderArchive className="w-3.5 h-3.5 text-amber-400" />
+                                <span>{isArabic ? "أرشيف التقارير (+6 أشهر)" : "Archive (+6m)"}</span>
+                                <span className={`px-1.5 py-0.2 text-[10px] rounded-full font-black ${
+                                  reportArchiveFilter === "archived"
+                                    ? "bg-slate-950 text-amber-300"
+                                    : "bg-slate-200 text-slate-700"
+                                }`}>
+                                  {archivedCount}
+                                </span>
+                              </button>
+
+                              {/* Tab 3: All Reports */}
+                              <button
+                                type="button"
+                                onClick={() => setReportArchiveFilter("all")}
+                                className={`px-2.5 py-1.5 rounded-lg font-black text-xs transition flex items-center gap-1.5 ${
+                                  reportArchiveFilter === "all"
+                                    ? "bg-indigo-600 text-white shadow-xs"
+                                    : "text-slate-600 hover:text-indigo-600 hover:bg-slate-50"
+                                }`}
+                              >
+                                <span>{isArabic ? "جميع التقارير" : "All"}</span>
+                                <span className={`px-1.5 py-0.2 text-[10px] rounded-full font-black ${
+                                  reportArchiveFilter === "all"
+                                    ? "bg-indigo-800 text-indigo-100"
+                                    : "bg-slate-200 text-slate-700"
+                                }`}>
+                                  {totalCount}
+                                </span>
+                              </button>
+                            </div>
+
+                            {/* Auto-archive optimization badge */}
+                            <span className="text-[10.5px] font-bold text-slate-500 flex items-center gap-1 px-2">
+                              <Clock className="w-3.5 h-3.5 text-slate-400" />
+                              <span>{isArabic ? "الأرشفة التلقائية بعد 6 أشهر مفعلة ⚡" : "Auto-archive (>6m) active ⚡"}</span>
+                            </span>
+                          </div>
+
+                          {/* Sub-tools for Archived Tab (Search & Subject Filter) */}
+                          {reportArchiveFilter === "archived" && (
+                            <div className="p-2.5 bg-white rounded-xl border border-slate-200/80 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs animate-in fade-in">
+                              <div className="relative flex-1 w-full">
+                                <Search className="w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                                <input
+                                  type="text"
+                                  value={archiveSearchQuery}
+                                  onChange={e => setArchiveSearchQuery(e.target.value)}
+                                  placeholder={isArabic ? "البحث في التقارير المؤرشفة (بالنص أو التاريخ)..." : "Search archived reports..."}
+                                  className="w-full pl-3 pr-8 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-800 font-bold focus:outline-none focus:border-purple-500"
+                                />
+                              </div>
+
+                              {availableSubjects.length > 1 && (
+                                <div className="flex items-center gap-1.5 w-full sm:w-auto shrink-0">
+                                  <Filter className="w-3.5 h-3.5 text-slate-400" />
+                                  <select
+                                    value={archiveSubjectFilter}
+                                    onChange={e => setArchiveSubjectFilter(e.target.value)}
+                                    className="px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 focus:outline-none focus:border-purple-500"
+                                  >
+                                    <option value="all">{isArabic ? "جميع المواد" : "All Subjects"}</option>
+                                    {availableSubjects.map(s => (
+                                      <option key={s} value={s}>{s}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Active Reports List or Archive List */}
+                      {totalCount === 0 ? (
                         <div className="p-8 text-center bg-slate-50 border border-slate-200/80 rounded-2xl text-slate-400 text-xs">
                           <FileText className="w-8 h-8 mx-auto text-slate-300 mb-2" />
                           <p className="font-bold text-slate-600">
@@ -2164,133 +2775,231 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                             {isArabic ? "اضغط على زر (كتابة تقرير جديد) أعلاه لإنشاء تقرير وصياغته بالذكاء الاصطناعي وحفظه." : "Click 'Write Report' above to generate and save one."}
                           </p>
                         </div>
-                      );
-                    }
+                      ) : filteredDisplayReports.length === 0 ? (
+                        <div className="p-8 text-center bg-slate-50 border border-slate-200/80 rounded-2xl text-slate-400 text-xs">
+                          <FolderArchive className="w-8 h-8 mx-auto text-slate-300 mb-2" />
+                          <p className="font-bold text-slate-600">
+                            {reportArchiveFilter === "archived"
+                              ? isArabic ? "لا توجد تقارير مؤرشفة تطابق معايير البحث." : "No archived reports match your search."
+                              : isArabic ? "لا توجد تقارير نشطة حالياً (جميع التقارير أقدم من 6 أشهر وموجودة في الأرشيف)." : "No active reports currently (all older reports are in Archive)."}
+                          </p>
+                          {reportArchiveFilter === "active" && archivedCount > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setReportArchiveFilter("archived")}
+                              className="mt-3 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs inline-flex items-center gap-1.5 shadow-xs transition"
+                            >
+                              <FolderArchive className="w-3.5 h-3.5 text-amber-400" />
+                              <span>{isArabic ? `عرض قسم الأرشيف (${archivedCount} تقارير)` : `View Archive (${archivedCount} reports)`}</span>
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {filteredDisplayReports.map((rep, idx) => {
+                            const finalReportContent = rep.generatedText || rep.reportText || rep.teacherNotes;
+                            const isExpanded = expandedReportIds.includes(rep.id);
+                            const lessonNum = rep.lessonNumber || (totalCount - idx);
+                            const isAbsent = rep.attendance === "absent";
 
-                    const totalCount = allPastReports.length;
+                            return (
+                              <div
+                                key={rep.id}
+                                className={`rounded-2xl border overflow-hidden bg-white shadow-2xs transition ${
+                                  rep.isArchived
+                                    ? "border-slate-200/90 bg-slate-50/50 opacity-95"
+                                    : isAbsent
+                                    ? "border-rose-200/80"
+                                    : "border-slate-200"
+                                }`}
+                              >
+                                {/* Header - Click to toggle expansion */}
+                                <div
+                                  onClick={() => toggleReportExpand(rep.id)}
+                                  className={`p-3.5 cursor-pointer transition flex items-center justify-between gap-2 select-none ${
+                                    rep.isArchived ? "bg-slate-50/70 hover:bg-slate-100/70" : "bg-white hover:bg-slate-50/80"
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className={`px-2.5 py-1 rounded-xl text-white font-black text-xs shrink-0 shadow-2xs ${
+                                      rep.isArchived
+                                        ? "bg-slate-700"
+                                        : isAbsent
+                                        ? "bg-rose-600"
+                                        : "bg-purple-600"
+                                    }`}>
+                                      {isArabic ? `الحصة #${lessonNum}` : `Lesson #${lessonNum}`}
+                                    </span>
 
-                    return allPastReports.map((rep, idx) => {
-                      const finalReportContent = rep.generatedText || rep.reportText || rep.teacherNotes;
-                      const isExpanded = expandedReportIds.includes(rep.id);
-                      const lessonNum = rep.lessonNumber || (totalCount - idx);
-                      const isAbsent = rep.attendance === "absent";
+                                    <span className="font-bold text-slate-800 text-xs">{rep.date}</span>
 
-                      return (
-                        <div
-                          key={rep.id}
-                          className={`rounded-2xl border overflow-hidden bg-white shadow-2xs transition ${
-                            isAbsent ? "border-rose-200/80" : "border-slate-200"
-                          }`}
-                        >
-                          {/* Header - Click to toggle expansion */}
-                          <div
-                            onClick={() => toggleReportExpand(rep.id)}
-                            className="p-3.5 bg-white hover:bg-slate-50/80 cursor-pointer transition flex items-center justify-between gap-2 select-none"
-                          >
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className={`px-2.5 py-1 rounded-xl text-white font-black text-xs shrink-0 shadow-2xs ${
-                                isAbsent ? "bg-rose-600" : "bg-purple-600"
-                              }`}>
-                                {isArabic ? `الحصة #${lessonNum}` : `Lesson #${lessonNum}`}
-                              </span>
+                                    <span className="px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200/60 text-[10px] font-bold">
+                                      {rep.subject || selectedStudent.subject}
+                                    </span>
 
-                              <span className="font-bold text-slate-800 text-xs">{rep.date}</span>
-
-                              <span className="px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200/60 text-[10px] font-bold">
-                                {rep.subject || selectedStudent.subject}
-                              </span>
-
-                              {/* Attendance Status Badge */}
-                              {isAbsent ? (
-                                <span className="px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-bold flex items-center gap-1">
-                                  <span>🔴 {isArabic ? "غائب" : "Absent"}</span>
-                                  <span>({rep.deductCost ? (isArabic ? "تم الخصم" : "Deducted") : (isArabic ? "بدون خصم" : "Excused")})</span>
-                                </span>
-                              ) : (
-                                <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold flex items-center gap-1">
-                                  <span>🟢 {isArabic ? "حاضر" : "Present"}</span>
-                                </span>
-                              )}
-                            </div>
-
-                            <div className="flex items-center gap-2 shrink-0">
-                              <span className="text-[11px] font-bold text-purple-600 hidden sm:inline">
-                                {isExpanded ? (isArabic ? "إخفاء التفاصيل" : "Collapse") : (isArabic ? "عرض التقرير" : "Expand")}
-                              </span>
-                              <div className="p-1 rounded-lg bg-slate-100 text-slate-600 transition">
-                                {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Collapsible Content */}
-                          {isExpanded && (
-                            <div className="p-4 bg-slate-50 border-t border-slate-100 space-y-3 text-xs animate-in fade-in">
-                              <div className={`p-3.5 rounded-xl border space-y-1.5 shadow-inner leading-relaxed whitespace-pre-wrap font-sans text-xs ${
-                                isAbsent
-                                  ? "bg-rose-950 text-rose-50 border-rose-900"
-                                  : "bg-slate-900 text-slate-100 border-slate-800"
-                              }`}>
-                                {finalReportContent}
-                              </div>
-
-                              <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-                                <div className="flex items-center gap-2">
-                                  {/* Copy Button */}
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      navigator.clipboard.writeText(finalReportContent);
-                                      setCopiedReportId(rep.id);
-                                      setTimeout(() => setCopiedReportId(null), 2000);
-                                    }}
-                                    className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 font-bold text-[11px] transition flex items-center gap-1 shadow-2xs"
-                                  >
-                                    {copiedReportId === rep.id ? (
-                                      <>
-                                        <Check className="w-3.5 h-3.5 text-emerald-600" />
-                                        <span className="text-emerald-700">{isArabic ? "تم النسخ" : "Copied"}</span>
-                                      </>
+                                    {/* Attendance Status Badge */}
+                                    {isAbsent ? (
+                                      <span className="px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-bold flex items-center gap-1">
+                                        <span>🔴 {isArabic ? "غائب" : "Absent"}</span>
+                                        <span>({rep.deductCost ? (isArabic ? "تم الخصم" : "Deducted") : (isArabic ? "بدون خصم" : "Excused")})</span>
+                                      </span>
                                     ) : (
-                                      <>
-                                        <Copy className="w-3.5 h-3.5" />
-                                        <span>{isArabic ? "نسخ التقرير" : "Copy"}</span>
-                                      </>
+                                      <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold flex items-center gap-1">
+                                        <span>🟢 {isArabic ? "حاضر" : "Present"}</span>
+                                      </span>
                                     )}
-                                  </button>
 
-                                  {/* WhatsApp Send Button */}
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      handleOpenWhatsAppChooser(finalReportContent, selectedStudent);
-                                    }}
-                                    className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] transition flex items-center gap-1 shadow-2xs"
-                                  >
-                                    <Share2 className="w-3.5 h-3.5" />
-                                    <span>{isArabic ? "إرسال بالواتساب" : "Send WhatsApp"}</span>
-                                  </button>
+                                    {/* Archive Badge */}
+                                    {rep.isArchived && (
+                                      <span className="px-2 py-0.5 rounded-full bg-slate-200/80 text-slate-700 border border-slate-300 text-[10px] font-bold flex items-center gap-1">
+                                        <Archive className="w-3 h-3 text-slate-500" />
+                                        <span>
+                                          {rep.archiveReason === "auto_6_months"
+                                            ? isArabic ? "مؤرشف تلقائياً (+6 أشهر)" : "Auto-Archived (+6m)"
+                                            : isArabic ? "مؤرشف" : "Archived"}
+                                        </span>
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    <span className="text-[11px] font-bold text-purple-600 hidden sm:inline">
+                                      {isExpanded ? (isArabic ? "إخفاء التفاصيل" : "Collapse") : (isArabic ? "عرض التقرير" : "Expand")}
+                                    </span>
+                                    <div className="p-1 rounded-lg bg-slate-100 text-slate-600 transition">
+                                      {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                                    </div>
+                                  </div>
                                 </div>
 
-                                {/* Delete Report Button */}
-                                {rep.id.startsWith("rep_") && (
-                                  <button
-                                    type="button"
-                                    onClick={() => onDeleteReport(rep.id)}
-                                    className="p-1.5 text-slate-400 hover:text-rose-600 transition"
-                                    title={isArabic ? "حذف التقرير" : "Delete"}
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </button>
+                                {/* Collapsible Content */}
+                                {isExpanded && (
+                                  <div className="p-4 bg-slate-50 border-t border-slate-100 space-y-3 text-xs animate-in fade-in">
+                                    <div className={`p-3.5 rounded-xl border space-y-1.5 shadow-inner leading-relaxed whitespace-pre-wrap font-sans text-xs ${
+                                      isAbsent
+                                        ? "bg-rose-950 text-rose-50 border-rose-900"
+                                        : "bg-slate-900 text-slate-100 border-slate-800"
+                                    }`}>
+                                      {finalReportContent}
+                                    </div>
+
+                                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        {/* Copy Button */}
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            navigator.clipboard.writeText(finalReportContent);
+                                            setCopiedReportId(rep.id);
+                                            setTimeout(() => setCopiedReportId(null), 2000);
+                                          }}
+                                          className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 font-bold text-[11px] transition flex items-center gap-1 shadow-2xs"
+                                        >
+                                          {copiedReportId === rep.id ? (
+                                            <>
+                                              <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                              <span className="text-emerald-700">{isArabic ? "تم النسخ" : "Copied"}</span>
+                                            </>
+                                          ) : (
+                                            <>
+                                              <Copy className="w-3.5 h-3.5" />
+                                              <span>{isArabic ? "نسخ التقرير" : "Copy"}</span>
+                                            </>
+                                          )}
+                                        </button>
+
+                                        {/* WhatsApp Send Button */}
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            handleOpenWhatsAppChooser(finalReportContent, selectedStudent);
+                                          }}
+                                          className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] transition flex items-center gap-1 shadow-2xs"
+                                        >
+                                          <Share2 className="w-3.5 h-3.5" />
+                                          <span>{isArabic ? "إرسال بالواتساب" : "Send WhatsApp"}</span>
+                                        </button>
+
+                                        {/* Toggle Archive / Unarchive Button */}
+                                        {onToggleArchiveReport && rep.id.startsWith("rep_") && (
+                                          <button
+                                            type="button"
+                                            onClick={() => onToggleArchiveReport(rep.id)}
+                                            className={`px-2.5 py-1.5 rounded-xl font-bold text-[11px] transition flex items-center gap-1 shadow-2xs border ${
+                                              rep.isArchived
+                                                ? "bg-purple-50 hover:bg-purple-100 border-purple-200 text-purple-700"
+                                                : "bg-slate-100 hover:bg-slate-200 border-slate-200 text-slate-700"
+                                            }`}
+                                          >
+                                            {rep.isArchived ? (
+                                              <>
+                                                <ArchiveRestore className="w-3.5 h-3.5 text-purple-600" />
+                                                <span>{isArabic ? "استعادة للنشط" : "Restore"}</span>
+                                              </>
+                                            ) : (
+                                              <>
+                                                <Archive className="w-3.5 h-3.5 text-slate-500" />
+                                                <span>{isArabic ? "أرشفة التقرير" : "Archive"}</span>
+                                              </>
+                                            )}
+                                          </button>
+                                        )}
+                                      </div>
+
+                                      {/* Delete Report Button */}
+                                      {rep.id.startsWith("rep_") && (
+                                        <button
+                                          type="button"
+                                          onClick={() => onDeleteReport(rep.id)}
+                                          className="p-1.5 text-slate-400 hover:text-rose-600 transition"
+                                          title={isArabic ? "حذف التقرير" : "Delete"}
+                                        >
+                                          <Trash2 className="w-4 h-4" />
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
                                 )}
                               </div>
+                            );
+                          })}
+
+                          {/* Quick Jump Banner in Active Tab if Archived reports exist */}
+                          {reportArchiveFilter === "active" && archivedCount > 0 && (
+                            <div className="p-3.5 bg-gradient-to-r from-slate-100 to-indigo-50/50 border border-slate-200/90 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-2.5 text-xs text-slate-700 shadow-2xs">
+                              <div className="flex items-center gap-2.5">
+                                <div className="w-8 h-8 rounded-xl bg-slate-200 flex items-center justify-center text-slate-700 shrink-0 shadow-2xs">
+                                  <FolderArchive className="w-4 h-4 text-amber-600" />
+                                </div>
+                                <div>
+                                  <p className="font-bold text-slate-800">
+                                    {isArabic
+                                      ? `يوجد ${archivedCount} تقرير قديم في الأرشيف (مر عليها أكثر من 6 أشهر)`
+                                      : `${archivedCount} archived reports (+6 months)`}
+                                  </p>
+                                  <p className="text-[10.5px] text-slate-500 font-medium">
+                                    {isArabic
+                                      ? "تم نقلها تلقائياً للأرشيف لتحسين أداء وتحميل الصفحة بسرعة فائقة."
+                                      : "Moved to archive to maximize student profile loading speed."}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() => setReportArchiveFilter("archived")}
+                                className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs shadow-xs flex items-center gap-1.5 transition shrink-0"
+                              >
+                                <Archive className="w-3.5 h-3.5 text-amber-400" />
+                                <span>{isArabic ? "فتح قسم الأرشيف" : "View Archive"}</span>
+                              </button>
                             </div>
                           )}
                         </div>
-                      );
-                    });
-                  })()}
-                </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             )}
           </div>
@@ -2492,8 +3201,8 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 
             <form onSubmit={handleSaveEditStudent} className="space-y-3 my-3 text-xs">
               {/* Top Compact Student Info Grid */}
-              <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2.5">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <div>
                     <label className="block font-bold text-slate-700 mb-1 text-[11px]">
                       {isArabic ? "اسم الطالب بالكامل *" : "Student Full Name *"}
@@ -2521,7 +3230,97 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {/* Grade & Curriculum Section */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2 border-t border-slate-200/70">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                      🎓 {isArabic ? "الصف الدراسي / المرحلة" : "Academic Grade / Year"}
+                    </label>
+                    <div className="space-y-1.5">
+                      <select
+                        value={COMMON_GRADES.includes(editAcademicYear) ? editAcademicYear : (editAcademicYear ? "other" : "")}
+                        onChange={e => {
+                          if (e.target.value === "other") {
+                            setEditAcademicYear("");
+                          } else {
+                            setEditAcademicYear(e.target.value);
+                          }
+                        }}
+                        className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 font-bold focus:outline-none focus:border-blue-500"
+                      >
+                        <option value="">{isArabic ? "-- اختر الصف الدراسي --" : "-- Select Grade --"}</option>
+                        {COMMON_GRADES.map(g => (
+                          <option key={g} value={g}>
+                            {g}
+                          </option>
+                        ))}
+                        <option value="other">{isArabic ? "✏️ كتابة صف آخر يدوياً..." : "✏️ Custom Grade..."}</option>
+                      </select>
+
+                      {(!COMMON_GRADES.includes(editAcademicYear) || editAcademicYear === "") && (
+                        <input
+                          type="text"
+                          value={editAcademicYear}
+                          onChange={e => setEditAcademicYear(e.target.value)}
+                          placeholder={isArabic ? "أو اكتب الصف (مثال: الصف الثاني الثانوي - علمي)" : "Or type custom grade..."}
+                          className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-blue-500"
+                        />
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                      🌍 {isArabic ? "المنهج الدراسي (مصري، سعودي...)" : "Curriculum System"}
+                    </label>
+                    <div className="space-y-1.5">
+                      <select
+                        value={COMMON_CURRICULUMS.some(c => c.label === editCurriculum) ? editCurriculum : (editCurriculum ? "other" : "")}
+                        onChange={e => {
+                          if (e.target.value === "other") {
+                            setEditCurriculum("");
+                          } else {
+                            setEditCurriculum(e.target.value);
+                          }
+                        }}
+                        className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 font-bold focus:outline-none focus:border-blue-500"
+                      >
+                        <option value="">{isArabic ? "-- اختر المنهج --" : "-- Select Curriculum --"}</option>
+                        {COMMON_CURRICULUMS.map(c => (
+                          <option key={c.label} value={c.label}>
+                            {c.flag} {c.label}
+                          </option>
+                        ))}
+                        <option value="other">{isArabic ? "✏️ كتابة منهج آخر يدوياً..." : "✏️ Custom Curriculum..."}</option>
+                      </select>
+
+                      {(!COMMON_CURRICULUMS.some(c => c.label === editCurriculum) || editCurriculum === "") && (
+                        <input
+                          type="text"
+                          value={editCurriculum}
+                          onChange={e => setEditCurriculum(e.target.value)}
+                          placeholder={isArabic ? "اكتب اسم المنهج (مثال: منهج سعودي - مقررات)" : "Or type custom curriculum..."}
+                          className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-blue-500"
+                        />
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2 border-t border-slate-200/70">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                      📱 {isArabic ? "هاتف الطالب (اختياري)" : "Student Phone"}
+                    </label>
+                    <input
+                      type="text"
+                      value={editStudentPhone}
+                      onChange={e => setEditStudentPhone(e.target.value)}
+                      placeholder="+201..."
+                      className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 font-mono font-bold focus:outline-none focus:border-blue-500 dir-ltr text-right"
+                    />
+                  </div>
+
                   <div>
                     <label className="block font-bold text-slate-700 mb-1 text-[11px]">
                       {isArabic ? "رقم/كود الطالب (اختياري)" : "Student ID (Optional)"}

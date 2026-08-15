@@ -16,9 +16,11 @@ import {
   Calendar,
   DollarSign,
   LogOut,
-  Globe
+  Globe,
+  Trash2,
+  RotateCcw
 } from "lucide-react";
-import { AppSettings, Student } from "../types";
+import { AppSettings, Student, AppNotification } from "../types";
 import { sanitizeTeacherName } from "../lib/storage";
 import { User as FirebaseUser } from "../lib/firebase";
 
@@ -36,6 +38,10 @@ interface HeaderProps {
   currentUser?: FirebaseUser | null;
   onLogout?: () => void;
   onToggleLanguage?: () => void;
+  dismissedNotificationIds?: string[];
+  onDismissNotification?: (id: string) => void;
+  onDismissAllNotifications?: (ids: string[]) => void;
+  onRestoreNotifications?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -49,7 +55,11 @@ export const Header: React.FC<HeaderProps> = ({
   activeSearchQuery,
   currentUser,
   onLogout,
-  onToggleLanguage
+  onToggleLanguage,
+  dismissedNotificationIds = [],
+  onDismissNotification,
+  onDismissAllNotifications,
+  onRestoreNotifications
 }) => {
   const [showNotifications, setShowNotifications] = useState(false);
   const [showMobileSearch, setShowMobileSearch] = useState(false);
@@ -87,16 +97,68 @@ export const Header: React.FC<HeaderProps> = ({
   const lowBalanceStudents = students.filter(
     s => s.paymentStatus === "paid" && s.subscriptionType === "lessons_count" && s.remainingLessons <= 1 && s.status === "active"
   );
-  const alertCount = unpaidStudents.length + lowBalanceStudents.length;
+
+  // Generate distinct notification items
+  const generatedNotifications = [
+    ...unpaidStudents.map(s => ({
+      id: `unpaid_${s.id}`,
+      type: "unpaid" as const,
+      studentId: s.id,
+      title: s.fullName,
+      subject: s.subject,
+      message: isArabic ? "طالب نشط لم يقم بسداد الرسوم المستحقة" : "Active student with unpaid tuition fees",
+      badge: isArabic ? "مستحق سداد" : "Unpaid"
+    })),
+    ...lowBalanceStudents.map(s => ({
+      id: `low_balance_${s.id}`,
+      type: "low_balance" as const,
+      studentId: s.id,
+      title: s.fullName,
+      subject: s.subject,
+      message: isArabic
+        ? `رصيد الحصص المتبقية: ${s.remainingLessons} حصة فقط`
+        : `Low balance: only ${s.remainingLessons} lesson remaining`,
+      badge: isArabic ? `متبقي ${s.remainingLessons} حصة` : `${s.remainingLessons} left`
+    }))
+  ];
+
+  // Active notifications (excluding dismissed ones)
+  const activeNotifications = generatedNotifications.filter(
+    n => !dismissedNotificationIds.includes(n.id)
+  );
+
+  const dismissedCount = generatedNotifications.filter(
+    n => dismissedNotificationIds.includes(n.id)
+  ).length;
+
+  const alertCount = activeNotifications.length;
 
   const teacherDisplayName =
     sanitizeTeacherName(settings.teacherName) ||
     sanitizeTeacherName(currentUser?.displayName || "") ||
     (isArabic ? "معلم المادة" : "Teacher");
 
+  const handleDismissSingle = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onDismissNotification) {
+      onDismissNotification(id);
+    }
+  };
+
+  const handleDismissAll = () => {
+    if (onDismissAllNotifications) {
+      onDismissAllNotifications(activeNotifications.map(n => n.id));
+    }
+  };
+
+  const handleNotificationClick = (studentId?: string) => {
+    setShowNotifications(false);
+    onTabChange("finance");
+  };
+
   return (
     <header className="sticky top-0 z-40 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 text-slate-100 shadow-md">
-      <div className="w-full max-w-7xl mx-auto px-2.5 sm:px-4 lg:px-6 py-2">
+      <div className="w-full max-w-[1750px] mx-auto px-2.5 sm:px-4 lg:px-6 py-1.5 sm:py-2">
         {/* TOP MAIN ROW: Brand, Desktop Nav Tabs, Quick Actions */}
         <div className="flex items-center justify-between gap-2">
           {/* 1. Brand Logo & Title */}
@@ -211,55 +273,121 @@ export const Header: React.FC<HeaderProps> = ({
                       <h3 className="font-bold text-xs sm:text-sm">
                         {isArabic ? "التنبيهات والإشعارات" : "Important Alerts"}
                       </h3>
+                      {alertCount > 0 && (
+                        <span className="px-1.5 py-0.2 rounded-md bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[10px] font-bold">
+                          {alertCount}
+                        </span>
+                      )}
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => setShowNotifications(false)}
-                      className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
+                    
+                    <div className="flex items-center gap-1">
+                      {alertCount > 0 && onDismissAllNotifications && (
+                        <button
+                          type="button"
+                          onClick={handleDismissAll}
+                          title={isArabic ? "حذف جميع الإشعارات" : "Clear all notifications"}
+                          className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-rose-300 text-[10.5px] font-bold transition flex items-center gap-1 border border-slate-700/60"
+                        >
+                          <Trash2 className="w-3 h-3 text-rose-400" />
+                          <span>{isArabic ? "مسح الكل" : "Clear"}</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setShowNotifications(false)}
+                        className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
 
-                  <div className="mt-2.5 max-h-64 overflow-y-auto space-y-2 pr-1 scrollbar-thin">
+                  <div className="mt-2.5 max-h-72 overflow-y-auto space-y-2 pr-1 scrollbar-thin">
                     {alertCount === 0 ? (
-                      <div className="text-center py-5 text-slate-400 text-xs">
-                        <CheckCircle2 className="w-6 h-6 mx-auto mb-1.5 text-emerald-400" />
-                        {isArabic ? "لا توجد تنبيهات معلقة حالياً" : "All clear! No urgent alerts."}
+                      <div className="text-center py-6 text-slate-400 text-xs space-y-2">
+                        <CheckCircle2 className="w-7 h-7 mx-auto text-emerald-400 opacity-80" />
+                        <p className="font-bold text-slate-200">
+                          {dismissedCount > 0
+                            ? (isArabic ? "تم حذف وتصفية جميع الإشعارات بنجاح" : "All notifications cleared")
+                            : (isArabic ? "لا توجد تنبيهات معلقة حالياً" : "All clear! No urgent alerts.")}
+                        </p>
+                        {dismissedCount > 0 && onRestoreNotifications && (
+                          <button
+                            type="button"
+                            onClick={onRestoreNotifications}
+                            className="mt-2 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-blue-300 text-[11px] font-bold transition border border-slate-700 flex items-center gap-1.5 mx-auto"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>{isArabic ? `استعادة الإشعارات المحذوفة (${dismissedCount})` : `Restore alerts (${dismissedCount})`}</span>
+                          </button>
+                        )}
                       </div>
                     ) : (
                       <>
-                        {unpaidStudents.map(s => (
-                          <div
-                            key={s.id}
-                            className="p-2 rounded-lg bg-rose-950/40 border border-rose-800/50 flex items-start gap-2 text-xs"
-                          >
-                            <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                            <div>
-                              <p className="font-bold text-rose-200">{s.fullName}</p>
-                              <p className="text-slate-300 text-[10px] sm:text-[11px]">
-                                {isArabic ? "طالب نشط لم يقم بسداد الرسوم المستحقة" : "Active student with unpaid tuition fees"}
-                              </p>
-                            </div>
-                          </div>
-                        ))}
+                        {activeNotifications.map(notification => {
+                          const isUnpaid = notification.type === "unpaid";
+                          return (
+                            <div
+                              key={notification.id}
+                              onClick={() => handleNotificationClick(notification.studentId)}
+                              className={`p-2.5 rounded-xl border transition cursor-pointer flex items-start justify-between gap-2 text-xs group ${
+                                isUnpaid
+                                  ? "bg-rose-950/40 border-rose-800/60 hover:bg-rose-900/40"
+                                  : "bg-amber-950/40 border-amber-800/60 hover:bg-amber-900/40"
+                              }`}
+                            >
+                              <div className="flex items-start gap-2 min-w-0">
+                                {isUnpaid ? (
+                                  <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                                ) : (
+                                  <Clock className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                                )}
+                                <div className="space-y-0.5 min-w-0">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <p className={`font-bold truncate ${isUnpaid ? "text-rose-200" : "text-amber-200"}`}>
+                                      {notification.title}
+                                    </p>
+                                    {notification.badge && (
+                                      <span
+                                        className={`px-1.5 py-0.2 rounded text-[9.5px] font-bold ${
+                                          isUnpaid ? "bg-rose-900/80 text-rose-300" : "bg-amber-900/80 text-amber-300"
+                                        }`}
+                                      >
+                                        {notification.badge}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-slate-300 text-[10.5px] line-clamp-2">
+                                    {notification.message}
+                                  </p>
+                                </div>
+                              </div>
 
-                        {lowBalanceStudents.map(s => (
-                          <div
-                            key={s.id}
-                            className="p-2 rounded-lg bg-amber-950/40 border border-amber-800/50 flex items-start gap-2 text-xs"
-                          >
-                            <Clock className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                            <div>
-                              <p className="font-bold text-amber-200">{s.fullName}</p>
-                              <p className="text-slate-300 text-[10px] sm:text-[11px]">
-                                {isArabic
-                                  ? `رصيد الحصص المتبقية: ${s.remainingLessons} حصة فقط`
-                                  : `Low balance: only ${s.remainingLessons} lesson remaining`}
-                              </p>
+                              {/* Delete single notification button */}
+                              <button
+                                type="button"
+                                onClick={e => handleDismissSingle(notification.id, e)}
+                                title={isArabic ? "حذف هذا الإشعار" : "Dismiss notification"}
+                                className="w-6 h-6 rounded-lg bg-slate-800/80 hover:bg-rose-600 text-slate-400 hover:text-white flex items-center justify-center transition shrink-0 border border-slate-700/60"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
                             </div>
+                          );
+                        })}
+
+                        {dismissedCount > 0 && onRestoreNotifications && (
+                          <div className="pt-2 border-t border-slate-800 text-center">
+                            <button
+                              type="button"
+                              onClick={onRestoreNotifications}
+                              className="text-[10.5px] font-bold text-slate-400 hover:text-blue-300 transition flex items-center justify-center gap-1 mx-auto"
+                            >
+                              <RotateCcw className="w-3 h-3" />
+                              <span>{isArabic ? `استعادة ${dismissedCount} إشعار محذوف` : `Restore ${dismissedCount} dismissed`}</span>
+                            </button>
                           </div>
-                        ))}
+                        )}
                       </>
                     )}
                   </div>

@@ -23,6 +23,8 @@ export interface StudentSubjectPlan {
   id: string;
   subject: string;
   studyType: StudyType; // "group" | "private"
+  academicYear?: string; // الصف الدراسي e.g. "الصف الأول الثانوي"
+  curriculum?: string; // المنهج e.g. "مصري", "سعودي", "إماراتي", "دولي"
   subscriptionType: SubscriptionType; // "monthly" (بالشهر) | "lessons_count" (بعدد الحصص)
   paymentPlan: PaymentPlan; // "beginning_of_month" (أول الشهر) | "end_of_month" (آخر الشهر) | "mixed" (مختلط)
   lessonCost: number; // سعر الحصة للمادة
@@ -37,6 +39,9 @@ export interface Student {
   id: string;
   fullName: string;
   studentNumber?: string;
+  studentPhone?: string;
+  academicYear?: string; // الصف الدراسي e.g. "الصف الأول الثانوي", "الصف الثالث الإعدادي"
+  curriculum?: string; // المنهج الدراسي e.g. "منهج مصري", "منهج سعودي", "منهج إماراتي", "منهج كويتي", "لغات / تجريبي", "International"
   parentContact: string; // WhatsApp number e.g. "+201000000000"
   whatsappGroupLink?: string; // WhatsApp group link e.g. "https://chat.whatsapp.com/..."
   studyType: StudyType;
@@ -176,6 +181,8 @@ export interface GeneratedReport {
   aiInstructions: string;
   reportText?: string;
   generatedText?: string;
+  archived?: boolean;
+  archivedAt?: string;
   createdAt: string;
 }
 
@@ -192,6 +199,18 @@ export interface AppSettings {
   subjectDefaults: SubjectAiInstruction[];
   notificationMinutesBefore: number; // 5, 10, 15
   notificationsEnabled: boolean;
+}
+
+export interface AppNotification {
+  id: string;
+  type: "unpaid" | "low_balance" | "reminder" | "system";
+  title: string;
+  message: string;
+  studentId?: string;
+  studentName?: string;
+  amountDue?: number;
+  remainingLessons?: number;
+  date?: string;
 }
 
 export interface GoStarsBackupData {
