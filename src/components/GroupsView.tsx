@@ -31,8 +31,10 @@ import {
   AttendanceStatus,
   HomeworkStatus,
   AppSettings,
-  ReportAttachment
+  ReportAttachment,
+  ScheduleSlot
 } from "../types";
+import { MixedScheduleEditor, formatTime12h } from "./MixedScheduleEditor";
 
 interface GroupsViewProps {
   settings: AppSettings;
@@ -43,6 +45,9 @@ interface GroupsViewProps {
   onAddGroup: (group: Omit<Group, "id" | "createdAt">) => void;
   onAddPrivateLesson: (lesson: Omit<PrivateLesson, "id" | "createdAt">) => void;
   onUpdateGroup: (id: string, group: Partial<Group>) => void;
+  onDeleteGroup?: (id: string) => void;
+  onUpdatePrivateLesson?: (id: string, lesson: Partial<PrivateLesson>) => void;
+  onDeletePrivateLesson?: (id: string) => void;
   onSaveAttendanceAndNotes: (
     lessonId: string,
     attendanceList: { studentId: string; attendance: AttendanceStatus; homeworkStatus: HomeworkStatus }[],
@@ -68,6 +73,9 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
   onAddGroup,
   onAddPrivateLesson,
   onUpdateGroup,
+  onDeleteGroup,
+  onUpdatePrivateLesson,
+  onDeletePrivateLesson,
   onSaveAttendanceAndNotes,
   onGenerateReportAi
 }) => {
@@ -78,15 +86,26 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
   const [showAddModal, setShowAddModal] = useState(false);
   const [addType, setAddType] = useState<"group" | "private">("group");
 
-  // Form State
+  // Form State for Add
   const [name, setName] = useState("");
   const [subject, setSubject] = useState("الرياضيات");
   const [selectedStudentId, setSelectedStudentId] = useState("");
-  const [selectedDays, setSelectedDays] = useState<string[]>(["الأحد", "الثلاثاء"]);
-  const [time, setTime] = useState("16:00");
-  const [durationMinutes, setDurationMinutes] = useState(90);
+  const [scheduleSlots, setScheduleSlots] = useState<ScheduleSlot[]>([
+    { day: isArabic ? "السبت" : "Sat", time: "17:00", durationMinutes: 90 },
+    { day: isArabic ? "الأحد" : "Sun", time: "19:00", durationMinutes: 90 }
+  ]);
   const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
   const [whatsappGroupLink, setWhatsappGroupLink] = useState("");
+
+  // Edit Modal State
+  const [editingGroup, setEditingGroup] = useState<Group | null>(null);
+  const [editingPrivateLesson, setEditingPrivateLesson] = useState<PrivateLesson | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editSubject, setEditSubject] = useState("");
+  const [editStudentId, setEditStudentId] = useState("");
+  const [editScheduleSlots, setEditScheduleSlots] = useState<ScheduleSlot[]>([]);
+  const [editStudentIds, setEditStudentIds] = useState<string[]>([]);
+  const [editWhatsappLink, setEditWhatsappLink] = useState("");
 
   // Selected Group or Private for Detailed View
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
@@ -132,18 +151,6 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
     reader.readAsDataURL(file);
   };
 
-  const daysList = isArabic
-    ? ["الأحد", "الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"]
-    : ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
-  const handleDayToggle = (day: string) => {
-    if (selectedDays.includes(day)) {
-      setSelectedDays(selectedDays.filter(d => d !== day));
-    } else {
-      setSelectedDays([...selectedDays, day]);
-    }
-  };
-
   const handleStudentSelectToggle = (id: string) => {
     if (selectedStudentIds.includes(id)) {
       setSelectedStudentIds(selectedStudentIds.filter(i => i !== id));
@@ -152,16 +159,30 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
     }
   };
 
+  const handleEditStudentSelectToggle = (id: string) => {
+    if (editStudentIds.includes(id)) {
+      setEditStudentIds(editStudentIds.filter(i => i !== id));
+    } else {
+      setEditStudentIds([...editStudentIds, id]);
+    }
+  };
+
   const handleCreateSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const effectiveSlots = scheduleSlots.length > 0 ? scheduleSlots : [{ day: isArabic ? "السبت" : "Sat", time: "17:00", durationMinutes: 90 }];
+    const uniqueDays = Array.from(new Set(effectiveSlots.map(s => s.day)));
+    const primaryTime = effectiveSlots[0]?.time || "17:00";
+    const primaryDuration = effectiveSlots[0]?.durationMinutes || 90;
+
     if (addType === "group") {
       if (!name.trim()) return;
       onAddGroup({
-        name,
-        subject,
-        days: selectedDays,
-        time,
-        durationMinutes,
+        name: name.trim(),
+        subject: subject.trim() || "عام",
+        days: uniqueDays,
+        time: primaryTime,
+        durationMinutes: primaryDuration,
+        scheduleSlots: effectiveSlots,
         studentIds: selectedStudentIds,
         status: "active",
         whatsappGroupLink: whatsappGroupLink.trim() || undefined
@@ -172,10 +193,11 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
       onAddPrivateLesson({
         studentId: studentObj.id,
         studentName: studentObj.fullName,
-        subject,
-        days: selectedDays,
-        time,
-        durationMinutes,
+        subject: subject.trim() || studentObj.subject || "عام",
+        days: uniqueDays,
+        time: primaryTime,
+        durationMinutes: primaryDuration,
+        scheduleSlots: effectiveSlots,
         status: "active",
         whatsappGroupLink: whatsappGroupLink.trim() || studentObj.whatsappGroupLink || undefined
       });
@@ -188,11 +210,125 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
     setName("");
     setSubject("الرياضيات");
     setSelectedStudentId("");
-    setSelectedDays(["الأحد", "الثلاثاء"]);
-    setTime("16:00");
-    setDurationMinutes(90);
+    setScheduleSlots([
+      { day: isArabic ? "السبت" : "Sat", time: "17:00", durationMinutes: 90 },
+      { day: isArabic ? "الأحد" : "Sun", time: "19:00", durationMinutes: 90 }
+    ]);
     setSelectedStudentIds([]);
     setWhatsappGroupLink("");
+  };
+
+  // Open Edit Group Modal
+  const handleOpenEditGroup = (group: Group) => {
+    setEditingGroup(group);
+    setEditName(group.name);
+    setEditSubject(group.subject);
+    setEditStudentIds(group.studentIds || []);
+    setEditWhatsappLink(group.whatsappGroupLink || "");
+    if (group.scheduleSlots && group.scheduleSlots.length > 0) {
+      setEditScheduleSlots(group.scheduleSlots);
+    } else {
+      const slots = (group.days || []).map(d => ({
+        day: d,
+        time: group.time || "17:00",
+        durationMinutes: group.durationMinutes || 90
+      }));
+      setEditScheduleSlots(slots.length > 0 ? slots : [{ day: isArabic ? "السبت" : "Sat", time: "17:00", durationMinutes: 90 }]);
+    }
+  };
+
+  const handleSaveEditGroup = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingGroup || !editName.trim()) return;
+    const effectiveSlots = editScheduleSlots.length > 0 ? editScheduleSlots : [{ day: isArabic ? "السبت" : "Sat", time: "17:00", durationMinutes: 90 }];
+    const uniqueDays = Array.from(new Set(effectiveSlots.map(s => s.day)));
+    const primaryTime = effectiveSlots[0]?.time || "17:00";
+    const primaryDuration = effectiveSlots[0]?.durationMinutes || 90;
+
+    onUpdateGroup(editingGroup.id, {
+      name: editName.trim(),
+      subject: editSubject.trim() || "عام",
+      days: uniqueDays,
+      time: primaryTime,
+      durationMinutes: primaryDuration,
+      scheduleSlots: effectiveSlots,
+      studentIds: editStudentIds,
+      whatsappGroupLink: editWhatsappLink.trim() || undefined
+    });
+    setEditingGroup(null);
+  };
+
+  // Open Edit Private Lesson Modal
+  const handleOpenEditPrivateLesson = (prv: PrivateLesson) => {
+    setEditingPrivateLesson(prv);
+    setEditStudentId(prv.studentId);
+    setEditSubject(prv.subject);
+    setEditWhatsappLink(prv.whatsappGroupLink || "");
+    if (prv.scheduleSlots && prv.scheduleSlots.length > 0) {
+      setEditScheduleSlots(prv.scheduleSlots);
+    } else {
+      const slots = (prv.days || []).map(d => ({
+        day: d,
+        time: prv.time || "17:00",
+        durationMinutes: prv.durationMinutes || 90
+      }));
+      setEditScheduleSlots(slots.length > 0 ? slots : [{ day: isArabic ? "السبت" : "Sat", time: "17:00", durationMinutes: 90 }]);
+    }
+  };
+
+  const handleSaveEditPrivateLesson = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingPrivateLesson) return;
+    const studentObj = students.find(s => s.id === editStudentId) || { id: editingPrivateLesson.studentId, fullName: editingPrivateLesson.studentName };
+    const effectiveSlots = editScheduleSlots.length > 0 ? editScheduleSlots : [{ day: isArabic ? "السبت" : "Sat", time: "17:00", durationMinutes: 90 }];
+    const uniqueDays = Array.from(new Set(effectiveSlots.map(s => s.day)));
+    const primaryTime = effectiveSlots[0]?.time || "17:00";
+    const primaryDuration = effectiveSlots[0]?.durationMinutes || 90;
+
+    if (onUpdatePrivateLesson) {
+      onUpdatePrivateLesson(editingPrivateLesson.id, {
+        studentId: studentObj.id,
+        studentName: studentObj.fullName,
+        subject: editSubject.trim() || "عام",
+        days: uniqueDays,
+        time: primaryTime,
+        durationMinutes: primaryDuration,
+        scheduleSlots: effectiveSlots,
+        whatsappGroupLink: editWhatsappLink.trim() || undefined
+      });
+    }
+    setEditingPrivateLesson(null);
+  };
+
+  const handleDeleteGroupClick = (group: Group) => {
+    const confirmMsg = isArabic
+      ? `هل أنت متأكد من حذف المجموعة "${group.name}"؟`
+      : `Are you sure you want to delete group "${group.name}"?`;
+    if (window.confirm(confirmMsg)) {
+      if (onDeleteGroup) {
+        onDeleteGroup(group.id);
+      }
+    }
+  };
+
+  const handleDeletePrivateLessonClick = (prv: PrivateLesson) => {
+    const confirmMsg = isArabic
+      ? `هل أنت متأكد من حذف موعد الدرس الخاص للطالب "${prv.studentName}"؟`
+      : `Are you sure you want to delete private lesson for "${prv.studentName}"?`;
+    if (window.confirm(confirmMsg)) {
+      if (onDeletePrivateLesson) {
+        onDeletePrivateLesson(prv.id);
+      }
+    }
+  };
+
+  const getScheduleSummaryText = (item: { days: string[]; time: string; durationMinutes?: number; scheduleSlots?: ScheduleSlot[] }): string => {
+    if (item.scheduleSlots && item.scheduleSlots.length > 0) {
+      return item.scheduleSlots
+        .map(s => `${s.day} ${formatTime12h(s.time, isArabic)}`)
+        .join(" • ");
+    }
+    return `${item.days.join("، ")} (${formatTime12h(item.time, isArabic)})`;
   };
 
   // Send Report Directly to WhatsApp Group / Chat
@@ -429,20 +565,20 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
 
       {/* Grid View - Optimized for Mobile (2 Columns) */}
       {activeTab === "groups" ? (
-        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2 sm:gap-3.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5 sm:gap-3.5">
           {groups.map(group => (
             <div
               key={group.id}
-              className="bg-white border border-slate-200/90 hover:border-blue-300 rounded-xl p-2.5 sm:p-4 shadow-2xs hover:shadow-md transition-all flex flex-col justify-between"
+              className="bg-white border border-slate-200/90 hover:border-blue-300 rounded-2xl p-3 sm:p-4 shadow-2xs hover:shadow-md transition-all flex flex-col justify-between"
             >
               <div>
                 <div className="flex items-center justify-between gap-1 mb-1.5">
-                  <span className="px-1.5 py-0.2 rounded text-[8px] sm:text-[9px] font-black bg-blue-100 text-blue-800 flex items-center gap-0.5 truncate">
-                    <Users className="w-2.5 h-2.5 shrink-0" />
-                    <span className="truncate">{isArabic ? "مجموعة" : "Group"}</span>
+                  <span className="px-1.5 py-0.5 rounded-lg text-[9px] font-black bg-blue-100 text-blue-800 flex items-center gap-1">
+                    <Users className="w-3 h-3 shrink-0" />
+                    <span>{isArabic ? "مجموعة" : "Group"}</span>
                   </span>
                   <span
-                    className={`px-1.5 py-0.2 rounded text-[8px] sm:text-[9px] font-black shrink-0 ${
+                    className={`px-2 py-0.5 rounded-lg text-[9px] font-black shrink-0 ${
                       group.status === "active" ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-600"
                     }`}
                   >
@@ -450,36 +586,61 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
                   </span>
                 </div>
 
-                <h3 className="text-xs sm:text-base font-black text-slate-900 truncate leading-tight">{group.name}</h3>
-                <p className="text-[10px] sm:text-xs font-bold text-blue-600 mt-0.5 truncate">{group.subject}</p>
+                <h3 className="text-sm sm:text-base font-black text-slate-900 leading-snug">{group.name}</h3>
+                <p className="text-[11px] font-bold text-blue-600 mt-0.5">{group.subject}</p>
 
-                <div className="mt-2 pt-1.5 border-t border-slate-100 space-y-1 text-slate-600">
-                  <div className="flex items-center gap-1 text-[9.5px] sm:text-[11px]">
-                    <Calendar className="w-3 h-3 text-slate-400 shrink-0" />
-                    <span className="truncate">{group.days.join("، ")}</span>
+                {/* Mixed Schedule Summary Card */}
+                <div className="mt-2.5 pt-2 border-t border-slate-100 space-y-1.5 text-slate-600">
+                  <div className="bg-slate-50/80 p-2 rounded-xl border border-slate-200/70 space-y-1.5">
+                    <div className="flex items-center gap-1 text-[10.5px] font-bold text-slate-700">
+                      <Clock className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                      <span>{isArabic ? "مواعيد الحصص:" : "Class Schedule:"}</span>
+                    </div>
+                    {group.scheduleSlots && group.scheduleSlots.length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {group.scheduleSlots.map((slot, sIdx) => (
+                          <span
+                            key={sIdx}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-blue-50/90 border border-blue-200/70 text-blue-900 font-bold text-[10px]"
+                          >
+                            <span>📅 {slot.day}</span>
+                            <span className="font-mono text-blue-700">⏰ {formatTime12h(slot.time, isArabic)}</span>
+                            <span className="text-slate-400 font-normal">({slot.durationMinutes || 90}د)</span>
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-[11px] font-bold text-slate-800 leading-tight">
+                        {getScheduleSummaryText(group)}
+                      </div>
+                    )}
                   </div>
-                  <div className="flex items-center gap-1 text-[9.5px] sm:text-[11px]">
-                    <Clock className="w-3 h-3 text-slate-400 shrink-0" />
-                    <span className="truncate">
-                      {group.time} ({group.durationMinutes} {isArabic ? "د" : "m"})
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1 text-[9.5px] sm:text-[11px]">
-                    <Users className="w-3 h-3 text-slate-400 shrink-0" />
-                    <span className="font-bold text-slate-800">
+
+                  <div className="flex items-center justify-between text-[11px] px-1">
+                    <span className="text-slate-500 font-medium">{isArabic ? "عدد الطلاب:" : "Students:"}</span>
+                    <span className="font-black text-slate-800">
                       {group.studentIds.length} {isArabic ? "طلاب" : "st"}
                     </span>
                   </div>
                 </div>
               </div>
 
-              <div className="mt-2 pt-1.5 border-t border-slate-100 flex items-center justify-between gap-1">
+              <div className="mt-3 pt-2 border-t border-slate-100 flex items-center justify-between gap-1.5">
                 <button
                   onClick={() => handleOpenAttendanceSession(group)}
-                  className="flex-1 py-1 px-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-[10px] sm:text-xs transition shadow-2xs flex items-center justify-center gap-0.5 truncate"
+                  className="flex-1 py-1.5 px-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition shadow-2xs flex items-center justify-center gap-1"
                 >
                   <Play className="w-3 h-3 fill-current shrink-0" />
-                  <span>{isArabic ? "بدء" : "Launch"}</span>
+                  <span>{isArabic ? "بدء الحصة" : "Launch"}</span>
+                </button>
+
+                {/* Edit Button */}
+                <button
+                  onClick={() => handleOpenEditGroup(group)}
+                  title={isArabic ? "تعديل المجموعة والمواعيد" : "Edit Group & Schedule"}
+                  className="p-1.5 rounded-xl bg-slate-100 hover:bg-blue-50 text-slate-600 hover:text-blue-700 border border-slate-200 hover:border-blue-200 transition shrink-0"
+                >
+                  <Edit2 className="w-3.5 h-3.5" />
                 </button>
 
                 {group.whatsappGroupLink && (
@@ -488,7 +649,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
                     target="_blank"
                     rel="noopener noreferrer"
                     title={isArabic ? "فتح جروب الواتساب" : "Open WhatsApp Group"}
-                    className="p-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 transition shrink-0 flex items-center justify-center"
+                    className="p-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 transition shrink-0 flex items-center justify-center"
                   >
                     <Share2 className="w-3.5 h-3.5" />
                   </a>
@@ -501,7 +662,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
                     })
                   }
                   title={group.status === "active" ? (isArabic ? "إيقاف المجموعة" : "Pause") : (isArabic ? "تنشيط" : "Resume")}
-                  className="p-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition shrink-0"
+                  className="p-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition shrink-0"
                 >
                   {group.status === "active" ? (
                     <PauseCircle className="w-3.5 h-3.5 text-amber-600" />
@@ -509,6 +670,17 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
                     <PlayCircle className="w-3.5 h-3.5 text-emerald-600" />
                   )}
                 </button>
+
+                {/* Delete Button */}
+                {onDeleteGroup && (
+                  <button
+                    onClick={() => handleDeleteGroupClick(group)}
+                    title={isArabic ? "حذف المجموعة" : "Delete Group"}
+                    className="p-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 transition shrink-0"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             </div>
           ))}
@@ -519,79 +691,157 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
               setAddType("group");
               setShowAddModal(true);
             }}
-            className="border-2 border-dashed border-slate-300 rounded-xl p-3 flex flex-col items-center justify-center text-center cursor-pointer hover:border-blue-500 hover:bg-blue-50/50 transition min-h-[140px]"
+            className="border-2 border-dashed border-slate-300 rounded-2xl p-4 flex flex-col items-center justify-center text-center cursor-pointer hover:border-blue-500 hover:bg-blue-50/50 transition min-h-[160px]"
           >
-            <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold mb-1">
-              <Plus className="w-4 h-4" />
+            <div className="w-10 h-10 rounded-2xl bg-blue-100 text-blue-600 flex items-center justify-center font-bold mb-2 shadow-2xs">
+              <Plus className="w-5 h-5" />
             </div>
-            <h4 className="font-bold text-slate-800 text-[11px] sm:text-sm">
+            <h4 className="font-bold text-slate-800 text-sm">
               {isArabic ? "مجموعة جديدة" : "New Group"}
             </h4>
-            <p className="text-[9.5px] sm:text-xs text-slate-400 mt-0.5 leading-tight">
-              {isArabic ? "إضافة طلاب ومواعيد" : "Add schedule"}
+            <p className="text-[11px] text-slate-400 mt-0.5 leading-tight">
+              {isArabic ? "تحديد مواعيد مختلقة وطلاب" : "Add schedule & students"}
             </p>
           </div>
         </div>
       ) : (
         /* Private Lessons Grid */
-        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2 sm:gap-3.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5 sm:gap-3.5">
           {privateLessons.map(prv => (
             <div
               key={prv.id}
-              className="bg-white border border-slate-200/90 hover:border-purple-300 rounded-xl p-2.5 sm:p-4 shadow-2xs hover:shadow-md transition-all flex flex-col justify-between"
+              className="bg-white border border-slate-200/90 hover:border-purple-300 rounded-2xl p-3 sm:p-4 shadow-2xs hover:shadow-md transition-all flex flex-col justify-between"
             >
               <div>
                 <div className="flex items-center justify-between gap-1 mb-1.5">
-                  <span className="px-1.5 py-0.2 rounded text-[8px] sm:text-[9px] font-black bg-purple-100 text-purple-800 flex items-center gap-0.5 truncate">
-                    <User className="w-2.5 h-2.5 shrink-0" />
-                    <span className="truncate">{isArabic ? "درس خاص" : "Private"}</span>
+                  <span className="px-1.5 py-0.5 rounded-lg text-[9px] font-black bg-purple-100 text-purple-800 flex items-center gap-1">
+                    <User className="w-3 h-3 shrink-0" />
+                    <span>{isArabic ? "درس خاص" : "Private"}</span>
                   </span>
-                  <span className="px-1.5 py-0.2 rounded text-[8px] sm:text-[9px] font-black bg-emerald-100 text-emerald-800 shrink-0">
+                  <span className="px-2 py-0.5 rounded-lg text-[9px] font-black bg-emerald-100 text-emerald-800 shrink-0">
                     {isArabic ? "نشط" : "Active"}
                   </span>
                 </div>
 
-                <h3 className="text-xs sm:text-base font-black text-slate-900 truncate leading-tight">{prv.studentName}</h3>
-                <p className="text-[10px] sm:text-xs font-bold text-purple-600 mt-0.5 truncate">{prv.subject}</p>
+                <h3 className="text-sm sm:text-base font-black text-slate-900 leading-snug">{prv.studentName}</h3>
+                <p className="text-[11px] font-bold text-purple-600 mt-0.5">{prv.subject}</p>
 
-                <div className="mt-2 pt-1.5 border-t border-slate-100 space-y-1 text-slate-600">
-                  <div className="flex items-center gap-1 text-[9.5px] sm:text-[11px]">
-                    <Calendar className="w-3 h-3 text-slate-400 shrink-0" />
-                    <span className="truncate">{prv.days.join("، ")}</span>
-                  </div>
-                  <div className="flex items-center gap-1 text-[9.5px] sm:text-[11px]">
-                    <Clock className="w-3 h-3 text-slate-400 shrink-0" />
-                    <span className="truncate">
-                      {prv.time} ({prv.durationMinutes} {isArabic ? "د" : "m"})
-                    </span>
+                {/* Mixed Schedule Summary Card */}
+                <div className="mt-2.5 pt-2 border-t border-slate-100 space-y-1.5 text-slate-600">
+                  <div className="bg-purple-50/60 p-2 rounded-xl border border-purple-200/60 space-y-1.5">
+                    <div className="flex items-center gap-1 text-[10.5px] font-bold text-purple-900">
+                      <Clock className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+                      <span>{isArabic ? "المواعيد المخصصة:" : "Schedule Slots:"}</span>
+                    </div>
+                    {prv.scheduleSlots && prv.scheduleSlots.length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {prv.scheduleSlots.map((slot, sIdx) => (
+                          <span
+                            key={sIdx}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-purple-100/80 border border-purple-200 text-purple-950 font-bold text-[10px]"
+                          >
+                            <span>📅 {slot.day}</span>
+                            <span className="font-mono text-purple-700">⏰ {formatTime12h(slot.time, isArabic)}</span>
+                            <span className="text-slate-400 font-normal">({slot.durationMinutes || 90}د)</span>
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-[11px] font-bold text-slate-800 leading-tight">
+                        {getScheduleSummaryText(prv)}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
 
-              <div className="mt-2 pt-1.5 border-t border-slate-100">
+              <div className="mt-3 pt-2 border-t border-slate-100 flex items-center justify-between gap-1.5">
                 <button
                   onClick={() => handleOpenAttendanceSession(undefined, prv)}
-                  className="w-full py-1 px-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 text-white font-bold text-[10px] sm:text-xs transition shadow-2xs flex items-center justify-center gap-0.5 truncate"
+                  className="flex-1 py-1.5 px-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs transition shadow-2xs flex items-center justify-center gap-1"
                 >
                   <Play className="w-3 h-3 fill-current shrink-0" />
                   <span>{isArabic ? "بدء الحصة" : "Launch"}</span>
                 </button>
+
+                {/* Edit Private Lesson */}
+                <button
+                  onClick={() => handleOpenEditPrivateLesson(prv)}
+                  title={isArabic ? "تعديل المواعيد والتفاصيل" : "Edit Details & Schedule"}
+                  className="p-1.5 rounded-xl bg-slate-100 hover:bg-purple-50 text-slate-600 hover:text-purple-700 border border-slate-200 hover:border-purple-200 transition shrink-0"
+                >
+                  <Edit2 className="w-3.5 h-3.5" />
+                </button>
+
+                {prv.whatsappGroupLink && (
+                  <a
+                    href={prv.whatsappGroupLink.startsWith("http") ? prv.whatsappGroupLink : `https://${prv.whatsappGroupLink}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={isArabic ? "فتح الواتساب" : "WhatsApp"}
+                    className="p-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 transition shrink-0 flex items-center justify-center"
+                  >
+                    <Share2 className="w-3.5 h-3.5" />
+                  </a>
+                )}
+
+                {/* Delete Button */}
+                {onDeletePrivateLesson && (
+                  <button
+                    onClick={() => handleDeletePrivateLessonClick(prv)}
+                    title={isArabic ? "حذف الموعد" : "Delete"}
+                    className="p-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 transition shrink-0"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             </div>
           ))}
+
+          {/* Add Private Lesson Placeholder */}
+          <div
+            onClick={() => {
+              setAddType("private");
+              setShowAddModal(true);
+            }}
+            className="border-2 border-dashed border-purple-300 rounded-2xl p-4 flex flex-col items-center justify-center text-center cursor-pointer hover:border-purple-500 hover:bg-purple-50/50 transition min-h-[160px]"
+          >
+            <div className="w-10 h-10 rounded-2xl bg-purple-100 text-purple-600 flex items-center justify-center font-bold mb-2 shadow-2xs">
+              <Plus className="w-5 h-5" />
+            </div>
+            <h4 className="font-bold text-slate-800 text-sm">
+              {isArabic ? "درس خاص جديد" : "New Private Lesson"}
+            </h4>
+            <p className="text-[11px] text-slate-400 mt-0.5 leading-tight">
+              {isArabic ? "تحديد مواعيد مخصصة للطالب" : "Set mixed schedule"}
+            </p>
+          </div>
         </div>
       )}
 
-      {/* Modal: Create Group or Private Lesson */}
+      {/* Modal: Create Group or Private Lesson with Mixed Schedule Support */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white border border-slate-200 rounded-3xl p-6 max-w-lg w-full shadow-2xl animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
-              <h2 className="text-lg font-bold text-slate-900">
-                {addType === "group"
-                  ? (isArabic ? "إضافة مجموعة جديدة" : "Add New Group")
-                  : (isArabic ? "إضافة درس خاص" : "Add Private Lesson")}
-              </h2>
+        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 max-w-xl w-full shadow-2xl animate-in fade-in zoom-in-95 duration-150 my-4 max-h-[92vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 sticky top-0 bg-white z-10">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
+                  <Calendar className="w-4 h-4" />
+                </div>
+                <div>
+                  <h2 className="text-sm sm:text-base font-black text-slate-900">
+                    {addType === "group"
+                      ? (isArabic ? "إضافة مجموعة جديدة" : "Add New Group")
+                      : (isArabic ? "إضافة درس خاص" : "Add Private Lesson")}
+                  </h2>
+                  <p className="text-[10.5px] text-slate-500 font-medium">
+                    {isArabic
+                      ? "تحديد تفاصيل الحصة والمواعيد المختلطة لكل يوم"
+                      : "Configure session details and per-day schedules"}
+                  </p>
+                </div>
+              </div>
               <button
                 onClick={() => setShowAddModal(false)}
                 className="text-slate-400 hover:text-slate-700 p-1"
@@ -601,52 +851,58 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
             </div>
 
             {/* Selection Switcher */}
-            <div className="flex bg-slate-100 p-1 rounded-2xl my-4">
+            <div className="flex bg-slate-100 p-1 rounded-2xl my-3">
               <button
                 type="button"
                 onClick={() => setAddType("group")}
-                className={`flex-1 py-2 rounded-xl text-xs font-bold transition ${
+                className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition ${
                   addType === "group" ? "bg-white text-blue-600 shadow-sm" : "text-slate-500"
                 }`}
               >
-                👥 {isArabic ? "مجموعة" : "Group"}
+                👥 {isArabic ? "مجموعة طلاب" : "Group"}
               </button>
               <button
                 type="button"
                 onClick={() => setAddType("private")}
-                className={`flex-1 py-2 rounded-xl text-xs font-bold transition ${
+                className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition ${
                   addType === "private" ? "bg-white text-purple-600 shadow-sm" : "text-slate-500"
                 }`}
               >
-                👤 {isArabic ? "خاص" : "Private"}
+                👤 {isArabic ? "درس خاص (طالب فردي)" : "Private"}
               </button>
             </div>
 
-            <form onSubmit={handleCreateSubmit} className="space-y-4 text-xs">
+            <form onSubmit={handleCreateSubmit} className="space-y-3.5 text-xs">
               {addType === "group" ? (
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">
-                    {isArabic ? "اسم المجموعة" : "Group Name"}
+                  <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                    {isArabic ? "اسم المجموعة *" : "Group Name *"}
                   </label>
                   <input
                     type="text"
                     required
                     value={name}
                     onChange={e => setName(e.target.value)}
-                    placeholder={isArabic ? "مثال: مجموعة الرياضيات أ" : "e.g., Group A - Math"}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-medium focus:outline-none focus:border-blue-500"
+                    placeholder={isArabic ? "مثال: مجموعة الرياضيات - الصف الثالث" : "e.g. Math Group - Grade 3"}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-bold focus:outline-none focus:border-blue-500"
                   />
                 </div>
               ) : (
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">
-                    {isArabic ? "اختر الطالب" : "Select Student"}
+                  <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                    {isArabic ? "اختر الطالب *" : "Select Student *"}
                   </label>
                   <select
                     required
                     value={selectedStudentId}
-                    onChange={e => setSelectedStudentId(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-medium focus:outline-none focus:border-blue-500"
+                    onChange={e => {
+                      setSelectedStudentId(e.target.value);
+                      const st = students.find(s => s.id === e.target.value);
+                      if (st && st.subject) {
+                        setSubject(st.subject);
+                      }
+                    }}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-bold focus:outline-none focus:border-blue-500"
                   >
                     <option value="">{isArabic ? "-- اختر طالباً --" : "-- Select Student --"}</option>
                     {activeStudentsList.map(s => (
@@ -659,98 +915,59 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
               )}
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">
-                  {isArabic ? "المادة الدراسية" : "Subject"}
+                <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                  {isArabic ? "المادة الدراسية *" : "Subject *"}
                 </label>
                 <input
                   type="text"
                   required
                   value={subject}
                   onChange={e => setSubject(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-medium focus:outline-none focus:border-blue-500"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-bold focus:outline-none focus:border-blue-500"
                 />
               </div>
 
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">
-                  {isArabic ? "أيام الحصص" : "Study Days"}
-                </label>
-                <div className="flex flex-wrap gap-1.5">
-                  {daysList.map(day => {
-                    const isSelected = selectedDays.includes(day);
-                    return (
-                      <button
-                        type="button"
-                        key={day}
-                        onClick={() => handleDayToggle(day)}
-                        className={`px-3 py-1.5 rounded-xl font-bold text-[11px] transition ${
-                          isSelected
-                            ? "bg-blue-600 text-white shadow-sm"
-                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                        }`}
-                      >
-                        {day}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">
-                    {isArabic ? "وقت الحصة" : "Session Time"}
-                  </label>
-                  <input
-                    type="time"
-                    required
-                    value={time}
-                    onChange={e => setTime(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-medium focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">
-                    {isArabic ? "مدة الحصة (بالدقيقة)" : "Duration (Mins)"}
-                  </label>
-                  <input
-                    type="number"
-                    min="15"
-                    step="15"
-                    value={durationMinutes}
-                    onChange={e => setDurationMinutes(Number(e.target.value))}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-medium focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-              </div>
+              {/* Mixed Schedule Builder Component */}
+              <MixedScheduleEditor
+                scheduleSlots={scheduleSlots}
+                onChange={setScheduleSlots}
+                defaultDuration={90}
+                isArabic={isArabic}
+              />
 
               {addType === "group" && (
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">
-                    {isArabic ? "إضافة طلاب للمجموعة" : "Add Students to Group"}
+                  <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                    {isArabic ? "إضافة طلاب للمجموعة:" : "Add Students to Group:"}
                   </label>
                   <div className="max-h-36 overflow-y-auto bg-slate-50 border border-slate-200 rounded-xl p-2 space-y-1">
-                    {activeStudentsList.map(s => (
-                      <label
-                        key={s.id}
-                        className="flex items-center gap-2 p-1.5 hover:bg-white rounded-lg cursor-pointer"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selectedStudentIds.includes(s.id)}
-                          onChange={() => handleStudentSelectToggle(s.id)}
-                          className="rounded text-blue-600 focus:ring-blue-500"
-                        />
-                        <span className="font-semibold text-slate-800">{s.fullName}</span>
-                      </label>
-                    ))}
+                    {activeStudentsList.length === 0 ? (
+                      <p className="text-[11px] text-slate-400 p-2 text-center">
+                        {isArabic ? "لا يوجد طلاب نشطون حالياً" : "No active students"}
+                      </p>
+                    ) : (
+                      activeStudentsList.map(s => (
+                        <label
+                          key={s.id}
+                          className="flex items-center gap-2 p-1.5 hover:bg-white rounded-lg cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedStudentIds.includes(s.id)}
+                            onChange={() => handleStudentSelectToggle(s.id)}
+                            className="rounded text-blue-600 focus:ring-blue-500"
+                          />
+                          <span className="font-semibold text-slate-800">{s.fullName}</span>
+                          <span className="text-[10px] text-slate-400">({s.subject})</span>
+                        </label>
+                      ))
+                    )}
                   </div>
                 </div>
               )}
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+                <label className="block font-bold text-slate-700 mb-1 flex items-center gap-1.5 text-[11px]">
                   <Share2 className="w-3.5 h-3.5 text-emerald-600" />
                   <span>{isArabic ? "رابط جروب الواتساب (اختياري)" : "WhatsApp Group Link (Optional)"}</span>
                 </label>
@@ -758,12 +975,12 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
                   type="url"
                   value={whatsappGroupLink}
                   onChange={e => setWhatsappGroupLink(e.target.value)}
-                  placeholder={isArabic ? "مثال: https://chat.whatsapp.com/ExAmPlE..." : "e.g., https://chat.whatsapp.com/..."}
+                  placeholder={isArabic ? "مثال: https://chat.whatsapp.com/..." : "https://chat.whatsapp.com/..."}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-medium focus:outline-none focus:border-blue-500 dir-ltr text-left"
                 />
               </div>
 
-              <div className="pt-4 flex justify-end gap-2">
+              <div className="pt-3 flex justify-end gap-2 border-t border-slate-100">
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
@@ -775,7 +992,224 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
                   type="submit"
                   className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-md shadow-blue-600/30"
                 >
-                  {isArabic ? "حفظ وإنشاء" : "Save & Create"}
+                  {isArabic ? "حفظ وإنشاء الموعد" : "Save & Create"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Edit Group */}
+      {editingGroup && (
+        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 max-w-xl w-full shadow-2xl animate-in fade-in zoom-in-95 duration-150 my-4 max-h-[92vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 sticky top-0 bg-white z-10">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
+                  <Edit2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h2 className="text-sm sm:text-base font-black text-slate-900">
+                    {isArabic ? "تعديل المجموعة ومواعيدها" : "Edit Group & Schedule"}
+                  </h2>
+                  <p className="text-[10.5px] text-slate-500 font-medium">
+                    {editingGroup.name}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setEditingGroup(null)}
+                className="text-slate-400 hover:text-slate-700 p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditGroup} className="space-y-3.5 text-xs mt-3">
+              <div>
+                <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                  {isArabic ? "اسم المجموعة *" : "Group Name *"}
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editName}
+                  onChange={e => setEditName(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-bold focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                  {isArabic ? "المادة الدراسية *" : "Subject *"}
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editSubject}
+                  onChange={e => setEditSubject(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-bold focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              {/* Mixed Schedule Builder Component */}
+              <MixedScheduleEditor
+                scheduleSlots={editScheduleSlots}
+                onChange={setEditScheduleSlots}
+                defaultDuration={editingGroup.durationMinutes || 90}
+                isArabic={isArabic}
+              />
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                  {isArabic ? "الطلاب المقيدون بالمجموعة:" : "Enrolled Students:"}
+                </label>
+                <div className="max-h-36 overflow-y-auto bg-slate-50 border border-slate-200 rounded-xl p-2 space-y-1">
+                  {activeStudentsList.map(s => (
+                    <label
+                      key={s.id}
+                      className="flex items-center gap-2 p-1.5 hover:bg-white rounded-lg cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={editStudentIds.includes(s.id)}
+                        onChange={() => handleEditStudentSelectToggle(s.id)}
+                        className="rounded text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="font-semibold text-slate-800">{s.fullName}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1 flex items-center gap-1.5 text-[11px]">
+                  <Share2 className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>{isArabic ? "رابط جروب الواتساب" : "WhatsApp Group Link"}</span>
+                </label>
+                <input
+                  type="url"
+                  value={editWhatsappLink}
+                  onChange={e => setEditWhatsappLink(e.target.value)}
+                  placeholder="https://chat.whatsapp.com/..."
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-medium focus:outline-none focus:border-blue-500 dir-ltr text-left"
+                />
+              </div>
+
+              <div className="pt-3 flex justify-end gap-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setEditingGroup(null)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold"
+                >
+                  {isArabic ? "إلغاء" : "Cancel"}
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-md shadow-blue-600/30"
+                >
+                  {isArabic ? "حفظ التعديلات" : "Save Changes"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Edit Private Lesson */}
+      {editingPrivateLesson && (
+        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 max-w-xl w-full shadow-2xl animate-in fade-in zoom-in-95 duration-150 my-4 max-h-[92vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 sticky top-0 bg-white z-10">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center font-bold">
+                  <Edit2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h2 className="text-sm sm:text-base font-black text-slate-900">
+                    {isArabic ? "تعديل موعد الدرس الخاص" : "Edit Private Lesson"}
+                  </h2>
+                  <p className="text-[10.5px] text-slate-500 font-medium">
+                    {editingPrivateLesson.studentName}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setEditingPrivateLesson(null)}
+                className="text-slate-400 hover:text-slate-700 p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditPrivateLesson} className="space-y-3.5 text-xs mt-3">
+              <div>
+                <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                  {isArabic ? "الطالب *" : "Student *"}
+                </label>
+                <select
+                  required
+                  value={editStudentId}
+                  onChange={e => setEditStudentId(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-bold focus:outline-none focus:border-purple-500"
+                >
+                  {activeStudentsList.map(s => (
+                    <option key={s.id} value={s.id}>
+                      {s.fullName} ({s.subject})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                  {isArabic ? "المادة الدراسية *" : "Subject *"}
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editSubject}
+                  onChange={e => setEditSubject(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-bold focus:outline-none focus:border-purple-500"
+                />
+              </div>
+
+              {/* Mixed Schedule Builder Component */}
+              <MixedScheduleEditor
+                scheduleSlots={editScheduleSlots}
+                onChange={setEditScheduleSlots}
+                defaultDuration={editingPrivateLesson.durationMinutes || 90}
+                isArabic={isArabic}
+              />
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1 flex items-center gap-1.5 text-[11px]">
+                  <Share2 className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>{isArabic ? "رابط جروب الواتساب" : "WhatsApp Link"}</span>
+                </label>
+                <input
+                  type="url"
+                  value={editWhatsappLink}
+                  onChange={e => setEditWhatsappLink(e.target.value)}
+                  placeholder="https://chat.whatsapp.com/..."
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-medium focus:outline-none focus:border-purple-500 dir-ltr text-left"
+                />
+              </div>
+
+              <div className="pt-3 flex justify-end gap-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setEditingPrivateLesson(null)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold"
+                >
+                  {isArabic ? "إلغاء" : "Cancel"}
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold shadow-md shadow-purple-600/30"
+                >
+                  {isArabic ? "حفظ التعديلات" : "Save Changes"}
                 </button>
               </div>
             </form>

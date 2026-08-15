@@ -123,41 +123,77 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
 
     if (filterType !== "private") {
       groups.forEach(grp => {
-        const h = getHourFromTimeString(grp.time || "");
-        grp.days.forEach(dayRaw => {
-          const dayName = normalizeDay(dayRaw);
-          if (matrix[h] && matrix[h][dayName]) {
-            matrix[h][dayName].push({
-              id: `grp-${grp.id}-${dayName}`,
-              type: "group",
-              time: grp.time || "",
-              title: grp.name,
-              subject: grp.subject,
-              subtext: `${grp.studentIds?.length || 0} ${isArabic ? "طلاب" : "students"}`,
-              groupObj: grp
-            });
-          }
-        });
+        if (grp.scheduleSlots && grp.scheduleSlots.length > 0) {
+          grp.scheduleSlots.forEach((slot, sIdx) => {
+            const h = getHourFromTimeString(slot.time || grp.time || "");
+            const dayName = normalizeDay(slot.day);
+            if (matrix[h] && matrix[h][dayName]) {
+              matrix[h][dayName].push({
+                id: `grp-${grp.id}-${dayName}-${sIdx}`,
+                type: "group",
+                time: slot.time || grp.time || "",
+                title: grp.name,
+                subject: grp.subject,
+                subtext: `${grp.studentIds?.length || 0} ${isArabic ? "طلاب" : "students"}`,
+                groupObj: grp
+              });
+            }
+          });
+        } else {
+          const h = getHourFromTimeString(grp.time || "");
+          grp.days.forEach(dayRaw => {
+            const dayName = normalizeDay(dayRaw);
+            if (matrix[h] && matrix[h][dayName]) {
+              matrix[h][dayName].push({
+                id: `grp-${grp.id}-${dayName}`,
+                type: "group",
+                time: grp.time || "",
+                title: grp.name,
+                subject: grp.subject,
+                subtext: `${grp.studentIds?.length || 0} ${isArabic ? "طلاب" : "students"}`,
+                groupObj: grp
+              });
+            }
+          });
+        }
       });
     }
 
     if (filterType !== "group") {
       privateLessons.forEach(prv => {
-        const h = getHourFromTimeString(prv.time || "");
-        prv.days.forEach(dayRaw => {
-          const dayName = normalizeDay(dayRaw);
-          if (matrix[h] && matrix[h][dayName]) {
-            matrix[h][dayName].push({
-              id: `prv-${prv.id}-${dayName}`,
-              type: "private",
-              time: prv.time || "",
-              title: prv.studentName,
-              subject: prv.subject,
-              subtext: isArabic ? "درس خاص" : "Private",
-              privateObj: prv
-            });
-          }
-        });
+        if (prv.scheduleSlots && prv.scheduleSlots.length > 0) {
+          prv.scheduleSlots.forEach((slot, sIdx) => {
+            const h = getHourFromTimeString(slot.time || prv.time || "");
+            const dayName = normalizeDay(slot.day);
+            if (matrix[h] && matrix[h][dayName]) {
+              matrix[h][dayName].push({
+                id: `prv-${prv.id}-${dayName}-${sIdx}`,
+                type: "private",
+                time: slot.time || prv.time || "",
+                title: prv.studentName,
+                subject: prv.subject,
+                subtext: isArabic ? "درس خاص" : "Private",
+                privateObj: prv
+              });
+            }
+          });
+        } else {
+          const h = getHourFromTimeString(prv.time || "");
+          prv.days.forEach(dayRaw => {
+            const dayName = normalizeDay(dayRaw);
+            if (matrix[h] && matrix[h][dayName]) {
+              matrix[h][dayName].push({
+                id: `prv-${prv.id}-${dayName}`,
+                type: "private",
+                time: prv.time || "",
+                title: prv.studentName,
+                subject: prv.subject,
+                subtext: isArabic ? "درس خاص" : "Private",
+                privateObj: prv
+              });
+            }
+          });
+        }
       });
     }
 

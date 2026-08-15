@@ -253,16 +253,31 @@ export function App() {
     setPrivateLessons(prev => [newPrv, ...prev]);
   };
 
+  const handleUpdatePrivateLesson = (id: string, partial: Partial<PrivateLesson>) => {
+    setPrivateLessons(prev =>
+      prev.map(p => (p.id === id ? { ...p, ...partial } : p))
+    );
+  };
+
+  const handleDeletePrivateLesson = (id: string) => {
+    setPrivateLessons(prev => prev.filter(p => p.id !== id));
+  };
+
   const handleUpdateGroup = (id: string, partial: Partial<Group>) => {
     setGroups(prev =>
       prev.map(g => (g.id === id ? { ...g, ...partial } : g))
     );
   };
 
+  const handleDeleteGroup = (id: string) => {
+    setGroups(prev => prev.filter(g => g.id !== id));
+  };
+
   const handleAddStudent = (newData: Omit<Student, "id" | "createdAt">) => {
+    const studentId = `stu_${Date.now()}`;
     const newStudent: Student = {
       ...newData,
-      id: `stu_${Date.now()}`,
+      id: studentId,
       createdAt: new Date().toISOString()
     };
     setStudents(prev => [newStudent, ...prev]);
@@ -272,10 +287,27 @@ export function App() {
     setStudents(prev =>
       prev.map(s => (s.id === studentId ? { ...s, ...updatedData } : s))
     );
+
+    // Sync updated student info to existing private lessons if needed
+    if (updatedData.fullName || updatedData.whatsappGroupLink !== undefined) {
+      setPrivateLessons(prev =>
+        prev.map(p => {
+          if (p.studentId === studentId) {
+            return {
+              ...p,
+              studentName: updatedData.fullName || p.studentName,
+              whatsappGroupLink: updatedData.whatsappGroupLink !== undefined ? updatedData.whatsappGroupLink : p.whatsappGroupLink
+            };
+          }
+          return p;
+        })
+      );
+    }
   };
 
   const handleDeleteStudent = (studentId: string) => {
     setStudents(prev => prev.filter(s => s.id !== studentId));
+    setPrivateLessons(prev => prev.filter(p => p.studentId !== studentId));
   };
 
   const handleUpdateStudentStatus = (studentId: string, status: StudentStatus) => {
@@ -438,6 +470,84 @@ export function App() {
       createdAt: new Date().toISOString()
     };
     setReports(prev => [newReport, ...prev]);
+
+    // Synchronize Attendance Record and Student Balance
+    const isDeduct = reportData.deductCost ?? (reportData.attendance === "present");
+    const attStatus: AttendanceStatus = reportData.attendance || "present";
+    const hwStatus: HomeworkStatus = reportData.homeworkStatus || "done";
+
+    if (isDeduct && reportData.studentId) {
+      setStudents(prev =>
+        prev.map(s => {
+          if (s.id === reportData.studentId) {
+            let updatedSubjects = s.subjects;
+            let targetCost = s.lessonCost;
+
+            if (s.subjects && s.subjects.length > 0 && reportData.subject) {
+              const normSubj = reportData.subject.trim().toLowerCase();
+              updatedSubjects = s.subjects.map(sp => {
+                if (sp.subject.trim().toLowerCase() === normSubj) {
+                  targetCost = sp.lessonCost || targetCost;
+                  if (sp.subscriptionType === "lessons_count" && (sp.remainingLessons ?? 0) > 0) {
+                    const newRem = (sp.remainingLessons ?? 0) - 1;
+                    return {
+                      ...sp,
+                      remainingLessons: newRem,
+                      totalAttendedLessons: (sp.totalAttendedLessons ?? 0) + 1
+                    };
+                  } else {
+                    return {
+                      ...sp,
+                      totalAttendedLessons: (sp.totalAttendedLessons ?? 0) + 1
+                    };
+                  }
+                }
+                return sp;
+              });
+            }
+
+            let newRemainingLessons = s.remainingLessons;
+            let newBalance = s.remainingBalance;
+            let newPaymentStatus = s.paymentStatus;
+
+            if (s.subscriptionType === "lessons_count" && s.remainingLessons > 0) {
+              newRemainingLessons = s.remainingLessons - 1;
+              newBalance = newRemainingLessons * (s.lessonCost || targetCost || 100);
+              newPaymentStatus = newRemainingLessons <= 0 ? "unpaid" : "paid";
+            }
+
+            return {
+              ...s,
+              subjects: updatedSubjects,
+              remainingLessons: newRemainingLessons,
+              remainingBalance: newBalance,
+              paymentStatus: newPaymentStatus,
+              totalAttendedLessons: (s.totalAttendedLessons || 0) + 1
+            };
+          }
+          return s;
+        })
+      );
+    }
+
+    // Save linked attendance entry
+    const newAttendance: AttendanceRecord = {
+      id: `att_${Date.now()}_${reportData.studentId}`,
+      lessonId: reportData.lessonId || `les_${Date.now()}`,
+      studentId: reportData.studentId,
+      studentName: reportData.studentName,
+      subject: reportData.subject,
+      lessonNumber: reportData.lessonNumber,
+      date: reportData.date,
+      attendance: attStatus,
+      homeworkStatus: hwStatus,
+      teacherNotes: reportData.teacherNotes,
+      aiInstructions: reportData.aiInstructions,
+      generatedReportText: reportData.reportText || reportData.generatedText,
+      deducted: isDeduct
+    };
+
+    setAttendanceRecords(prev => [newAttendance, ...prev]);
   };
 
   const handleDeleteReport = (reportId: string) => {
@@ -558,6 +668,9 @@ export function App() {
             onAddGroup={handleAddGroup}
             onAddPrivateLesson={handleAddPrivateLesson}
             onUpdateGroup={handleUpdateGroup}
+            onDeleteGroup={handleDeleteGroup}
+            onUpdatePrivateLesson={handleUpdatePrivateLesson}
+            onDeletePrivateLesson={handleDeletePrivateLesson}
             onSaveAttendanceAndNotes={handleSaveAttendanceAndNotes}
             onGenerateReportAi={handleGenerateReportAi}
           />
@@ -567,6 +680,7 @@ export function App() {
           <StudentsView
             settings={settings}
             students={students}
+            privateLessons={privateLessons}
             attendanceRecords={attendanceRecords}
             examRecords={examRecords}
             paymentTransactions={paymentTransactions}
@@ -580,6 +694,9 @@ export function App() {
             onAddReport={handleAddReport}
             onDeleteReport={handleDeleteReport}
             onGenerateReportAi={handleGenerateReportAi}
+            onAddPrivateLesson={handleAddPrivateLesson}
+            onUpdatePrivateLesson={handleUpdatePrivateLesson}
+            onDeletePrivateLesson={handleDeletePrivateLesson}
           />
         )}
 

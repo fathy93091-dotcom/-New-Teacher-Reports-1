@@ -1,4 +1,27 @@
-import { Student, AttendanceRecord } from "../types";
+import { Student, AttendanceRecord, StudentSubjectPlan, StudyType, SubscriptionType, PaymentPlan } from "../types";
+
+export interface SubjectFinancialDetail {
+  id: string;
+  subject: string;
+  studyType: StudyType;
+  subscriptionType: SubscriptionType;
+  paymentPlan: PaymentPlan;
+  lessonCost: number;
+  totalAttendedLessons: number;
+  totalAccruedCost: number;
+  totalPaidAmount: number;
+  remainingLessons: number;
+  remainingBalance: number;
+  netBalance: number;
+  amountDue: number;
+  creditRemaining: number;
+  isFullyPaid: boolean;
+  statusBadge: {
+    labelAr: string;
+    labelEn: string;
+    color: "emerald" | "amber" | "rose" | "blue";
+  };
+}
 
 export interface StudentFinancialSummary {
   totalAttendedLessons: number;
@@ -11,6 +34,7 @@ export interface StudentFinancialSummary {
   amountDue: number; // >= 0
   creditRemaining: number; // >= 0
   isFullyPaid: boolean;
+  subjectsDetails?: SubjectFinancialDetail[];
   statusBadge: {
     labelAr: string;
     labelEn: string;
@@ -20,14 +44,235 @@ export interface StudentFinancialSummary {
   detailsExplanationEn: string;
 }
 
+function calculateSingleSubjectFinance(
+  subj: StudentSubjectPlan,
+  studentId: string,
+  attendanceRecords?: AttendanceRecord[]
+): SubjectFinancialDetail {
+  const lessonCost = Math.max(1, subj.lessonCost || 100);
+  let totalAttended = subj.totalAttendedLessons || 0;
+
+  if (attendanceRecords && attendanceRecords.length > 0) {
+    const presentRecords = attendanceRecords.filter(
+      r => r.studentId === studentId && r.attendance === "present"
+    );
+    // If multiple subjects, try to match by date or use proportional/recorded count
+    totalAttended = Math.max(totalAttended, presentRecords.length);
+  }
+
+  const isMonthly = subj.subscriptionType === "monthly";
+  const plan = subj.paymentPlan || "beginning_of_month";
+  const totalAccruedCost = totalAttended * lessonCost;
+
+  if (isMonthly) {
+    const totalPaid = subj.totalPaidAmount ?? (plan === "beginning_of_month" ? totalAccruedCost : 0);
+    const netBalance = totalPaid - totalAccruedCost;
+    const amountDue = netBalance < 0 ? Math.abs(netBalance) : 0;
+    const creditRemaining = netBalance > 0 ? netBalance : 0;
+    const isFullyPaid = netBalance >= 0;
+
+    let badgeLabelAr = "";
+    let badgeLabelEn = "";
+    let badgeColor: "emerald" | "amber" | "rose" | "blue" = "emerald";
+
+    if (plan === "beginning_of_month") {
+      if (netBalance > 0) {
+        badgeLabelAr = `رصيد متبقي: +${creditRemaining} ج.م`;
+        badgeLabelEn = `Credit: +${creditRemaining} EGP`;
+        badgeColor = "emerald";
+      } else if (netBalance === 0) {
+        badgeLabelAr = totalPaid > 0 ? "مسدد بالكامل" : "بانتظار السداد";
+        badgeLabelEn = totalPaid > 0 ? "Fully Paid" : "Awaiting Payment";
+        badgeColor = totalPaid > 0 ? "emerald" : "amber";
+      } else {
+        badgeLabelAr = `مستحق: ${amountDue} ج.م`;
+        badgeLabelEn = `Due: ${amountDue} EGP`;
+        badgeColor = "rose";
+      }
+    } else if (plan === "end_of_month") {
+      if (netBalance >= 0 && totalAccruedCost > 0) {
+        badgeLabelAr = `مسدد لنهاية الشهر (${totalAccruedCost} ج.م)`;
+        badgeLabelEn = `Settled (${totalAccruedCost} EGP)`;
+        badgeColor = "emerald";
+      } else if (totalAccruedCost === 0 && totalPaid === 0) {
+        badgeLabelAr = "حساب نهاية الشهر";
+        badgeLabelEn = "Month-End Plan";
+        badgeColor = "blue";
+      } else {
+        badgeLabelAr = `مستحق نهاية الشهر: ${amountDue} ج.م`;
+        badgeLabelEn = `Due: ${amountDue} EGP`;
+        badgeColor = totalAttended > 0 ? "amber" : "blue";
+      }
+    } else {
+      // Mixed
+      if (netBalance > 0) {
+        badgeLabelAr = `رصيد: +${netBalance} ج.م`;
+        badgeLabelEn = `Credit: +${netBalance} EGP`;
+        badgeColor = "emerald";
+      } else if (netBalance === 0) {
+        badgeLabelAr = "متوازن";
+        badgeLabelEn = "Balanced";
+        badgeColor = "emerald";
+      } else {
+        badgeLabelAr = `مستحق: ${amountDue} ج.م`;
+        badgeLabelEn = `Due: ${amountDue} EGP`;
+        badgeColor = "rose";
+      }
+    }
+
+    return {
+      id: subj.id,
+      subject: subj.subject,
+      studyType: subj.studyType,
+      subscriptionType: subj.subscriptionType,
+      paymentPlan: subj.paymentPlan,
+      lessonCost,
+      totalAttendedLessons: totalAttended,
+      totalAccruedCost,
+      totalPaidAmount: totalPaid,
+      remainingLessons: creditRemaining > 0 ? Math.floor(creditRemaining / lessonCost) : 0,
+      remainingBalance: creditRemaining,
+      netBalance,
+      amountDue,
+      creditRemaining,
+      isFullyPaid,
+      statusBadge: {
+        labelAr: badgeLabelAr,
+        labelEn: badgeLabelEn,
+        color: badgeColor
+      }
+    };
+  } else {
+    // Package
+    const remainingLessons = subj.remainingLessons ?? 0;
+    const remainingBalance = remainingLessons * lessonCost;
+    const totalPurchased = subj.totalPurchasedLessons || (remainingLessons + totalAttended) || 8;
+    const isFullyPaid = remainingLessons > 0;
+    const totalPaid = subj.totalPaidAmount ?? (totalPurchased * lessonCost);
+
+    let badgeLabelAr = "";
+    let badgeLabelEn = "";
+    let badgeColor: "emerald" | "amber" | "rose" | "blue" = "emerald";
+
+    if (remainingLessons > 1) {
+      badgeLabelAr = `باقة: متبقي ${remainingLessons} حصة`;
+      badgeLabelEn = `Pack: ${remainingLessons} left`;
+      badgeColor = "emerald";
+    } else if (remainingLessons === 1) {
+      badgeLabelAr = `⚠️ متبقي حصة واحدة`;
+      badgeLabelEn = `⚠️ 1 lesson left`;
+      badgeColor = "amber";
+    } else {
+      badgeLabelAr = "نفدت الباقة (مستحق التجديد)";
+      badgeLabelEn = "Package Expired";
+      badgeColor = "rose";
+    }
+
+    return {
+      id: subj.id,
+      subject: subj.subject,
+      studyType: subj.studyType,
+      subscriptionType: subj.subscriptionType,
+      paymentPlan: subj.paymentPlan,
+      lessonCost,
+      totalAttendedLessons: totalAttended,
+      totalAccruedCost,
+      totalPaidAmount: totalPaid,
+      remainingLessons,
+      remainingBalance,
+      netBalance: remainingBalance,
+      amountDue: remainingLessons <= 0 ? (totalPurchased * lessonCost) : 0,
+      creditRemaining: remainingBalance,
+      isFullyPaid,
+      statusBadge: {
+        labelAr: badgeLabelAr,
+        labelEn: badgeLabelEn,
+        color: badgeColor
+      }
+    };
+  }
+}
+
 export function calculateStudentFinancials(
   student: Student,
   attendanceRecords?: AttendanceRecord[]
 ): StudentFinancialSummary {
+  // If student has multiple subjects defined
+  if (student.subjects && student.subjects.length > 0) {
+    const subjectsDetails = student.subjects.map(subj =>
+      calculateSingleSubjectFinance(subj, student.id, attendanceRecords)
+    );
+
+    const totalAttendedLessons = subjectsDetails.reduce((sum, d) => sum + d.totalAttendedLessons, 0);
+    const totalAccruedCost = subjectsDetails.reduce((sum, d) => sum + d.totalAccruedCost, 0);
+    const totalPaidAmount = student.totalPaidAmount || subjectsDetails.reduce((sum, d) => sum + d.totalPaidAmount, 0);
+    const remainingLessons = subjectsDetails.reduce((sum, d) => sum + d.remainingLessons, 0);
+    const remainingBalance = subjectsDetails.reduce((sum, d) => sum + d.remainingBalance, 0);
+    const amountDue = subjectsDetails.reduce((sum, d) => sum + d.amountDue, 0);
+    const creditRemaining = subjectsDetails.reduce((sum, d) => sum + d.creditRemaining, 0);
+    const netBalance = creditRemaining - amountDue;
+    const isFullyPaid = amountDue === 0;
+
+    const avgLessonCost = Math.round(
+      subjectsDetails.reduce((sum, d) => sum + d.lessonCost, 0) / Math.max(1, subjectsDetails.length)
+    );
+
+    let badgeLabelAr = "";
+    let badgeLabelEn = "";
+    let badgeColor: "emerald" | "amber" | "rose" | "blue" = "emerald";
+
+    if (amountDue > 0) {
+      badgeLabelAr = `مستحق سداد: ${amountDue} ج.م (${student.subjects.length} مواد)`;
+      badgeLabelEn = `Due: ${amountDue} EGP (${student.subjects.length} subjects)`;
+      badgeColor = "rose";
+    } else if (creditRemaining > 0) {
+      badgeLabelAr = `رصيد دائن: +${creditRemaining} ج.م (${student.subjects.length} مواد)`;
+      badgeLabelEn = `Credit: +${creditRemaining} EGP (${student.subjects.length} subjects)`;
+      badgeColor = "emerald";
+    } else {
+      badgeLabelAr = `مسدد بالكامل (${student.subjects.length} مواد)`;
+      badgeLabelEn = `Fully Settled (${student.subjects.length} subjects)`;
+      badgeColor = "emerald";
+    }
+
+    const subjectsSummaryText = student.subjects
+      .map(s => `${s.subject} (${s.subscriptionType === "monthly" ? "شهري" : "باقة"} - ${s.lessonCost} ج.م)`)
+      .join(" • ");
+
+    const explanationAr = `طالب مسجل في ${student.subjects.length} مواد: [ ${subjectsSummaryText} ]. إجمالي الحصص المنفذة: ${totalAttendedLessons} حصة بقيمة ${totalAccruedCost} ج.م. المسدد: ${totalPaidAmount} ج.م. ${
+      amountDue > 0 ? `المستحق المطلوب سداده: ${amountDue} ج.م.` : `الرصيد المتبقي: ${creditRemaining} ج.م.`
+    }`;
+
+    const explanationEn = `Enrolled in ${student.subjects.length} subjects. Total attended: ${totalAttendedLessons} lessons (${totalAccruedCost} EGP). Paid: ${totalPaidAmount} EGP. ${
+      amountDue > 0 ? `Due amount: ${amountDue} EGP.` : `Credit left: ${creditRemaining} EGP.`
+    }`;
+
+    return {
+      totalAttendedLessons,
+      lessonCost: avgLessonCost,
+      totalAccruedCost,
+      totalPaidAmount,
+      remainingLessons,
+      remainingBalance,
+      netBalance,
+      amountDue,
+      creditRemaining,
+      isFullyPaid,
+      subjectsDetails,
+      statusBadge: {
+        labelAr: badgeLabelAr,
+        labelEn: badgeLabelEn,
+        color: badgeColor
+      },
+      detailsExplanationAr: explanationAr,
+      detailsExplanationEn: explanationEn
+    };
+  }
+
+  // Single Subject Fallback
   const lessonCost = Math.max(1, student.lessonCost || 100);
   const totalPaidAmount = student.totalPaidAmount || 0;
 
-  // Calculate attended lessons from attendanceRecords if available, or student's stored counter
   let totalAttended = student.totalAttendedLessons || 0;
   if (attendanceRecords && attendanceRecords.length > 0) {
     const presentRecords = attendanceRecords.filter(
@@ -38,7 +283,6 @@ export function calculateStudentFinancials(
 
   const isMonthly = student.subscriptionType === "monthly";
   const plan = student.paymentPlan || "beginning_of_month";
-
   const totalAccruedCost = totalAttended * lessonCost;
 
   if (isMonthly) {
@@ -189,3 +433,4 @@ export function calculateStudentFinancials(
     };
   }
 }
+

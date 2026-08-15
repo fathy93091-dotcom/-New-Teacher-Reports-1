@@ -29,11 +29,18 @@ import {
   Paperclip,
   FileUp,
   Calculator,
-  Layers
+  Layers,
+  BookOpen,
+  Smartphone,
+  Globe,
+  ExternalLink
 } from "lucide-react";
 import {
   Student,
+  StudentSubjectPlan,
   AttendanceRecord,
+  AttendanceStatus,
+  HomeworkStatus,
   ExamRecord,
   PaymentTransaction,
   GeneratedReport,
@@ -45,6 +52,20 @@ import {
   PaymentPlan
 } from "../types";
 import { calculateStudentFinancials } from "../lib/financeUtils";
+
+const COMMON_SUBJECT_SUGGESTIONS = [
+  "الرياضيات",
+  "الفيزياء",
+  "الكيمياء",
+  "الأحياء",
+  "اللغة العربية",
+  "اللغة الإنجليزية",
+  "العلوم",
+  "الدراسات",
+  "الحاسب الآلي",
+  "القرآن الكريم",
+  "الفرنساوي"
+];
 
 interface StudentsViewProps {
   settings: AppSettings;
@@ -97,6 +118,13 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 
   // AI Report State inside Student Profile
   const [showCreateReportForm, setShowCreateReportForm] = useState(false);
+  const [reportSubject, setReportSubject] = useState("");
+  const [reportLessonNumber, setReportLessonNumber] = useState<number>(1);
+  const [reportDate, setReportDate] = useState<string>(new Date().toISOString().split("T")[0]);
+  const [reportAttendance, setReportAttendance] = useState<AttendanceStatus>("present");
+  const [reportDeductCost, setReportDeductCost] = useState<boolean>(true);
+  const [reportHomeworkStatus, setReportHomeworkStatus] = useState<HomeworkStatus>("done");
+  const [absentNotes, setAbsentNotes] = useState("");
   const [newTeacherNotes, setNewTeacherNotes] = useState("");
   const [newAiInstructions, setNewAiInstructions] = useState("");
   const [newGeneratedReportText, setNewGeneratedReportText] = useState("");
@@ -105,6 +133,172 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   const [copiedReportId, setCopiedReportId] = useState<string | null>(null);
   const [whatsappSentNotice, setWhatsappSentNotice] = useState("");
   const [expandedReportIds, setExpandedReportIds] = useState<string[]>([]);
+
+  // WhatsApp Multi-App Target Selection Modal State
+  const [showWhatsAppChooserModal, setShowWhatsAppChooserModal] = useState(false);
+  const [pendingWhatsAppText, setPendingWhatsAppText] = useState("");
+  const [pendingWhatsAppTargetStudent, setPendingWhatsAppTargetStudent] = useState<Student | null>(null);
+
+  // Function to open WhatsApp chooser modal
+  const handleOpenWhatsAppChooser = (text: string, st: Student | null = selectedStudent) => {
+    if (!text.trim()) return;
+    navigator.clipboard.writeText(text);
+    setPendingWhatsAppText(text);
+    setPendingWhatsAppTargetStudent(st);
+    setShowWhatsAppChooserModal(true);
+  };
+
+  // Function to send via chosen WhatsApp target/app
+  const handleSendViaWhatsAppMode = (
+    mode: "universal" | "web" | "app_scheme" | "business_scheme" | "intent_android"
+  ) => {
+    const text = pendingWhatsAppText;
+    const st = pendingWhatsAppTargetStudent;
+    const rawLink = st?.whatsappGroupLink || st?.parentContact || "";
+    const isUrl = rawLink.startsWith("http");
+    const cleanPhone = rawLink.replace(/[^0-9]/g, "");
+
+    const encodedText = encodeURIComponent(text);
+
+    let finalUrl = "";
+
+    if (mode === "web") {
+      // WhatsApp Web directly
+      if (isUrl) {
+        finalUrl = rawLink;
+      } else if (cleanPhone) {
+        finalUrl = `https://web.whatsapp.com/send?phone=${cleanPhone}&text=${encodedText}`;
+      } else {
+        finalUrl = `https://web.whatsapp.com/send?text=${encodedText}`;
+      }
+    } else if (mode === "app_scheme") {
+      // whatsapp:// protocol (standard app directly)
+      if (isUrl) {
+        finalUrl = rawLink;
+      } else if (cleanPhone) {
+        finalUrl = `whatsapp://send?phone=${cleanPhone}&text=${encodedText}`;
+      } else {
+        finalUrl = `whatsapp://send?text=${encodedText}`;
+      }
+    } else if (mode === "business_scheme") {
+      // WhatsApp Business specific attempt / wa.me universal
+      if (cleanPhone) {
+        finalUrl = `https://wa.me/${cleanPhone}?text=${encodedText}`;
+      } else if (isUrl) {
+        finalUrl = rawLink;
+      } else {
+        finalUrl = `https://wa.me/?text=${encodedText}`;
+      }
+    } else if (mode === "intent_android") {
+      // Native Share API if supported on mobile/tablet to let OS show WhatsApp/WhatsApp Business chooser
+      if (navigator.share) {
+        navigator
+          .share({
+            title: isArabic ? `تقرير ${st?.fullName || "الطالب"}` : `Report: ${st?.fullName || "Student"}`,
+            text: text
+          })
+          .then(() => {
+            setShowWhatsAppChooserModal(false);
+            setWhatsappSentNotice(isArabic ? "تم فتح نافذة المشاركة بنجاح!" : "Shared successfully!");
+            setTimeout(() => setWhatsappSentNotice(""), 4000);
+          })
+          .catch(() => {
+            // fallback if user cancels or fails
+          });
+        return;
+      } else {
+        // Fallback to wa.me universal link
+        if (cleanPhone) {
+          finalUrl = `https://wa.me/${cleanPhone}?text=${encodedText}`;
+        } else {
+          finalUrl = `https://api.whatsapp.com/send?text=${encodedText}`;
+        }
+      }
+    } else {
+      // Universal (wa.me / api.whatsapp.com - prompts device to choose installed WhatsApp)
+      if (isUrl) {
+        finalUrl = rawLink;
+      } else if (cleanPhone) {
+        finalUrl = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodedText}`;
+      } else {
+        finalUrl = `https://api.whatsapp.com/send?text=${encodedText}`;
+      }
+    }
+
+    if (finalUrl) {
+      window.open(finalUrl, "_blank");
+    }
+
+    setShowWhatsAppChooserModal(false);
+    setWhatsappSentNotice(isArabic ? "تم نسخ التقرير وجاري الفتح في تطبيق الواتساب المختار!" : "Report copied and opened!");
+    setTimeout(() => setWhatsappSentNotice(""), 4500);
+  };
+
+  // Automatically calculate the next lesson number for a student and subject
+  const calculateNextLessonNumber = (st: Student | null, subj: string): number => {
+    if (!st) return 1;
+    const normSubj = (subj || "").trim().toLowerCase();
+
+    // 1. Check existing reports for this student and subject
+    const studentReports = reports.filter(
+      r => (r.studentId === st.id || r.studentName === st.fullName) &&
+           ((r.subject || "").trim().toLowerCase() === normSubj)
+    );
+
+    const maxInReports = studentReports.reduce((max, r) => Math.max(max, r.lessonNumber || 0), 0);
+    if (maxInReports > 0) {
+      return maxInReports + 1;
+    }
+
+    // 2. Check attendance records for this student and subject
+    const studentAttendance = attendanceRecords.filter(
+      ar => ar.studentId === st.id &&
+           (!ar.subject || (ar.subject || "").trim().toLowerCase() === normSubj)
+    );
+
+    const maxInAtt = studentAttendance.reduce((max, ar) => Math.max(max, ar.lessonNumber || 0), 0);
+    if (maxInAtt > 0) {
+      return maxInAtt + 1;
+    }
+
+    // 3. Fallback: total records count + 1
+    const totalCount = Math.max(studentReports.length, studentAttendance.length);
+    return totalCount + 1;
+  };
+
+  const handleReportSubjectChange = (newSubj: string) => {
+    setReportSubject(newSubj);
+    if (selectedStudent) {
+      setReportLessonNumber(calculateNextLessonNumber(selectedStudent, newSubj));
+    }
+    const subjInst =
+      settings.subjectDefaults?.find(
+        s => s.subject.trim().toLowerCase() === newSubj.trim().toLowerCase()
+      )?.instruction || settings.generalAiInstructions || "";
+    setNewAiInstructions(subjInst);
+  };
+
+  const openNewReportModal = () => {
+    if (!selectedStudent) return;
+    const initialSubj = selectedStudent.subjects?.[0]?.subject || selectedStudent.subject || (isArabic ? "الرياضيات" : "Mathematics");
+    setReportSubject(initialSubj);
+    setReportDate(new Date().toISOString().split("T")[0]);
+    setReportLessonNumber(calculateNextLessonNumber(selectedStudent, initialSubj));
+    setReportAttendance("present");
+    setReportDeductCost(true);
+    setReportHomeworkStatus("done");
+    setAbsentNotes("");
+    setNewTeacherNotes("");
+    setNewGeneratedReportText("");
+    setReportAttachment(null);
+
+    const subjInst =
+      settings.subjectDefaults?.find(
+        s => s.subject.trim().toLowerCase() === initialSubj.trim().toLowerCase()
+      )?.instruction || settings.generalAiInstructions || "";
+    setNewAiInstructions(subjInst);
+    setShowCreateReportForm(true);
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -139,19 +333,49 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     );
   };
 
-  // Add Student Modal
+  // Add Student Modal State
   const [showAddStudentModal, setShowAddStudentModal] = useState(false);
   const [fullName, setFullName] = useState("");
   const [studentNumber, setStudentNumber] = useState("");
   const [parentContact, setParentContact] = useState("+20");
   const [whatsappGroupLink, setWhatsappGroupLink] = useState("");
-  const [studyType, setStudyType] = useState<"group" | "private">("private");
-  const [subject, setSubject] = useState("الرياضيات");
-  const [subscriptionType, setSubscriptionType] = useState<SubscriptionType>("monthly");
-  const [paymentPlan, setPaymentPlan] = useState<PaymentPlan>("beginning_of_month");
-  const [initialPurchasedLessons, setInitialPurchasedLessons] = useState(8);
-  const [initialLessonCost, setInitialLessonCost] = useState(100);
   const [notes, setNotes] = useState("");
+
+  const createInitialSubject = (id: string, name: string = "الرياضيات"): StudentSubjectPlan => ({
+    id,
+    subject: name,
+    studyType: "private",
+    subscriptionType: "monthly",
+    paymentPlan: "beginning_of_month",
+    lessonCost: 100,
+    totalPurchasedLessons: 8
+  });
+
+  const [studentSubjects, setStudentSubjects] = useState<StudentSubjectPlan[]>([
+    createInitialSubject("subj_1", "الرياضيات")
+  ]);
+
+  const handleAddSubjectField = () => {
+    const nextIdx = studentSubjects.length + 1;
+    const available = COMMON_SUBJECT_SUGGESTIONS.find(
+      s => !studentSubjects.some(sub => sub.subject === s)
+    ) || (isArabic ? `مادة ${nextIdx}` : `Subject ${nextIdx}`);
+    setStudentSubjects(prev => [
+      ...prev,
+      createInitialSubject(`subj_${Date.now()}_${nextIdx}`, available)
+    ]);
+  };
+
+  const handleRemoveSubjectField = (indexToRemove: number) => {
+    if (studentSubjects.length <= 1) return;
+    setStudentSubjects(prev => prev.filter((_, idx) => idx !== indexToRemove));
+  };
+
+  const handleUpdateSubjectField = (index: number, patch: Partial<StudentSubjectPlan>) => {
+    setStudentSubjects(prev =>
+      prev.map((sub, idx) => (idx === index ? { ...sub, ...patch } : sub))
+    );
+  };
 
   // Helper functions for Subscription & Payment labels
   const getSubscriptionLabel = (type?: SubscriptionType) => {
@@ -186,41 +410,76 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   const [editStudentNumber, setEditStudentNumber] = useState("");
   const [editParentContact, setEditParentContact] = useState("+20");
   const [editWhatsappGroupLink, setEditWhatsappGroupLink] = useState("");
-  const [editStudyType, setEditStudyType] = useState<"group" | "private">("private");
-  const [editSubject, setEditSubject] = useState("الرياضيات");
-  const [editSubscriptionType, setEditSubscriptionType] = useState<SubscriptionType>("monthly");
-  const [editPaymentPlan, setEditPaymentPlan] = useState<PaymentPlan>("beginning_of_month");
-  const [editLessonCost, setEditLessonCost] = useState(100);
   const [editNotes, setEditNotes] = useState("");
+  const [editStudentSubjects, setEditStudentSubjects] = useState<StudentSubjectPlan[]>([]);
 
   const handleOpenEditStudent = (st: Student) => {
     setEditFullName(st.fullName || "");
     setEditStudentNumber(st.studentNumber || "");
     setEditParentContact(st.parentContact || "+20");
     setEditWhatsappGroupLink(st.whatsappGroupLink || "");
-    setEditStudyType(st.studyType || "private");
-    setEditSubject(st.subject || "الرياضيات");
-    setEditSubscriptionType(st.subscriptionType || "monthly");
-    setEditPaymentPlan(st.paymentPlan || "beginning_of_month");
-    setEditLessonCost(st.lessonCost || 100);
     setEditNotes(st.notes || "");
+
+    if (st.subjects && st.subjects.length > 0) {
+      setEditStudentSubjects(JSON.parse(JSON.stringify(st.subjects)));
+    } else {
+      setEditStudentSubjects([
+        {
+          id: `subj_edit_1`,
+          subject: st.subject || "الرياضيات",
+          studyType: st.studyType || "private",
+          subscriptionType: st.subscriptionType || "monthly",
+          paymentPlan: st.paymentPlan || "beginning_of_month",
+          lessonCost: st.lessonCost || 100,
+          totalPurchasedLessons: st.totalPurchasedLessons || 8
+        }
+      ]);
+    }
+
     setShowEditStudentModal(true);
+  };
+
+  const handleAddEditSubjectField = () => {
+    const nextIdx = editStudentSubjects.length + 1;
+    const available = COMMON_SUBJECT_SUGGESTIONS.find(
+      s => !editStudentSubjects.some(sub => sub.subject === s)
+    ) || (isArabic ? `مادة ${nextIdx}` : `Subject ${nextIdx}`);
+    setEditStudentSubjects(prev => [
+      ...prev,
+      createInitialSubject(`subj_edit_${Date.now()}_${nextIdx}`, available)
+    ]);
+  };
+
+  const handleRemoveEditSubjectField = (indexToRemove: number) => {
+    if (editStudentSubjects.length <= 1) return;
+    setEditStudentSubjects(prev => prev.filter((_, idx) => idx !== indexToRemove));
+  };
+
+  const handleUpdateEditSubjectField = (index: number, patch: Partial<StudentSubjectPlan>) => {
+    setEditStudentSubjects(prev =>
+      prev.map((sub, idx) => (idx === index ? { ...sub, ...patch } : sub))
+    );
   };
 
   const handleSaveEditStudent = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedStudent || !editFullName.trim()) return;
+    if (!selectedStudent || !editFullName.trim() || editStudentSubjects.length === 0) return;
+
+    const subjectsSummary = editStudentSubjects.map(s => s.subject.trim()).filter(Boolean).join(" + ") || "عام";
+    const primaryStudyType = editStudentSubjects.some(s => s.studyType === "group") ? "group" : "private";
+    const primarySub = editStudentSubjects[0];
 
     const updatedData: Partial<Student> = {
       fullName: editFullName.trim(),
       studentNumber: editStudentNumber.trim() || undefined,
       parentContact: editParentContact.trim(),
       whatsappGroupLink: editWhatsappGroupLink.trim() || undefined,
-      studyType: editStudyType,
-      subject: editSubject,
-      subscriptionType: editSubscriptionType,
-      paymentPlan: editPaymentPlan,
-      lessonCost: editLessonCost,
+      studyType: primaryStudyType,
+      subject: subjectsSummary,
+      subjects: editStudentSubjects,
+      subscriptionType: primarySub.subscriptionType,
+      paymentPlan: primarySub.paymentPlan,
+      lessonCost: primarySub.lessonCost,
       notes: editNotes
     };
 
@@ -260,30 +519,53 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 
   const handleCreateStudent = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!fullName.trim()) return;
+    if (!fullName.trim() || studentSubjects.length === 0) return;
 
-    const isLessonsCount = subscriptionType === "lessons_count";
-    const purchasedLessons = Math.max(1, Number(initialPurchasedLessons) || 8);
-    const cost = Math.max(1, Number(initialLessonCost) || 100);
-    const initialPaid = (paymentPlan === "beginning_of_month") ? purchasedLessons * cost : 0;
-    const isPaidInitially = paymentPlan === "beginning_of_month";
+    const subjectsSummary = studentSubjects.map(s => s.subject.trim()).filter(Boolean).join(" + ") || "عام";
+    const primaryStudyType = studentSubjects.some(s => s.studyType === "group") ? "group" : "private";
+    const primarySub = studentSubjects[0];
+
+    // Compute aggregate initial numbers
+    let totalInitialPaid = 0;
+    let totalPurchased = 0;
+    let totalRemainingLessons = 0;
+    let totalRemainingBalance = 0;
+
+    studentSubjects.forEach(s => {
+      const cost = Math.max(1, Number(s.lessonCost) || 100);
+      const isPackage = s.subscriptionType === "lessons_count";
+      const lessons = isPackage ? Math.max(1, Number(s.totalPurchasedLessons) || 8) : 0;
+      
+      if (isPackage) {
+        totalPurchased += lessons;
+        totalRemainingLessons += lessons;
+        totalRemainingBalance += lessons * cost;
+      }
+
+      if (s.paymentPlan === "beginning_of_month") {
+        totalInitialPaid += (isPackage ? lessons : 4) * cost;
+      }
+    });
+
+    const isPaidInitially = studentSubjects.some(s => s.paymentPlan === "beginning_of_month");
 
     onAddStudent({
-      fullName,
-      studentNumber,
-      parentContact,
+      fullName: fullName.trim(),
+      studentNumber: studentNumber.trim() || undefined,
+      parentContact: parentContact.trim(),
       whatsappGroupLink: whatsappGroupLink.trim() || undefined,
-      studyType,
-      subject,
-      subscriptionType,
-      paymentPlan,
+      studyType: primaryStudyType,
+      subject: subjectsSummary,
+      subjects: studentSubjects,
+      subscriptionType: primarySub.subscriptionType,
+      paymentPlan: primarySub.paymentPlan,
       status: "active",
       paymentStatus: isPaidInitially ? "paid" : "unpaid",
-      totalPaidAmount: initialPaid,
-      totalPurchasedLessons: isLessonsCount ? purchasedLessons : 0,
-      lessonCost: cost,
-      remainingLessons: isLessonsCount ? purchasedLessons : 0,
-      remainingBalance: isLessonsCount ? purchasedLessons * cost : 0,
+      totalPaidAmount: totalInitialPaid,
+      totalPurchasedLessons: totalPurchased,
+      lessonCost: primarySub.lessonCost || 100,
+      remainingLessons: totalRemainingLessons,
+      remainingBalance: totalRemainingBalance,
       notes
     });
 
@@ -296,13 +578,8 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     setStudentNumber("");
     setParentContact("+20");
     setWhatsappGroupLink("");
-    setStudyType("private");
-    setSubject("الرياضيات");
-    setSubscriptionType("monthly");
-    setPaymentPlan("beginning_of_month");
-    setInitialPurchasedLessons(8);
-    setInitialLessonCost(100);
     setNotes("");
+    setStudentSubjects([createInitialSubject("subj_1", "الرياضيات")]);
   };
 
   // Helper for WhatsApp Phone Formatting (Supports Egypt 01X and International formats)
@@ -358,21 +635,21 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   return (
     <div className="space-y-6 pb-20">
       {/* Top Header & Search */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white border border-slate-200/80 rounded-3xl p-6 shadow-sm">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white border border-slate-200/80 rounded-2xl p-4 sm:p-5 shadow-2xs">
         <div>
-          <h1 className="text-2xl font-black text-slate-900 tracking-tight">
+          <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
             {isArabic ? "دليل الطلاب والمتابعة" : "Student Directory"}
           </h1>
-          <p className="text-xs text-slate-500 font-medium mt-1">
+          <p className="text-[11px] sm:text-xs text-slate-500 font-medium mt-0.5">
             {isArabic
-              ? "متابعة مستمرة لدرجات الطلاب، الحضور والغياب، وحساب الحصص المتبقية."
-              : "Manage and track student progress, attendance, and fees."}
+              ? "متابعة مستمرة لدرجات الطلاب، الحضور والغياب، وحساب الحصص المتبقية والمواد."
+              : "Manage and track student progress, attendance, fees and subjects."}
           </p>
         </div>
 
         <button
           onClick={() => setShowAddStudentModal(true)}
-          className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-lg shadow-blue-600/30 transition flex items-center gap-1.5 self-start sm:self-auto"
+          className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md shadow-blue-600/25 transition flex items-center gap-1.5 self-start sm:self-auto shrink-0"
         >
           <Plus className="w-4 h-4" />
           <span>{isArabic ? "إضافة طالب جديد" : "Add Student"}</span>
@@ -380,58 +657,58 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       </div>
 
       {/* Filter Tabs & Search */}
-      <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+        <div className="flex items-center gap-1.5 flex-wrap">
           <button
             onClick={() => setFilterStatus("all")}
-            className={`px-4 py-2 rounded-xl font-bold text-xs transition ${
+            className={`px-3 py-1.5 rounded-xl font-bold text-xs transition ${
               filterStatus === "all"
-                ? "bg-slate-900 text-white shadow-sm"
-                : "bg-white text-slate-600 border border-slate-200"
+                ? "bg-slate-900 text-white shadow-2xs"
+                : "bg-white text-slate-600 border border-slate-200 hover:border-slate-300"
             }`}
           >
             {isArabic ? "الكل" : "All"} ({students.length})
           </button>
           <button
             onClick={() => setFilterStatus("active")}
-            className={`px-4 py-2 rounded-xl font-bold text-xs transition flex items-center gap-1.5 ${
+            className={`px-3 py-1.5 rounded-xl font-bold text-xs transition flex items-center gap-1.5 ${
               filterStatus === "active"
-                ? "bg-emerald-600 text-white shadow-sm"
-                : "bg-white text-slate-600 border border-slate-200"
+                ? "bg-emerald-600 text-white shadow-2xs"
+                : "bg-white text-slate-600 border border-slate-200 hover:border-slate-300"
             }`}
           >
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
             <span>{isArabic ? "النشطون" : "Active"}</span>
           </button>
           <button
             onClick={() => setFilterStatus("stopped")}
-            className={`px-4 py-2 rounded-xl font-bold text-xs transition flex items-center gap-1.5 ${
+            className={`px-3 py-1.5 rounded-xl font-bold text-xs transition flex items-center gap-1.5 ${
               filterStatus === "stopped"
-                ? "bg-slate-700 text-white shadow-sm"
-                : "bg-white text-slate-600 border border-slate-200"
+                ? "bg-slate-700 text-white shadow-2xs"
+                : "bg-white text-slate-600 border border-slate-200 hover:border-slate-300"
             }`}
           >
-            <span className="w-2 h-2 rounded-full bg-slate-400" />
+            <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
             <span>{isArabic ? "المتوقفون" : "Stopped"}</span>
           </button>
         </div>
 
-        <div className="relative flex-1 max-w-sm">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+        <div className="relative flex-1 max-w-xs">
+          <Search className="w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             type="text"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            placeholder={isArabic ? "ابحث باسم الطالب، رقم الموبايل..." : "Search by student name..."}
-            className="w-full bg-white border border-slate-200 rounded-xl pl-9 pr-4 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500"
+            placeholder={isArabic ? "ابحث باسم الطالب، رقم الموبايل..." : "Search student..."}
+            className="w-full bg-white border border-slate-200 rounded-xl pr-8 pl-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500"
           />
         </div>
       </div>
 
-      {/* Student Cards Grid - Optimized for Mobile (2 Columns) */}
-      <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-2 sm:gap-4">
+      {/* Student Cards Grid - Highly Space-Optimized Bento */}
+      <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-2.5 sm:gap-3">
         {filteredStudents.length === 0 ? (
-          <div className="col-span-full text-center py-8 bg-white border border-slate-200/80 rounded-xl">
+          <div className="col-span-full text-center py-8 bg-white border border-slate-200/80 rounded-2xl">
             <GraduationCap className="w-8 h-8 mx-auto text-slate-300 mb-1.5" />
             <p className="text-xs font-bold text-slate-600">
               {isArabic ? "لا يوجد طلاب يطابقون خيارات البحث." : "No students found."}
@@ -441,103 +718,92 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
           filteredStudents.map(student => {
             const isStopped = student.status === "stopped";
             const finSummary = calculateStudentFinancials(student, attendanceRecords);
-            const isUnpaid = !finSummary.isFullyPaid || finSummary.amountDue > 0;
-            const isLowBalance = student.subscriptionType === "lessons_count" && finSummary.remainingLessons === 1;
 
             return (
               <div
                 key={student.id}
-                className={`bg-white border rounded-xl p-2.5 sm:p-4 shadow-2xs hover:shadow-md transition-all flex flex-col justify-between ${
+                className={`bg-white border rounded-2xl p-2.5 sm:p-3.5 shadow-2xs hover:shadow-md transition-all flex flex-col justify-between ${
                   isStopped ? "border-slate-200 opacity-75 bg-slate-50/60" : "border-slate-200/90 hover:border-blue-300"
                 }`}
               >
                 <div>
-                  <div className="flex items-center justify-between gap-1 mb-1.5">
+                  <div className="flex items-center justify-between gap-1 mb-1">
                     <span
-                      className={`px-1.5 py-0.2 rounded text-[8px] sm:text-[9px] font-black flex items-center gap-0.5 truncate ${
+                      className={`px-1.5 py-0.5 rounded-md text-[8.5px] sm:text-[9px] font-black flex items-center gap-1 truncate ${
                         isStopped
-                          ? "bg-slate-200 text-slate-700"
-                          : "bg-emerald-100 text-emerald-800"
+                          ? "bg-slate-100 text-slate-600 border border-slate-200"
+                          : "bg-emerald-50 text-emerald-700 border border-emerald-200"
                       }`}
                     >
                       <span
-                        className={`w-1 h-1 sm:w-1.5 sm:h-1.5 rounded-full shrink-0 ${
-                          isStopped ? "bg-slate-500" : "bg-emerald-500"
+                        className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                          isStopped ? "bg-slate-400" : "bg-emerald-500"
                         }`}
                       />
                       <span className="truncate">{isStopped ? (isArabic ? "متوقف" : "Stopped") : (isArabic ? "نشط" : "Active")}</span>
                     </span>
 
                     <span
-                      className={`px-1.5 py-0.2 rounded text-[8px] sm:text-[9px] font-black shrink-0 ${
+                      className={`px-1.5 py-0.5 rounded-md text-[8.5px] sm:text-[9px] font-black shrink-0 ${
                         finSummary.statusBadge.color === "emerald"
-                          ? "bg-emerald-100 text-emerald-800"
+                          ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
                           : finSummary.statusBadge.color === "amber"
-                          ? "bg-amber-100 text-amber-800"
+                          ? "bg-amber-50 text-amber-700 border border-amber-200"
                           : finSummary.statusBadge.color === "blue"
-                          ? "bg-blue-100 text-blue-800"
-                          : "bg-rose-100 text-rose-800"
+                          ? "bg-blue-50 text-blue-700 border border-blue-200"
+                          : "bg-rose-50 text-rose-700 border border-rose-200"
                       }`}
                     >
                       {isArabic ? finSummary.statusBadge.labelAr : finSummary.statusBadge.labelEn}
                     </span>
                   </div>
 
-                  <h3 className="text-xs sm:text-base font-black text-slate-900 truncate leading-tight">
+                  <h3 className="text-xs sm:text-sm font-black text-slate-900 truncate leading-snug">
                     {student.fullName}
                   </h3>
-                  <div className="flex items-center justify-between text-[10px] sm:text-[11px] font-bold text-blue-600 mt-0.5">
-                    <span className="truncate">{student.subject}</span>
-                  </div>
+                  
+                  {student.subjects && student.subjects.length > 0 ? (
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {student.subjects.map((sub, sIdx) => (
+                        <span
+                          key={sub.id || sIdx}
+                          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-blue-50/80 border border-blue-200/60 text-blue-800 text-[8.5px] font-bold"
+                        >
+                          <span>{sub.studyType === "group" ? "👥" : "👤"}</span>
+                          <span className="truncate max-w-[65px]">{sub.subject}</span>
+                          <span className="text-blue-500 font-mono text-[7.5px]">({sub.lessonCost})</span>
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-[10px] font-bold text-blue-600 mt-0.5 truncate">
+                      {student.subject}
+                    </div>
+                  )}
 
-                  <div className="mt-2 pt-1.5 border-t border-slate-100 space-y-1 text-slate-600">
-                    <div className="flex items-center justify-between text-[9.5px] sm:text-[11px]">
-                      <span className="font-medium text-slate-400">{isArabic ? "الاشتراك:" : "Sub:"}</span>
-                      <span className="font-bold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded text-[9px]">
-                        {getSubscriptionLabel(student.subscriptionType)}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between text-[9.5px] sm:text-[11px]">
-                      <span className="font-medium text-slate-400">{isArabic ? "الدفع:" : "Payment:"}</span>
-                      <span className="font-bold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded text-[9px]">
-                        {getPaymentPlanLabel(student.paymentPlan)}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between text-[9.5px] sm:text-[11px]">
-                      <span className="font-medium text-slate-400">{isArabic ? "ولي الأمر:" : "Parent:"}</span>
+                  <div className="mt-2 pt-1.5 border-t border-slate-100 space-y-1 text-slate-600 text-[9.5px] sm:text-[10.5px]">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400">{isArabic ? "ولي الأمر:" : "Parent:"}</span>
                       <span className="font-mono font-bold text-slate-800 dir-ltr truncate max-w-[85px] sm:max-w-none">{student.parentContact}</span>
                     </div>
-                    <div className="flex items-center justify-between text-[9.5px] sm:text-[11px]">
-                      <span className="font-medium text-slate-400">{isArabic ? "سعر الحصة:" : "Cost:"}</span>
-                      <span className="font-bold text-slate-800">
-                        {finSummary.lessonCost} {isArabic ? "ج.م" : "EGP"}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between text-[9.5px] sm:text-[11px]">
-                      <span className="font-medium text-slate-400">{isArabic ? "الحصص المنفذة:" : "Attended:"}</span>
+
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400">{isArabic ? "الحصص المنفذة:" : "Attended:"}</span>
                       <span className="font-bold text-blue-700">
                         {finSummary.totalAttendedLessons} {isArabic ? "حصة" : "lss"} ({finSummary.totalAccruedCost} ج.م)
                       </span>
                     </div>
-                    {student.subscriptionType === "lessons_count" ? (
-                      <div className="flex items-center justify-between text-[9.5px] sm:text-[11px]">
-                        <span className="font-medium text-slate-400">{isArabic ? "المتبقي بالباقة:" : "Pack Rem:"}</span>
-                        <span className="font-black text-emerald-700">
-                          {finSummary.remainingLessons} {isArabic ? "حصة" : "lss"} ({finSummary.remainingBalance} ج.م)
-                        </span>
-                      </div>
-                    ) : (
-                      <div className="flex items-center justify-between text-[9.5px] sm:text-[11px]">
-                        <span className="font-medium text-slate-400">{isArabic ? "الصافي:" : "Net:"}</span>
-                        <span className={`font-black ${finSummary.amountDue > 0 ? "text-rose-600" : "text-emerald-700"}`}>
-                          {finSummary.amountDue > 0
-                            ? `مستحق ${finSummary.amountDue} ج.م`
-                            : finSummary.creditRemaining > 0
-                            ? `رصيد +${finSummary.creditRemaining} ج.م`
-                            : (isArabic ? "مسدد بالكامل" : "Settled")}
-                        </span>
-                      </div>
-                    )}
+
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400">{isArabic ? "الحساب:" : "Net:"}</span>
+                      <span className={`font-black ${finSummary.amountDue > 0 ? "text-rose-600" : "text-emerald-700"}`}>
+                        {finSummary.amountDue > 0
+                          ? `مستحق ${finSummary.amountDue} ج.م`
+                          : finSummary.creditRemaining > 0
+                          ? `رصيد +${finSummary.creditRemaining} ج.م`
+                          : (isArabic ? "مسدد بالكامل" : "Settled")}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
@@ -566,14 +832,24 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
         )}
       </div>
 
-      {/* Modal: Create Student */}
+      {/* Modal: Create Student - Ultra Space Optimized Bento Layout */}
       {showAddStudentModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white border border-slate-200 rounded-3xl p-6 max-w-lg w-full shadow-2xl animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
-              <h2 className="text-lg font-bold text-slate-900">
-                {isArabic ? "إضافة طالب جديد" : "Add New Student"}
-              </h2>
+        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-5 max-w-2xl w-full shadow-2xl animate-in fade-in zoom-in-95 duration-150 my-4 max-h-[92vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 sticky top-0 bg-white z-10">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
+                  <GraduationCap className="w-4 h-4" />
+                </div>
+                <div>
+                  <h2 className="text-sm sm:text-base font-black text-slate-900">
+                    {isArabic ? "إضافة طالب جديد" : "Add New Student"}
+                  </h2>
+                  <p className="text-[10.5px] text-slate-500 font-medium">
+                    {isArabic ? "تسجيل بيانات الطالب والمواد الدراسية ونظام الدفع" : "Register student info and multi-subject payment plans"}
+                  </p>
+                </div>
+              </div>
               <button
                 onClick={() => setShowAddStudentModal(false)}
                 className="text-slate-400 hover:text-slate-700 p-1"
@@ -582,268 +858,310 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleCreateStudent} className="space-y-4 text-xs mt-4">
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">
-                  {isArabic ? "اسم الطالب بالكامل" : "Student Full Name"}
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={fullName}
-                  onChange={e => setFullName(e.target.value)}
-                  placeholder={isArabic ? "مثال: نوفا سميث" : "e.g. Nova Smith"}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-medium focus:outline-none focus:border-blue-500"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">
-                    {isArabic ? "رقم الطالب (إن وجد)" : "Student ID / Number"}
-                  </label>
-                  <input
-                    type="text"
-                    value={studentNumber}
-                    onChange={e => setStudentNumber(e.target.value)}
-                    placeholder="STU-001"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-medium focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">
-                    {isArabic ? "رقم ولي الأمر (واتساب)" : "Parent WhatsApp Number"}
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={parentContact}
-                    onChange={e => setParentContact(e.target.value)}
-                    placeholder="+201000000000"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-medium focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-700 mb-1 flex items-center gap-1.5">
-                  <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>{isArabic ? "رابط جروب الواتساب لولي الأمر/الطالب (اختياري)" : "WhatsApp Group Link (Optional)"}</span>
-                </label>
-                <input
-                  type="url"
-                  value={whatsappGroupLink}
-                  onChange={e => setWhatsappGroupLink(e.target.value)}
-                  placeholder={isArabic ? "مثال: https://chat.whatsapp.com/..." : "e.g., https://chat.whatsapp.com/..."}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-medium focus:outline-none focus:border-blue-500 text-left dir-ltr"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">
-                    {isArabic ? "نوع الدراسة" : "Class Type"}
-                  </label>
-                  <select
-                    value={studyType}
-                    onChange={e => setStudyType(e.target.value as any)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-medium focus:outline-none focus:border-blue-500"
-                  >
-                    <option value="group">👥 {isArabic ? "مجموعة" : "Group"}</option>
-                    <option value="private">👤 {isArabic ? "خاص" : "Private"}</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">
-                    {isArabic ? "المادة" : "Subject"}
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={subject}
-                    onChange={e => setSubject(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-medium focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-              </div>
-
-              {/* Subscription & Payment System Section */}
-              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/90 space-y-3.5">
-                <div>
-                  <label className="block font-black text-slate-800 mb-1.5 flex items-center gap-1.5">
-                    <Calendar className="w-4 h-4 text-blue-600" />
-                    <span>{isArabic ? "نظام الاشتراك" : "Subscription System"}</span>
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setSubscriptionType("monthly")}
-                      className={`p-2.5 rounded-xl border text-right transition font-bold ${
-                        subscriptionType === "monthly"
-                          ? "bg-blue-600 text-white border-blue-600 shadow-sm"
-                          : "bg-white text-slate-700 border-slate-200 hover:border-slate-300"
-                      }`}
-                    >
-                      <p className="text-xs">📅 {isArabic ? "بالشهر (شهري)" : "Monthly"}</p>
-                      <p className={`text-[10px] mt-0.5 font-normal ${subscriptionType === "monthly" ? "text-blue-100" : "text-slate-500"}`}>
-                        {isArabic ? "حساب الحصص يتبين نهاية الشهر بناءً على الحضور الفعلي" : "Lessons calculated at month end"}
-                      </p>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setSubscriptionType("lessons_count")}
-                      className={`p-2.5 rounded-xl border text-right transition font-bold ${
-                        subscriptionType === "lessons_count"
-                          ? "bg-blue-600 text-white border-blue-600 shadow-sm"
-                          : "bg-white text-slate-700 border-slate-200 hover:border-slate-300"
-                      }`}
-                    >
-                      <p className="text-xs">🔢 {isArabic ? "بعدد الحصص (باقة)" : "Fixed Lessons Package"}</p>
-                      <p className={`text-[10px] mt-0.5 font-normal ${subscriptionType === "lessons_count" ? "text-blue-100" : "text-slate-500"}`}>
-                        {isArabic ? "تحديد عدد حصص معينة ينتهي/يجدد عند استهلاكها" : "Specific package of lessons"}
-                      </p>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Subscription Fields for Monthly */}
-                {subscriptionType === "monthly" && (
-                  <div className="pt-1 border-t border-slate-200/70">
-                    <label className="block font-bold text-slate-700 mb-1">
-                      {isArabic ? "سعر الحصة (ج.م)" : "Lesson Cost (EGP)"}
+            <form onSubmit={handleCreateStudent} className="space-y-3 text-xs mt-3">
+              {/* Top Compact Student Info Grid */}
+              <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                      {isArabic ? "اسم الطالب بالكامل *" : "Student Full Name *"}
                     </label>
                     <input
-                      type="number"
-                      min="1"
+                      type="text"
                       required
-                      value={initialLessonCost}
-                      onChange={e => setInitialLessonCost(Number(e.target.value))}
-                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-bold text-slate-800 focus:outline-none focus:border-blue-500"
-                      placeholder="100"
+                      value={fullName}
+                      onChange={e => setFullName(e.target.value)}
+                      placeholder={isArabic ? "مثال: أحمد محمد علي" : "e.g. Ahmed Mohamed"}
+                      className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 font-bold focus:outline-none focus:border-blue-500"
                     />
-                    <p className="text-[11px] text-slate-500 mt-1.5">
-                      {isArabic
-                        ? "💡 في الاشتراك الشهري: يُحدد سعر الحصة فقط، وتُحسب المستحقات شهرياً حسب عدد الحصص الحقيقية المنفذة."
-                        : "💡 Monthly plan: Set lesson cost only. Total is calculated based on completed lessons at month end."}
-                    </p>
                   </div>
-                )}
 
-                {/* Subscription Fields for Fixed Lessons Package */}
-                {subscriptionType === "lessons_count" && (
-                  <div className="grid grid-cols-2 gap-3 pt-1 border-t border-slate-200/70">
-                    <div>
-                      <label className="block font-bold text-slate-700 mb-1">
-                        {isArabic ? "عدد حصص الباقة" : "Package Lessons"}
-                      </label>
-                      <input
-                        type="number"
-                        min="1"
-                        required
-                        value={initialPurchasedLessons}
-                        onChange={e => setInitialPurchasedLessons(Number(e.target.value))}
-                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-bold text-slate-800 focus:outline-none focus:border-blue-500"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block font-bold text-slate-700 mb-1">
-                        {isArabic ? "سعر الحصة في الباقة (ج.م)" : "Lesson Cost in Package"}
-                      </label>
-                      <input
-                        type="number"
-                        min="1"
-                        required
-                        value={initialLessonCost}
-                        onChange={e => setInitialLessonCost(Number(e.target.value))}
-                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-bold text-slate-800 focus:outline-none focus:border-blue-500"
-                      />
-                    </div>
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                      {isArabic ? "رقم ولي الأمر (واتساب) *" : "Parent WhatsApp Number *"}
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={parentContact}
+                      onChange={e => setParentContact(e.target.value)}
+                      placeholder="+201000000000"
+                      className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 font-mono font-bold focus:outline-none focus:border-blue-500 dir-ltr text-right"
+                    />
                   </div>
-                )}
+                </div>
 
-                <div className="pt-2 border-t border-slate-200/70">
-                  <label className="block font-black text-slate-800 mb-1.5 flex items-center gap-1.5">
-                    <DollarSign className="w-4 h-4 text-emerald-600" />
-                    <span>{isArabic ? "طريقة ونظام الدفع" : "Payment System"}</span>
-                  </label>
-                  <div className="grid grid-cols-3 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setPaymentPlan("beginning_of_month")}
-                      className={`p-2.5 rounded-xl border text-center transition font-bold text-xs ${
-                        paymentPlan === "beginning_of_month"
-                          ? "bg-emerald-600 text-white border-emerald-600 shadow-sm"
-                          : "bg-white text-slate-700 border-slate-200 hover:border-slate-300"
-                      }`}
-                    >
-                      <p className="text-[11px]">🟢 {isArabic ? "أول الشهر" : "Prepaid"}</p>
-                      <p className={`text-[9px] mt-0.5 font-normal ${paymentPlan === "beginning_of_month" ? "text-emerald-100" : "text-slate-500"}`}>
-                        {isArabic ? "مقدم" : "Advance"}
-                      </p>
-                    </button>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                      {isArabic ? "رقم/كود الطالب (اختياري)" : "Student ID (Optional)"}
+                    </label>
+                    <input
+                      type="text"
+                      value={studentNumber}
+                      onChange={e => setStudentNumber(e.target.value)}
+                      placeholder="STU-001"
+                      className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 font-medium focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
 
-                    <button
-                      type="button"
-                      onClick={() => setPaymentPlan("end_of_month")}
-                      className={`p-2.5 rounded-xl border text-center transition font-bold text-xs ${
-                        paymentPlan === "end_of_month"
-                          ? "bg-amber-600 text-white border-amber-600 shadow-sm"
-                          : "bg-white text-slate-700 border-slate-200 hover:border-slate-300"
-                      }`}
-                    >
-                      <p className="text-[11px]">🟡 {isArabic ? "آخر الشهر" : "Postpaid"}</p>
-                      <p className={`text-[9px] mt-0.5 font-normal ${paymentPlan === "end_of_month" ? "text-amber-100" : "text-slate-500"}`}>
-                        {isArabic ? "مؤخر" : "End of month"}
-                      </p>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setPaymentPlan("mixed")}
-                      className={`p-2.5 rounded-xl border text-center transition font-bold text-xs ${
-                        paymentPlan === "mixed"
-                          ? "bg-indigo-600 text-white border-indigo-600 shadow-sm"
-                          : "bg-white text-slate-700 border-slate-200 hover:border-slate-300"
-                      }`}
-                    >
-                      <p className="text-[11px]">🔵 {isArabic ? "دفع مختلط" : "Hybrid"}</p>
-                      <p className={`text-[9px] mt-0.5 font-normal ${paymentPlan === "mixed" ? "text-indigo-100" : "text-slate-500"}`}>
-                        {isArabic ? "دفعات" : "Split"}
-                      </p>
-                    </button>
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                      {isArabic ? "رابط جروب الواتساب (اختياري)" : "WhatsApp Group Link"}
+                    </label>
+                    <input
+                      type="url"
+                      value={whatsappGroupLink}
+                      onChange={e => setWhatsappGroupLink(e.target.value)}
+                      placeholder="https://chat.whatsapp.com/..."
+                      className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 font-medium focus:outline-none focus:border-blue-500 text-left dir-ltr"
+                    />
                   </div>
                 </div>
               </div>
 
+              {/* Multi-Subject Builder Section - Space Efficient Bento Rows */}
               <div>
-                <label className="block font-bold text-slate-700 mb-1">
-                  {isArabic ? "ملاحظات إضافية" : "Notes"}
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block font-black text-slate-800 flex items-center gap-1.5 text-xs">
+                    <BookOpen className="w-3.5 h-3.5 text-blue-600" />
+                    <span>{isArabic ? "المواد الدراسية ونظام الدفع لكل مادة" : "Subjects & Payment Plans"}</span>
+                    <span className="px-1.5 py-0.2 rounded-full bg-blue-100 text-blue-800 text-[9.5px] font-bold">
+                      {studentSubjects.length}
+                    </span>
+                  </label>
+
+                  <button
+                    type="button"
+                    onClick={handleAddSubjectField}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-[11px] border border-blue-200 transition"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>{isArabic ? "+ مادة أخرى" : "+ Subject"}</span>
+                  </button>
+                </div>
+
+                <div className="space-y-2">
+                  {studentSubjects.map((sub, idx) => (
+                    <div
+                      key={sub.id || idx}
+                      className="p-3 rounded-2xl bg-slate-50/90 border border-slate-200 hover:border-slate-300 shadow-2xs space-y-2 relative transition-all"
+                    >
+                      {/* Row 1: Subject Name + Suggestions + Study Type + Delete */}
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-2 justify-between">
+                        <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                          <span className="w-5 h-5 rounded-md bg-blue-600 text-white font-black text-[10px] flex items-center justify-center shrink-0">
+                            {idx + 1}
+                          </span>
+                          <input
+                            type="text"
+                            required
+                            value={sub.subject}
+                            onChange={e => handleUpdateSubjectField(idx, { subject: e.target.value })}
+                            placeholder={isArabic ? "اسم المادة (مثال: الرياضيات)" : "Subject"}
+                            className="bg-white border border-slate-200 rounded-xl px-2.5 py-1 text-xs text-slate-800 font-bold focus:outline-none focus:border-blue-500 flex-1 min-w-[120px]"
+                          />
+                          {/* Quick Chips */}
+                          <div className="hidden lg:flex items-center gap-1 overflow-hidden">
+                            {COMMON_SUBJECT_SUGGESTIONS.slice(0, 4).map(sugg => (
+                              <button
+                                key={sugg}
+                                type="button"
+                                onClick={() => handleUpdateSubjectField(idx, { subject: sugg })}
+                                className={`px-1.5 py-0.5 rounded-md text-[9px] font-bold border transition shrink-0 ${
+                                  sub.subject === sugg
+                                    ? "bg-blue-600 text-white border-blue-600"
+                                    : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"
+                                }`}
+                              >
+                                {sugg}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Controls: Study Type & Delete */}
+                        <div className="flex items-center gap-1.5 self-end sm:self-auto">
+                          {/* Study Type Segmented Control */}
+                          <div className="inline-flex p-0.5 rounded-lg bg-slate-200/80 text-[10px] font-bold">
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateSubjectField(idx, { studyType: "private" })}
+                              className={`px-2 py-0.5 rounded-md transition ${
+                                sub.studyType === "private"
+                                  ? "bg-white text-blue-700 shadow-2xs font-black"
+                                  : "text-slate-600 hover:text-slate-900"
+                              }`}
+                            >
+                              👤 {isArabic ? "خاص" : "Private"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateSubjectField(idx, { studyType: "group" })}
+                              className={`px-2 py-0.5 rounded-md transition ${
+                                sub.studyType === "group"
+                                  ? "bg-white text-blue-700 shadow-2xs font-black"
+                                  : "text-slate-600 hover:text-slate-900"
+                              }`}
+                            >
+                              👥 {isArabic ? "مجموعة" : "Group"}
+                            </button>
+                          </div>
+
+                          {studentSubjects.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveSubjectField(idx)}
+                              className="p-1 rounded-lg text-rose-500 hover:bg-rose-50 hover:text-rose-700 transition"
+                              title={isArabic ? "حذف المادة" : "Remove"}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Row 2: Price + Subscription Mode + Payment Plan in a sleek unified row */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1.5 border-t border-slate-200/60 items-center">
+                        {/* 1. Price */}
+                        <div className="flex items-center gap-1 bg-white px-2 py-1 rounded-xl border border-slate-200">
+                          <span className="text-[10px] font-bold text-slate-400 shrink-0">
+                            {isArabic ? "سعر الحصة:" : "Cost:"}
+                          </span>
+                          <input
+                            type="number"
+                            min="1"
+                            required
+                            value={sub.lessonCost}
+                            onChange={e => handleUpdateSubjectField(idx, { lessonCost: Number(e.target.value) })}
+                            className="w-full font-black text-slate-800 text-xs focus:outline-none"
+                            placeholder="100"
+                          />
+                          <span className="text-[9.5px] font-bold text-slate-400 shrink-0">ج.م</span>
+                        </div>
+
+                        {/* 2. Subscription Type (Monthly vs Package) */}
+                        <div className="flex items-center gap-1">
+                          <div className="inline-flex w-full p-0.5 rounded-lg bg-slate-200/80 text-[10px] font-bold">
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateSubjectField(idx, { subscriptionType: "monthly" })}
+                              className={`flex-1 py-1 rounded-md transition text-center ${
+                                sub.subscriptionType === "monthly"
+                                  ? "bg-blue-600 text-white shadow-2xs font-black"
+                                  : "text-slate-600 hover:text-slate-900"
+                              }`}
+                            >
+                              📅 {isArabic ? "شهري" : "Monthly"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateSubjectField(idx, { subscriptionType: "lessons_count" })}
+                              className={`flex-1 py-1 rounded-md transition text-center ${
+                                sub.subscriptionType === "lessons_count"
+                                  ? "bg-blue-600 text-white shadow-2xs font-black"
+                                  : "text-slate-600 hover:text-slate-900"
+                              }`}
+                            >
+                              🔢 {isArabic ? "باقة" : "Pack"}
+                            </button>
+                          </div>
+
+                          {sub.subscriptionType === "lessons_count" && (
+                            <div className="flex items-center gap-1 bg-white px-2 py-1 rounded-xl border border-blue-200 w-24 shrink-0">
+                              <input
+                                type="number"
+                                min="1"
+                                value={sub.totalPurchasedLessons || 8}
+                                onChange={e => handleUpdateSubjectField(idx, { totalPurchasedLessons: Number(e.target.value) })}
+                                className="w-full font-bold text-blue-700 text-xs focus:outline-none"
+                                title={isArabic ? "عدد حصص الباقة" : "Lessons Count"}
+                              />
+                              <span className="text-[9px] font-bold text-blue-500 shrink-0">حصة</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* 3. Payment Timing (Prepaid / Postpaid / Split) */}
+                        <div className="inline-flex p-0.5 rounded-lg bg-slate-200/80 text-[10px] font-bold">
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateSubjectField(idx, { paymentPlan: "beginning_of_month" })}
+                            className={`flex-1 py-1 rounded-md transition text-center ${
+                              sub.paymentPlan === "beginning_of_month"
+                                ? "bg-emerald-600 text-white shadow-2xs font-black"
+                                : "text-slate-600 hover:text-slate-900"
+                            }`}
+                            title={isArabic ? "دفع أول الشهر (مقدماً)" : "Prepaid"}
+                          >
+                            🟢 {isArabic ? "مقدم" : "Prepaid"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateSubjectField(idx, { paymentPlan: "end_of_month" })}
+                            className={`flex-1 py-1 rounded-md transition text-center ${
+                              sub.paymentPlan === "end_of_month"
+                                ? "bg-amber-600 text-white shadow-2xs font-black"
+                                : "text-slate-600 hover:text-slate-900"
+                            }`}
+                            title={isArabic ? "دفع آخر الشهر (مؤخر)" : "Postpaid"}
+                          >
+                            🟡 {isArabic ? "مؤخر" : "Postpaid"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateSubjectField(idx, { paymentPlan: "mixed" })}
+                            className={`flex-1 py-1 rounded-md transition text-center ${
+                              sub.paymentPlan === "mixed"
+                                ? "bg-indigo-600 text-white shadow-2xs font-black"
+                                : "text-slate-600 hover:text-slate-900"
+                            }`}
+                            title={isArabic ? "دفع مختلط (دفعات)" : "Split"}
+                          >
+                            🔵 {isArabic ? "دفعات" : "Split"}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleAddSubjectField}
+                  className="w-full mt-2 py-1.5 rounded-xl border border-dashed border-blue-300 bg-blue-50/40 hover:bg-blue-50 text-blue-700 font-bold text-[11px] flex items-center justify-center gap-1.5 transition"
+                >
+                  <PlusCircle className="w-3.5 h-3.5 text-blue-600" />
+                  <span>{isArabic ? "+ إضافة مادة دراسية أخرى لهذا الطالب" : "+ Add Another Subject"}</span>
+                </button>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                  {isArabic ? "ملاحظات إضافية (اختياري)" : "Notes (Optional)"}
                 </label>
                 <textarea
-                  rows={2}
+                  rows={1}
                   value={notes}
                   onChange={e => setNotes(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-slate-800 focus:outline-none focus:border-blue-500"
+                  placeholder={isArabic ? "أي ملاحظات عامة حول الطالب..." : "Any notes..."}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-blue-500"
                 />
               </div>
 
-              <div className="pt-4 flex justify-end gap-2">
+              <div className="pt-2 flex justify-end gap-2 border-t border-slate-100">
                 <button
                   type="button"
                   onClick={() => setShowAddStudentModal(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold"
+                  className="px-3.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs"
                 >
                   {isArabic ? "إلغاء" : "Cancel"}
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-md shadow-blue-600/30"
+                  className="px-4 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md shadow-blue-600/30"
                 >
-                  {isArabic ? "حفظ الطالب" : "Save Student"}
+                  {isArabic ? "حفظ الطالب والمواد" : "Save Student & Subjects"}
                 </button>
               </div>
             </form>
@@ -969,7 +1287,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                     <>
                       <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-50/80 via-slate-50 to-indigo-50/80 border border-blue-100 flex flex-wrap items-center justify-between gap-3 text-xs">
                         <div className="space-y-1">
-                          <span className="text-[11px] font-bold text-slate-500 block">{isArabic ? "نظام الاشتراك والدفع للطالب:" : "Subscription & Payment Plan:"}</span>
+                          <span className="text-[11px] font-bold text-slate-500 block">{isArabic ? "نظام الاشتراك والدفع الإجمالي للطالب:" : "Student Overall Subscription & Plan:"}</span>
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="px-2.5 py-1 rounded-xl bg-blue-600 text-white font-bold text-xs shadow-2xs">
                               {getSubscriptionLabel(selectedStudent.subscriptionType)}
@@ -997,14 +1315,14 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 
                       <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-5 grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
                         <div className="bg-white p-3 rounded-xl border border-slate-100">
-                          <p className="text-[11px] font-bold text-slate-500">{isArabic ? "سعر الحصة" : "Lesson Cost"}</p>
+                          <p className="text-[11px] font-bold text-slate-500">{isArabic ? "متوسط سعر الحصة" : "Avg Lesson Cost"}</p>
                           <p className="text-sm font-black text-slate-800 mt-1">
                             {finSummary.lessonCost} {isArabic ? "ج.م" : "EGP"}
                           </p>
                         </div>
 
                         <div className="bg-white p-3 rounded-xl border border-slate-100">
-                          <p className="text-[11px] font-bold text-slate-500">{isArabic ? "الحصص المنفذة" : "Attended"}</p>
+                          <p className="text-[11px] font-bold text-slate-500">{isArabic ? "إجمالي الحصص المنفذة" : "Total Attended"}</p>
                           <p className="text-sm font-black text-blue-700 mt-1">
                             {finSummary.totalAttendedLessons} {isArabic ? "حصة" : "lessons"}
                           </p>
@@ -1038,6 +1356,56 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                           )}
                         </div>
                       </div>
+
+                      {/* Multi-Subject Breakdown if available */}
+                      {finSummary.subjectsDetails && finSummary.subjectsDetails.length > 0 && (
+                        <div className="space-y-2 pt-2">
+                          <h4 className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                            <BookOpen className="w-3.5 h-3.5 text-blue-600" />
+                            <span>{isArabic ? "تفصيل الحساب المالي لكل مادة دراسية:" : "Subject-by-Subject Financial Breakdown:"}</span>
+                          </h4>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {finSummary.subjectsDetails.map((subDet, sIdx) => (
+                              <div
+                                key={subDet.id || sIdx}
+                                className="p-3.5 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-2"
+                              >
+                                <div className="flex items-center justify-between pb-1.5 border-b border-slate-100">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-sm">{subDet.studyType === "group" ? "👥" : "👤"}</span>
+                                    <span className="font-bold text-slate-900 text-xs">{subDet.subject}</span>
+                                  </div>
+                                  <div className="flex items-center gap-1">
+                                    <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-bold text-[9px]">
+                                      {getSubscriptionLabel(subDet.subscriptionType)}
+                                    </span>
+                                    <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 font-bold text-[9px]">
+                                      {getPaymentPlanLabel(subDet.paymentPlan)}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <div className="grid grid-cols-3 gap-2 text-center text-slate-600 text-[10px]">
+                                  <div className="bg-slate-50 p-1.5 rounded-lg">
+                                    <p className="text-slate-400 font-medium">{isArabic ? "سعر الحصة" : "Cost"}</p>
+                                    <p className="font-bold text-slate-800 text-xs mt-0.5">{subDet.lessonCost} ج.م</p>
+                                  </div>
+                                  <div className="bg-slate-50 p-1.5 rounded-lg">
+                                    <p className="text-slate-400 font-medium">{isArabic ? "الحضور" : "Attended"}</p>
+                                    <p className="font-bold text-blue-700 text-xs mt-0.5">{subDet.totalAttendedLessons} ح</p>
+                                  </div>
+                                  <div className="bg-slate-50 p-1.5 rounded-lg">
+                                    <p className="text-slate-400 font-medium">{isArabic ? "المستحق/الرصيد" : "Net"}</p>
+                                    <p className={`font-bold text-xs mt-0.5 ${subDet.amountDue > 0 ? "text-rose-600" : "text-emerald-700"}`}>
+                                      {subDet.amountDue > 0 ? `${subDet.amountDue} ج.م` : `+${subDet.creditRemaining} ج.م`}
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </>
                   );
                 })()}
@@ -1143,27 +1511,24 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                   <div>
                     <h3 className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
                       <Sparkles className="w-4 h-4 text-purple-600" />
-                      <span>{isArabic ? "سجل التقارير وملاحظات الذكاء الاصطناعي" : "Reports History & AI Logs"}</span>
+                      <span>{isArabic ? "سجل التقارير وملاحظات الحصص" : "Reports History & Lesson Logs"}</span>
                     </h3>
                     <p className="text-[11px] text-slate-500 font-medium mt-0.5">
                       {isArabic
-                        ? `التقارير المكتوبة وتعديلات الذكاء الاصطناعي بحسب تعليمات مادة (${selectedStudent.subject}).`
-                        : `Saved reports modified by AI subject instructions.`}
+                        ? `التقارير اليومية وسجل الحضور والغياب مع الصياغة بالذكاء الاصطناعي لـ (${selectedStudent.fullName}).`
+                        : `Lesson reports, attendance, and AI refinement for (${selectedStudent.fullName}).`}
                     </p>
                   </div>
 
                   <button
                     onClick={() => {
-                      setShowCreateReportForm(!showCreateReportForm);
-                      if (!showCreateReportForm) {
-                        const subjInst =
-                          settings.subjectDefaults?.find(
-                            s => s.subject.trim().toLowerCase() === selectedStudent.subject.trim().toLowerCase()
-                          )?.instruction || settings.generalAiInstructions || "";
-                        setNewAiInstructions(subjInst);
+                      if (showCreateReportForm) {
+                        setShowCreateReportForm(false);
+                      } else {
+                        openNewReportModal();
                       }
                     }}
-                    className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs shadow-sm flex items-center gap-1 shrink-0"
+                    className="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 shrink-0 transition"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     <span>{isArabic ? "كتابة تقرير جديد" : "Write Report"}</span>
@@ -1179,212 +1544,576 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 
                 {/* Form to Write New Report for Student */}
                 {showCreateReportForm && (
-                  <div className="p-4 rounded-2xl bg-purple-50/70 border border-purple-200/80 space-y-3 text-xs animate-in fade-in">
-                    <div className="flex items-center justify-between pb-2 border-b border-purple-200/60">
-                      <span className="font-black text-purple-900 flex items-center gap-1.5">
-                        <FileText className="w-4 h-4 text-purple-600" />
-                        <span>{isArabic ? `إضافة تقرير جديد لـ ${selectedStudent.fullName}` : "Add New Report"}</span>
-                      </span>
-                      <span className="px-2 py-0.5 rounded-full bg-purple-200 text-purple-800 font-bold text-[10px]">
-                        مادة: {selectedStudent.subject}
-                      </span>
-                    </div>
-
-                    <div>
-                      <label className="block font-bold text-slate-700 mb-1">
-                        {isArabic ? "ملاحظات المعلم (ما كتبته عن الطالب بالحصة):" : "Teacher Notes:"}
-                      </label>
-                      <textarea
-                        rows={3}
-                        value={newTeacherNotes}
-                        onChange={e => setNewTeacherNotes(e.target.value)}
-                        placeholder={
-                          isArabic
-                            ? "مثال: أتقن حفظ الجزء الأول من السورة، وعنده أخطاء بسيطة في التجويد، الواجب ص 22..."
-                            : "Write raw lesson notes here..."
-                        }
-                        className="w-full bg-white border border-purple-200 rounded-xl p-3 text-slate-800 focus:outline-none focus:border-purple-500 leading-relaxed"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block font-bold text-slate-700 mb-1 flex items-center gap-1">
-                        <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                        <span>{isArabic ? `تعليمات الذكاء الاصطناعي الخاصة بـ (${selectedStudent.subject}):` : "Subject AI Instructions:"}</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={newAiInstructions}
-                        onChange={e => setNewAiInstructions(e.target.value)}
-                        placeholder={isArabic ? "توجيهات صياغة الذكاء الاصطناعي لهذه المادة..." : "AI instructions..."}
-                        className="w-full bg-white border border-purple-200 rounded-xl px-3 py-2 text-slate-700 text-xs focus:outline-none"
-                      />
-                      <p className="text-[10px] text-purple-700/80 mt-1">
-                        * {isArabic ? "تم جلب هذه التعليمات تلقائياً من إعدادات الذكاء الاصطناعي لمادتك." : "Auto-filled from settings."}
-                      </p>
-                    </div>
-
-                    {/* Image or Document File Attachment Section */}
-                    <div className="space-y-1.5">
-                      <label className="block font-bold text-slate-700 text-xs flex items-center justify-between">
-                        <span className="flex items-center gap-1.5">
-                          <Paperclip className="w-4 h-4 text-purple-600" />
-                          <span>{isArabic ? "إرفاق صورة أو ملف (ورقة عمل / اختبار / صفحة كتاب / ملاحظات):" : "Attach Image or File:"}</span>
-                        </span>
-                        <span className="text-[10px] font-medium text-purple-700 bg-purple-100/80 px-2 py-0.5 rounded-full">
-                          {isArabic ? "اختياري" : "Optional"}
-                        </span>
-                      </label>
-
-                      {!reportAttachment ? (
-                        <label className="border-2 border-dashed border-purple-200 hover:border-purple-400 bg-white hover:bg-purple-50/50 rounded-xl p-3 flex flex-col items-center justify-center cursor-pointer transition text-center group">
-                          <input
-                            type="file"
-                            accept="image/*,.pdf,.txt,.doc,.docx"
-                            onChange={handleFileChange}
-                            className="hidden"
-                          />
-                          <div className="flex items-center gap-2 text-purple-700 font-bold text-xs">
-                            <FileUp className="w-4 h-4 text-purple-600 group-hover:scale-110 transition" />
-                            <span>{isArabic ? "اضغط هنا لإرفاق صورة أو مستند لتحليله بالذكاء الاصطناعي" : "Click to attach image or document"}</span>
-                          </div>
-                          <p className="text-[10px] text-slate-400 mt-1">
-                            {isArabic
-                              ? "يدعم الصور (PNG, JPG)، ملفات الـ PDF أو أوراق العمل والملاحظات اليدوية"
-                              : "Supports images, PDFs, worksheets, or handwritten notes"}
+                  <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-b from-purple-50/90 to-indigo-50/80 border-2 border-purple-200/90 shadow-md space-y-4 text-xs animate-in fade-in">
+                    {/* Header */}
+                    <div className="flex items-center justify-between pb-3 border-b border-purple-200/70">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-xl bg-purple-600 text-white flex items-center justify-center font-bold shadow-xs">
+                          <FileText className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h4 className="font-black text-purple-950 text-sm">
+                            {isArabic ? `إضافة تقرير جديد لـ ${selectedStudent.fullName}` : `Add New Report: ${selectedStudent.fullName}`}
+                          </h4>
+                          <p className="text-[10px] text-purple-700 font-medium">
+                            {isArabic ? "اختر المادة، حدد رقم وتاريخ الحصة، وحالة الحضور" : "Select subject, lesson number & date, and attendance"}
                           </p>
-                        </label>
-                      ) : (
-                        <div className="p-3 bg-white border border-purple-200 rounded-xl flex items-center justify-between gap-3 shadow-2xs">
-                          <div className="flex items-center gap-3 overflow-hidden">
-                            {reportAttachment.previewUrl ? (
-                              <img
-                                src={reportAttachment.previewUrl}
-                                alt="Attachment Preview"
-                                className="w-11 h-11 object-cover rounded-lg border border-purple-100 shrink-0"
-                              />
-                            ) : (
-                              <div className="w-10 h-10 rounded-lg bg-purple-100 text-purple-700 flex items-center justify-center shrink-0 font-bold text-xs">
-                                <FileText className="w-5 h-5" />
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setShowCreateReportForm(false)}
+                        className="p-1.5 rounded-lg text-purple-400 hover:text-purple-700 hover:bg-purple-100 transition"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    {/* FIELD 1: 1- اختيار المادة */}
+                    <div className="space-y-1.5">
+                      <label className="block font-black text-slate-800 text-xs flex items-center justify-between">
+                        <span className="flex items-center gap-1.5">
+                          <span className="w-5 h-5 rounded-full bg-purple-600 text-white text-[10px] flex items-center justify-center font-black">1</span>
+                          <span>{isArabic ? "اختيار المادة الدراسية *" : "Select Subject *"}</span>
+                        </span>
+                        <span className="text-[10px] font-bold text-purple-700 bg-purple-100/80 px-2 py-0.5 rounded-full">
+                          {isArabic ? `المادة الحالية: ${reportSubject}` : `Selected: ${reportSubject}`}
+                        </span>
+                      </label>
+                      
+                      <div className="flex flex-wrap gap-1.5 items-center">
+                        {(() => {
+                          const studentSubjectNames = selectedStudent.subjects && selectedStudent.subjects.length > 0
+                            ? selectedStudent.subjects.map(s => s.subject)
+                            : [selectedStudent.subject];
+                          
+                          return (
+                            <>
+                              {studentSubjectNames.map(subjName => (
+                                <button
+                                  key={subjName}
+                                  type="button"
+                                  onClick={() => handleReportSubjectChange(subjName)}
+                                  className={`px-3 py-1.5 rounded-xl font-bold text-xs transition flex items-center gap-1.5 ${
+                                    reportSubject === subjName
+                                      ? "bg-purple-600 text-white shadow-sm ring-2 ring-purple-300"
+                                      : "bg-white text-slate-700 border border-purple-200 hover:bg-purple-100/60"
+                                  }`}
+                                >
+                                  <BookOpen className="w-3.5 h-3.5" />
+                                  <span>{subjName}</span>
+                                </button>
+                              ))}
+
+                              <div className="flex-1 min-w-[140px]">
+                                <input
+                                  type="text"
+                                  value={reportSubject}
+                                  onChange={e => handleReportSubjectChange(e.target.value)}
+                                  placeholder={isArabic ? "أو اكتب اسم مادة أخرى..." : "Or type another subject..."}
+                                  className="w-full bg-white border border-purple-200 rounded-xl px-3 py-1.5 text-xs text-slate-800 font-bold focus:outline-none focus:border-purple-500 shadow-2xs"
+                                />
                               </div>
-                            )}
-                            <div className="min-w-0">
-                              <p className="font-bold text-slate-800 text-xs truncate">{reportAttachment.fileName || "ملف مرفق"}</p>
-                              <p className="text-[10px] text-purple-600 font-semibold flex items-center gap-1 mt-0.5">
-                                <Sparkles className="w-3 h-3 text-amber-500" />
-                                <span>{isArabic ? "جاهز لتحليل الذكاء الاصطناعي" : "Ready for AI context"}</span>
-                              </p>
-                            </div>
+                            </>
+                          );
+                        })()}
+                      </div>
+                    </div>
+
+                    {/* FIELDS 2 & 3: رقم الحصة + تاريخ الحصة */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                      {/* FIELD 2: 2- رقم الحصة */}
+                      <div className="space-y-1.5">
+                        <label className="block font-black text-slate-800 text-xs flex items-center justify-between">
+                          <span className="flex items-center gap-1.5">
+                            <span className="w-5 h-5 rounded-full bg-purple-600 text-white text-[10px] flex items-center justify-center font-black">2</span>
+                            <span>{isArabic ? "رقم الحصة *" : "Lesson Number *"}</span>
+                          </span>
+                          <span className="text-[10px] font-bold text-purple-700 bg-purple-100/80 px-2 py-0.5 rounded-full">
+                            {isArabic ? "تلقائي وقابل للتعديل" : "Auto-filled & editable"}
+                          </span>
+                        </label>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setReportLessonNumber(prev => Math.max(1, prev - 1))}
+                            className="w-9 h-9 rounded-xl bg-white border border-purple-200 text-purple-700 font-black text-base hover:bg-purple-100 flex items-center justify-center transition shadow-2xs shrink-0"
+                          >
+                            -
+                          </button>
+
+                          <div className="relative flex-1">
+                            <input
+                              type="number"
+                              min="1"
+                              required
+                              value={reportLessonNumber}
+                              onChange={e => setReportLessonNumber(Math.max(1, parseInt(e.target.value) || 1))}
+                              className="w-full bg-white border border-purple-200 rounded-xl px-3 py-2 text-center font-black text-slate-900 text-sm focus:outline-none focus:border-purple-500 shadow-2xs"
+                            />
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[11px] text-purple-600 font-bold pointer-events-none">
+                              #{reportLessonNumber}
+                            </span>
                           </div>
 
                           <button
                             type="button"
-                            onClick={() => setReportAttachment(null)}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition shrink-0"
-                            title={isArabic ? "إزالة المرفق" : "Remove attachment"}
+                            onClick={() => setReportLessonNumber(prev => prev + 1)}
+                            className="w-9 h-9 rounded-xl bg-white border border-purple-200 text-purple-700 font-black text-base hover:bg-purple-100 flex items-center justify-center transition shadow-2xs shrink-0"
                           >
-                            <X className="w-4 h-4" />
+                            +
                           </button>
                         </div>
-                      )}
+                      </div>
+
+                      {/* FIELD 3: 3- تاريخ الحصة */}
+                      <div className="space-y-1.5">
+                        <label className="block font-black text-slate-800 text-xs flex items-center justify-between">
+                          <span className="flex items-center gap-1.5">
+                            <span className="w-5 h-5 rounded-full bg-purple-600 text-white text-[10px] flex items-center justify-center font-black">3</span>
+                            <span>{isArabic ? "تاريخ الحصة *" : "Lesson Date *"}</span>
+                          </span>
+                          <span className="text-[10px] font-bold text-purple-700 bg-purple-100/80 px-2 py-0.5 rounded-full">
+                            {isArabic ? "تلقائي حسب اليوم (قابل للتعديل)" : "Today (editable)"}
+                          </span>
+                        </label>
+
+                        <div className="relative">
+                          <input
+                            type="date"
+                            required
+                            value={reportDate}
+                            onChange={e => setReportDate(e.target.value)}
+                            className="w-full bg-white border border-purple-200 rounded-xl px-3 py-2 text-slate-800 font-bold text-xs focus:outline-none focus:border-purple-500 shadow-2xs"
+                          />
+                        </div>
+                      </div>
                     </div>
 
-                    {/* AI Generation Trigger */}
-                    <button
-                      type="button"
-                      disabled={isGeneratingReport || (!newTeacherNotes.trim() && !reportAttachment)}
-                      onClick={async () => {
-                        if (!newTeacherNotes.trim() && !reportAttachment) return;
-                        setIsGeneratingReport(true);
-                        try {
-                          const res = await onGenerateReportAi({
-                            studentName: selectedStudent.fullName,
-                            subject: selectedStudent.subject,
-                            teacherNotes: newTeacherNotes,
-                            aiInstructions: newAiInstructions || settings.generalAiInstructions,
-                            attachment: reportAttachment || undefined
-                          });
-                          setNewGeneratedReportText(res);
-                        } catch (err) {
-                          console.error(err);
-                        } finally {
-                          setIsGeneratingReport(false);
-                        }
-                      }}
-                      className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold shadow-md transition flex items-center justify-center gap-2 disabled:opacity-50"
-                    >
-                      <Sparkles className="w-4 h-4 text-amber-300" />
-                      <span>
-                        {isGeneratingReport
-                          ? (isArabic ? "جاري صياغة وتحليل التقرير والمرفقات بالذكاء الاصطناعي..." : "Analyzing & Generating...")
-                          : (isArabic ? "✨ صياغة وتحليل التقرير بالذكاء الاصطناعي" : "Format & Analyze with AI")}
-                      </span>
-                    </button>
+                    {/* FIELD 4: 4- خانة بها حاضر وغائب */}
+                    <div className="space-y-2 pt-1 border-t border-purple-200/70">
+                      <label className="block font-black text-slate-800 text-xs flex items-center gap-1.5">
+                        <span className="w-5 h-5 rounded-full bg-purple-600 text-white text-[10px] flex items-center justify-center font-black">4</span>
+                        <span>{isArabic ? "حالة الحضور والغياب *" : "Attendance Status *"}</span>
+                      </label>
 
-                    {newGeneratedReportText && (
-                      <div className="space-y-2 pt-2">
-                        <label className="block font-bold text-slate-800 text-xs">
-                          {isArabic ? "التقرير المصاغ بالذكاء الاصطناعي (قابل للتعديل قبل الحفظ):" : "AI Generated Report:"}
-                        </label>
-                        <textarea
-                          rows={4}
-                          value={newGeneratedReportText}
-                          onChange={e => setNewGeneratedReportText(e.target.value)}
-                          className="w-full bg-slate-900 text-slate-100 border border-slate-700 rounded-xl p-3 text-xs font-sans leading-relaxed focus:outline-none"
-                        />
+                      <div className="grid grid-cols-2 gap-2 p-1 bg-white/90 border border-purple-200 rounded-2xl shadow-2xs">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setReportAttendance("present");
+                            setReportDeductCost(true);
+                          }}
+                          className={`py-2.5 px-3 rounded-xl font-black text-xs transition flex items-center justify-center gap-2 ${
+                            reportAttendance === "present"
+                              ? "bg-emerald-600 text-white shadow-md shadow-emerald-600/20"
+                              : "text-slate-600 hover:bg-slate-100"
+                          }`}
+                        >
+                          <CheckCircle2 className="w-4 h-4 text-emerald-300" />
+                          <span>{isArabic ? "🟢 حاضر (حضر الحصة)" : "🟢 Present"}</span>
+                        </button>
 
-                        <div className="flex items-center gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setReportAttendance("absent");
+                            setReportDeductCost(false);
+                          }}
+                          className={`py-2.5 px-3 rounded-xl font-black text-xs transition flex items-center justify-center gap-2 ${
+                            reportAttendance === "absent"
+                              ? "bg-rose-600 text-white shadow-md shadow-rose-600/20"
+                              : "text-slate-600 hover:bg-slate-100"
+                          }`}
+                        >
+                          <X className="w-4 h-4 text-rose-300" />
+                          <span>{isArabic ? "🔴 غائب (لم يحضر)" : "🔴 Absent"}</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* CONDITIONAL RENDERING: */}
+
+                    {/* CASE A: IF ABSENT (غائب) - HIDE REST OF FIELDS, ONLY SHOW DEDUCTION TOGGLE AND SAVE */}
+                    {reportAttendance === "absent" && (
+                      <div className="p-4 rounded-2xl bg-rose-50 border-2 border-rose-200 space-y-3.5 animate-in fade-in">
+                        <div className="flex items-center gap-2">
+                          <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
+                          <div>
+                            <h5 className="font-black text-rose-950 text-xs">
+                              {isArabic ? "تسجيل غياب الطالب عن الحصة" : "Record Student Absence"}
+                            </h5>
+                            <p className="text-[10.5px] text-rose-700 font-medium">
+                              {isArabic ? "حدد ما إذا كان سيتم حساب الحصة وخصم سعرها من رصيد الطالب أم لا:" : "Choose whether to bill/deduct this lesson fee:"}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* DEDUCTION OPTION */}
+                        <div className="space-y-1.5">
+                          <label className="block font-black text-slate-800 text-xs">
+                            {isArabic ? "هل يتم حساب الحصة وخصم سعرها؟ *" : "Deduct & Charge Lesson Fee? *"}
+                          </label>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setReportDeductCost(true)}
+                              className={`p-3 rounded-xl border text-right transition flex items-center justify-between ${
+                                reportDeductCost
+                                  ? "bg-rose-600 text-white border-rose-700 shadow-sm"
+                                  : "bg-white text-slate-700 border-rose-200 hover:bg-rose-100/40"
+                              }`}
+                            >
+                              <div>
+                                <p className="font-bold text-xs">
+                                  {isArabic ? "✅ نعم - يتم الخصم واحتساب الحصة" : "Yes - Deduct & Bill"}
+                                </p>
+                                <p className={`text-[10px] mt-0.5 ${reportDeductCost ? "text-rose-100" : "text-slate-500"}`}>
+                                  {isArabic ? "يتم خصم حصة واحدة من رصيد الطالب" : "Deducts 1 lesson from balance"}
+                                </p>
+                              </div>
+                              <Check className={`w-4 h-4 ${reportDeductCost ? "text-white" : "text-transparent"}`} />
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => setReportDeductCost(false)}
+                              className={`p-3 rounded-xl border text-right transition flex items-center justify-between ${
+                                !reportDeductCost
+                                  ? "bg-emerald-700 text-white border-emerald-800 shadow-sm"
+                                  : "bg-white text-slate-700 border-rose-200 hover:bg-rose-100/40"
+                              }`}
+                            >
+                              <div>
+                                <p className="font-bold text-xs">
+                                  {isArabic ? "❌ لا - لا يتم الخصم (غياب بعذر)" : "No - Excused (No Fee)"}
+                                </p>
+                                <p className={`text-[10px] mt-0.5 ${!reportDeductCost ? "text-emerald-100" : "text-slate-500"}`}>
+                                  {isArabic ? "لا يخصم من الرصيد ولا تترتب رسوم" : "No balance deducted"}
+                                </p>
+                              </div>
+                              <Check className={`w-4 h-4 ${!reportDeductCost ? "text-white" : "text-transparent"}`} />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Optional Absent Note */}
+                        <div>
+                          <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                            {isArabic ? "ملاحظة حول سبب الغياب (اختياري):" : "Absence reason/note (Optional):"}
+                          </label>
+                          <input
+                            type="text"
+                            value={absentNotes}
+                            onChange={e => setAbsentNotes(e.target.value)}
+                            placeholder={isArabic ? "مثال: اعتذر ولي الأمر لظرف طارئ..." : "e.g., Parent apologized due to emergency..."}
+                            className="w-full bg-white border border-rose-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-rose-500"
+                          />
+                        </div>
+
+                        {/* SAVE ABSENT REPORT BUTTON */}
+                        <div className="pt-2 flex items-center justify-end gap-2 border-t border-rose-200/80">
+                          <button
+                            type="button"
+                            onClick={() => setShowCreateReportForm(false)}
+                            className="px-4 py-2 rounded-xl bg-white border border-rose-200 text-slate-700 font-bold text-xs hover:bg-rose-100/50"
+                          >
+                            {isArabic ? "إلغاء" : "Cancel"}
+                          </button>
+
                           <button
                             type="button"
                             onClick={() => {
-                              if (!newTeacherNotes.trim() && !newGeneratedReportText.trim()) return;
+                              const absentReportText = isArabic
+                                ? `📌 تقرير غياب طالب\n• الطالب: ${selectedStudent.fullName}\n• المادة: ${reportSubject}\n• الحصة رقم: #${reportLessonNumber}\n• التاريخ: ${reportDate}\n• حالة الحضور: غائب\n• حساب الحصة: ${reportDeductCost ? "تم احتساب الحصة وخصمها من الرصيد" : "لم يتم الخصم (غياب بعذر)"}${absentNotes ? `\n• سبب/ملاحظات: ${absentNotes}` : ""}`
+                                : `📌 Student Absence Report\n• Student: ${selectedStudent.fullName}\n• Subject: ${reportSubject}\n• Lesson #: ${reportLessonNumber}\n• Date: ${reportDate}\n• Attendance: Absent\n• Billed: ${reportDeductCost ? "Yes (Deducted)" : "No (Excused)"}${absentNotes ? `\n• Notes: ${absentNotes}` : ""}`;
+
                               onAddReport({
                                 studentId: selectedStudent.id,
                                 studentName: selectedStudent.fullName,
-                                subject: selectedStudent.subject,
-                                date: new Date().toISOString().split("T")[0],
-                                teacherNotes: newTeacherNotes,
-                                aiInstructions: newAiInstructions,
-                                reportText: newGeneratedReportText || newTeacherNotes,
-                                generatedText: newGeneratedReportText || newTeacherNotes
+                                subject: reportSubject,
+                                lessonNumber: reportLessonNumber,
+                                date: reportDate,
+                                attendance: "absent",
+                                deductCost: reportDeductCost,
+                                homeworkStatus: "not_done",
+                                teacherNotes: absentNotes || (isArabic ? "غائب" : "Absent"),
+                                aiInstructions: "",
+                                reportText: absentReportText,
+                                generatedText: absentReportText
                               });
-                              setNewTeacherNotes("");
-                              setNewGeneratedReportText("");
-                              setReportAttachment(null);
+
                               setShowCreateReportForm(false);
+                              setWhatsappSentNotice(isArabic ? "تم حفظ تسجيل الغياب بنجاح!" : "Absence recorded successfully!");
+                              setTimeout(() => setWhatsappSentNotice(""), 4000);
                             }}
-                            className="flex-1 py-2 px-3 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs transition flex items-center justify-center gap-1.5 shadow-sm"
+                            className="px-6 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black text-xs shadow-md shadow-rose-600/30 flex items-center gap-1.5 transition"
                           >
                             <Check className="w-4 h-4" />
-                            <span>{isArabic ? "حفظ التقرير بملف الطالب" : "Save to Student Profile"}</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const text = newGeneratedReportText || newTeacherNotes;
-                              navigator.clipboard.writeText(text);
-                              setWhatsappSentNotice(isArabic ? "تم نسخ التقرير! توجيه للواتساب..." : "Report copied!");
-                              setTimeout(() => setWhatsappSentNotice(""), 4000);
-
-                              const link = selectedStudent.whatsappGroupLink || selectedStudent.parentContact;
-                              if (link) {
-                                if (link.startsWith("http")) {
-                                  window.open(link, "_blank");
-                                } else {
-                                  const phone = link.replace(/[^0-9]/g, "");
-                                  window.open(`https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(text)}`, "_blank");
-                                }
-                              } else {
-                                window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, "_blank");
-                              }
-                            }}
-                            className="py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition flex items-center justify-center gap-1.5 shrink-0"
-                          >
-                            <Share2 className="w-4 h-4" />
-                            <span>{isArabic ? "إرسال للواتساب" : "WhatsApp"}</span>
+                            <span>{isArabic ? "حفظ تسجيل الغياب" : "Save Absence"}</span>
                           </button>
                         </div>
+                      </div>
+                    )}
+
+                    {/* CASE B: IF PRESENT (حاضر) - SHOW FULL RICH REPORT FIELDS */}
+                    {reportAttendance === "present" && (
+                      <div className="space-y-3.5 animate-in fade-in">
+                        {/* Homework status */}
+                        <div className="flex items-center justify-between bg-white border border-purple-200 rounded-xl px-3 py-2">
+                          <label className="font-bold text-slate-700 text-xs">
+                            {isArabic ? "حالة الواجب المنزلي:" : "Homework Status:"}
+                          </label>
+                          <select
+                            value={reportHomeworkStatus}
+                            onChange={e => setReportHomeworkStatus(e.target.value as HomeworkStatus)}
+                            className="bg-purple-50 border border-purple-200 rounded-lg px-2.5 py-1 text-xs font-bold text-purple-900 focus:outline-none"
+                          >
+                            <option value="done">{isArabic ? "✅ تم حل الواجب كاملاً" : "Done"}</option>
+                            <option value="not_done">{isArabic ? "❌ لم يحل الواجب" : "Not Done"}</option>
+                            <option value="late">{isArabic ? "⚠️ تم حل الواجب بتأخير أو جزئياً" : "Late / Partial"}</option>
+                          </select>
+                        </div>
+
+                        {/* Teacher Notes */}
+                        <div>
+                          <label className="block font-bold text-slate-700 mb-1 text-xs">
+                            {isArabic ? "ملاحظات المعلم (ما كتبته عن الطالب بالحصة والواجب):" : "Teacher Notes:"}
+                          </label>
+                          <textarea
+                            rows={3}
+                            value={newTeacherNotes}
+                            onChange={e => setNewTeacherNotes(e.target.value)}
+                            placeholder={
+                              isArabic
+                                ? "مثال: أتقن شرح الدرس، وأجاب على التمارين بامتياز، الواجب صفحة 35 المسائل من 1 إلى 5..."
+                                : "Write lesson notes here..."
+                            }
+                            className="w-full bg-white border border-purple-200 rounded-xl p-3 text-slate-800 text-xs focus:outline-none focus:border-purple-500 leading-relaxed"
+                          />
+                        </div>
+
+                        {/* Subject AI Instructions */}
+                        <div>
+                          <label className="block font-bold text-slate-700 mb-1 flex items-center gap-1 text-xs">
+                            <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                            <span>{isArabic ? `تعليمات الذكاء الاصطناعي الخاصة بمادة (${reportSubject}):` : "Subject AI Instructions:"}</span>
+                          </label>
+                          <input
+                            type="text"
+                            value={newAiInstructions}
+                            onChange={e => setNewAiInstructions(e.target.value)}
+                            placeholder={isArabic ? "توجيهات صياغة الذكاء الاصطناعي لهذه المادة..." : "AI instructions..."}
+                            className="w-full bg-white border border-purple-200 rounded-xl px-3 py-2 text-slate-700 text-xs focus:outline-none focus:border-purple-500"
+                          />
+                        </div>
+
+                        {/* File Attachment */}
+                        <div className="space-y-1.5">
+                          <label className="block font-bold text-slate-700 text-xs flex items-center justify-between">
+                            <span className="flex items-center gap-1.5">
+                              <Paperclip className="w-4 h-4 text-purple-600" />
+                              <span>{isArabic ? "إرفاق صورة أو ملف (ورقة عمل / اختبار / صفحة كتاب):" : "Attach Image or File:"}</span>
+                            </span>
+                            <span className="text-[10px] font-medium text-purple-700 bg-purple-100/80 px-2 py-0.5 rounded-full">
+                              {isArabic ? "اختياري" : "Optional"}
+                            </span>
+                          </label>
+
+                          {!reportAttachment ? (
+                            <label className="border-2 border-dashed border-purple-200 hover:border-purple-400 bg-white hover:bg-purple-50/50 rounded-xl p-3 flex flex-col items-center justify-center cursor-pointer transition text-center group">
+                              <input
+                                type="file"
+                                accept="image/*,.pdf,.txt,.doc,.docx"
+                                onChange={handleFileChange}
+                                className="hidden"
+                              />
+                              <div className="flex items-center gap-2 text-purple-700 font-bold text-xs">
+                                <FileUp className="w-4 h-4 text-purple-600 group-hover:scale-110 transition" />
+                                <span>{isArabic ? "اضغط هنا لإرفاق صورة أو مستند لتحليله بالذكاء الاصطناعي" : "Click to attach image or document"}</span>
+                              </div>
+                              <p className="text-[10px] text-slate-400 mt-1">
+                                {isArabic
+                                  ? "يدعم الصور (PNG, JPG)، ملفات الـ PDF أو أوراق العمل والملاحظات اليدوية"
+                                  : "Supports images, PDFs, worksheets, or handwritten notes"}
+                              </p>
+                            </label>
+                          ) : (
+                            <div className="p-3 bg-white border border-purple-200 rounded-xl flex items-center justify-between gap-3 shadow-2xs">
+                              <div className="flex items-center gap-3 overflow-hidden">
+                                {reportAttachment.previewUrl ? (
+                                  <img
+                                    src={reportAttachment.previewUrl}
+                                    alt="Attachment Preview"
+                                    className="w-11 h-11 object-cover rounded-lg border border-purple-100 shrink-0"
+                                  />
+                                ) : (
+                                  <div className="w-10 h-10 rounded-lg bg-purple-100 text-purple-700 flex items-center justify-center shrink-0 font-bold text-xs">
+                                    <FileText className="w-5 h-5" />
+                                  </div>
+                                )}
+                                <div className="min-w-0">
+                                  <p className="font-bold text-slate-800 text-xs truncate">{reportAttachment.fileName || "ملف مرفق"}</p>
+                                  <p className="text-[10px] text-purple-600 font-semibold flex items-center gap-1 mt-0.5">
+                                    <Sparkles className="w-3 h-3 text-amber-500" />
+                                    <span>{isArabic ? "جاهز لتحليل الذكاء الاصطناعي" : "Ready for AI context"}</span>
+                                  </p>
+                                </div>
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() => setReportAttachment(null)}
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition shrink-0"
+                                title={isArabic ? "إزالة المرفق" : "Remove attachment"}
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* AI Generation Trigger */}
+                        <button
+                          type="button"
+                          disabled={isGeneratingReport || (!newTeacherNotes.trim() && !reportAttachment)}
+                          onClick={async () => {
+                            if (!newTeacherNotes.trim() && !reportAttachment) return;
+                            setIsGeneratingReport(true);
+                            try {
+                              const res = await onGenerateReportAi({
+                                studentName: selectedStudent.fullName,
+                                subject: reportSubject,
+                                teacherNotes: `الحصة #${reportLessonNumber} (${reportDate}):\n${newTeacherNotes}\nحالة الواجب: ${reportHomeworkStatus === "done" ? "تم حل الواجب" : reportHomeworkStatus === "not_done" ? "لم يتم حل الواجب" : "متأخر"}`,
+                                aiInstructions: newAiInstructions || settings.generalAiInstructions,
+                                attachment: reportAttachment || undefined
+                              });
+                              setNewGeneratedReportText(res);
+                            } catch (err) {
+                              console.error(err);
+                            } finally {
+                              setIsGeneratingReport(false);
+                            }
+                          }}
+                          className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold shadow-md transition flex items-center justify-center gap-2 disabled:opacity-50"
+                        >
+                          <Sparkles className="w-4 h-4 text-amber-300" />
+                          <span>
+                            {isGeneratingReport
+                              ? (isArabic ? "جاري صياغة وتحليل التقرير والمرفقات بالذكاء الاصطناعي..." : "Analyzing & Generating...")
+                              : (isArabic ? "✨ صياغة وتحليل التقرير بالذكاء الاصطناعي" : "Format & Analyze with AI")}
+                          </span>
+                        </button>
+
+                        {/* AI Report Editor & Save / Share Actions */}
+                        {newGeneratedReportText ? (
+                          <div className="space-y-2 pt-2">
+                            <label className="block font-bold text-slate-800 text-xs">
+                              {isArabic ? "التقرير المصاغ بالذكاء الاصطناعي (قابل للتعديل قبل الحفظ):" : "AI Generated Report:"}
+                            </label>
+                            <textarea
+                              rows={4}
+                              value={newGeneratedReportText}
+                              onChange={e => setNewGeneratedReportText(e.target.value)}
+                              className="w-full bg-slate-900 text-slate-100 border border-slate-700 rounded-xl p-3 text-xs font-sans leading-relaxed focus:outline-none"
+                            />
+
+                            <div className="flex items-center gap-2 pt-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const finalReport = newGeneratedReportText || newTeacherNotes;
+                                  if (!finalReport.trim()) return;
+
+                                  onAddReport({
+                                    studentId: selectedStudent.id,
+                                    studentName: selectedStudent.fullName,
+                                    subject: reportSubject,
+                                    lessonNumber: reportLessonNumber,
+                                    date: reportDate,
+                                    attendance: "present",
+                                    deductCost: true,
+                                    homeworkStatus: reportHomeworkStatus,
+                                    teacherNotes: newTeacherNotes,
+                                    aiInstructions: newAiInstructions,
+                                    reportText: finalReport,
+                                    generatedText: finalReport
+                                  });
+
+                                  setShowCreateReportForm(false);
+                                  setWhatsappSentNotice(isArabic ? "تم حفظ التقرير بملف الطالب بنجاح!" : "Report saved successfully!");
+                                  setTimeout(() => setWhatsappSentNotice(""), 4000);
+                                }}
+                                className="flex-1 py-2 px-3 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs transition flex items-center justify-center gap-1.5 shadow-sm"
+                              >
+                                <Check className="w-4 h-4" />
+                                <span>{isArabic ? "حفظ التقرير بملف الطالب" : "Save to Student Profile"}</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const text = newGeneratedReportText || newTeacherNotes;
+                                  handleOpenWhatsAppChooser(text, selectedStudent);
+                                }}
+                                className="py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition flex items-center justify-center gap-1.5 shrink-0 shadow-sm"
+                              >
+                                <Share2 className="w-4 h-4" />
+                                <span>{isArabic ? "إرسال للواتساب" : "WhatsApp"}</span>
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="pt-2 flex justify-end gap-2">
+                            {newTeacherNotes.trim() && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const manualText = `تقرير الحصة #${reportLessonNumber} - مادة: ${reportSubject}\nالتاريخ: ${reportDate}\nملاحظات الحصة:\n${newTeacherNotes}`;
+                                  handleOpenWhatsAppChooser(manualText, selectedStudent);
+                                }}
+                                className="py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition flex items-center justify-center gap-1.5 shadow-sm"
+                              >
+                                <Share2 className="w-4 h-4" />
+                                <span>{isArabic ? "مشاركة عبر الواتساب" : "WhatsApp"}</span>
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              disabled={!newTeacherNotes.trim()}
+                              onClick={() => {
+                                if (!newTeacherNotes.trim()) return;
+                                const manualText = `تقرير الحصة #${reportLessonNumber} - مادة: ${reportSubject}\nالتاريخ: ${reportDate}\nملاحظات الحصة:\n${newTeacherNotes}`;
+
+                                onAddReport({
+                                  studentId: selectedStudent.id,
+                                  studentName: selectedStudent.fullName,
+                                  subject: reportSubject,
+                                  lessonNumber: reportLessonNumber,
+                                  date: reportDate,
+                                  attendance: "present",
+                                  deductCost: true,
+                                  homeworkStatus: reportHomeworkStatus,
+                                  teacherNotes: newTeacherNotes,
+                                  aiInstructions: newAiInstructions,
+                                  reportText: manualText,
+                                  generatedText: manualText
+                                });
+
+                                setShowCreateReportForm(false);
+                                setWhatsappSentNotice(isArabic ? "تم حفظ التقرير بملف الطالب بنجاح!" : "Report saved successfully!");
+                                setTimeout(() => setWhatsappSentNotice(""), 4000);
+                              }}
+                              className="py-2 px-4 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs transition flex items-center justify-center gap-1.5 shadow-sm disabled:opacity-50"
+                            >
+                              <Check className="w-4 h-4" />
+                              <span>{isArabic ? "حفظ التقرير المباشر" : "Save Direct Report"}</span>
+                            </button>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -1404,7 +2133,10 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                         id: ar.id,
                         studentId: ar.studentId,
                         studentName: selectedStudent.fullName,
-                        subject: selectedStudent.subject,
+                        subject: ar.subject || selectedStudent.subject,
+                        lessonNumber: ar.lessonNumber,
+                        attendance: ar.attendance,
+                        deductCost: ar.deducted,
                         date: ar.date,
                         teacherNotes: ar.teacherNotes || "",
                         aiInstructions: ar.aiInstructions || "",
@@ -1440,12 +2172,15 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                     return allPastReports.map((rep, idx) => {
                       const finalReportContent = rep.generatedText || rep.reportText || rep.teacherNotes;
                       const isExpanded = expandedReportIds.includes(rep.id);
-                      const lessonNum = totalCount - idx;
+                      const lessonNum = rep.lessonNumber || (totalCount - idx);
+                      const isAbsent = rep.attendance === "absent";
 
                       return (
                         <div
                           key={rep.id}
-                          className="rounded-2xl border border-slate-200 overflow-hidden bg-white shadow-2xs"
+                          className={`rounded-2xl border overflow-hidden bg-white shadow-2xs transition ${
+                            isAbsent ? "border-rose-200/80" : "border-slate-200"
+                          }`}
                         >
                           {/* Header - Click to toggle expansion */}
                           <div
@@ -1453,13 +2188,29 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                             className="p-3.5 bg-white hover:bg-slate-50/80 cursor-pointer transition flex items-center justify-between gap-2 select-none"
                           >
                             <div className="flex items-center gap-2 flex-wrap">
-                              <span className="px-2.5 py-1 rounded-xl bg-purple-600 text-white font-black text-xs shrink-0 shadow-2xs">
+                              <span className={`px-2.5 py-1 rounded-xl text-white font-black text-xs shrink-0 shadow-2xs ${
+                                isAbsent ? "bg-rose-600" : "bg-purple-600"
+                              }`}>
                                 {isArabic ? `الحصة #${lessonNum}` : `Lesson #${lessonNum}`}
                               </span>
+
                               <span className="font-bold text-slate-800 text-xs">{rep.date}</span>
+
                               <span className="px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200/60 text-[10px] font-bold">
                                 {rep.subject || selectedStudent.subject}
                               </span>
+
+                              {/* Attendance Status Badge */}
+                              {isAbsent ? (
+                                <span className="px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-bold flex items-center gap-1">
+                                  <span>🔴 {isArabic ? "غائب" : "Absent"}</span>
+                                  <span>({rep.deductCost ? (isArabic ? "تم الخصم" : "Deducted") : (isArabic ? "بدون خصم" : "Excused")})</span>
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold flex items-center gap-1">
+                                  <span>🟢 {isArabic ? "حاضر" : "Present"}</span>
+                                </span>
+                              )}
                             </div>
 
                             <div className="flex items-center gap-2 shrink-0">
@@ -1475,7 +2226,11 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                           {/* Collapsible Content */}
                           {isExpanded && (
                             <div className="p-4 bg-slate-50 border-t border-slate-100 space-y-3 text-xs animate-in fade-in">
-                              <div className="p-3.5 rounded-xl bg-slate-900 text-slate-100 border border-slate-800 space-y-1.5 shadow-inner leading-relaxed whitespace-pre-wrap font-sans text-xs">
+                              <div className={`p-3.5 rounded-xl border space-y-1.5 shadow-inner leading-relaxed whitespace-pre-wrap font-sans text-xs ${
+                                isAbsent
+                                  ? "bg-rose-950 text-rose-50 border-rose-900"
+                                  : "bg-slate-900 text-slate-100 border-slate-800"
+                              }`}>
                                 {finalReportContent}
                               </div>
 
@@ -1508,21 +2263,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                                   <button
                                     type="button"
                                     onClick={() => {
-                                      navigator.clipboard.writeText(finalReportContent);
-                                      setWhatsappSentNotice(isArabic ? "تم نسخ التقرير! جارٍ التوجيه للواتساب..." : "Report copied! Opening WhatsApp...");
-                                      setTimeout(() => setWhatsappSentNotice(""), 4000);
-
-                                      const link = selectedStudent.whatsappGroupLink || selectedStudent.parentContact;
-                                      if (link) {
-                                        if (link.startsWith("http")) {
-                                          window.open(link, "_blank");
-                                        } else {
-                                          const phone = link.replace(/[^0-9]/g, "");
-                                          window.open(`https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(finalReportContent)}`, "_blank");
-                                        }
-                                      } else {
-                                        window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(finalReportContent)}`, "_blank");
-                                      }
+                                      handleOpenWhatsAppChooser(finalReportContent, selectedStudent);
                                     }}
                                     className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] transition flex items-center gap-1 shadow-2xs"
                                   >
@@ -1725,12 +2466,22 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 
       {/* Modal: Edit Student */}
       {showEditStudentModal && selectedStudent && (
-        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white border border-slate-200 rounded-3xl p-6 max-w-lg w-full shadow-2xl my-6 animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
-              <h2 className="text-lg font-bold text-slate-900">
-                {isArabic ? "تعديل بيانات الطالب ونظام الاشتراك" : "Edit Student & Plan"}
-              </h2>
+        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-5 max-w-2xl w-full shadow-2xl my-4 animate-in fade-in zoom-in-95 duration-150 max-h-[92vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 sticky top-0 bg-white z-10">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
+                  <Edit2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h2 className="text-sm sm:text-base font-black text-slate-900">
+                    {isArabic ? "تعديل بيانات الطالب والمواد" : "Edit Student & Subjects"}
+                  </h2>
+                  <p className="text-[10.5px] text-slate-500 font-medium">
+                    {isArabic ? "تعديل المواد وأنظمة الدفع والاشتراك المخصصة" : "Update subjects, payment plans and subscriptions"}
+                  </p>
+                </div>
+              </div>
               <button
                 onClick={() => setShowEditStudentModal(false)}
                 className="text-slate-400 hover:text-slate-700 p-1"
@@ -1739,214 +2490,504 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleSaveEditStudent} className="space-y-4 my-4 text-xs">
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">
-                  {isArabic ? "اسم الطالب بالكامل" : "Full Name"}
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={editFullName}
-                  onChange={e => setEditFullName(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-bold"
-                />
-              </div>
+            <form onSubmit={handleSaveEditStudent} className="space-y-3 my-3 text-xs">
+              {/* Top Compact Student Info Grid */}
+              <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                      {isArabic ? "اسم الطالب بالكامل *" : "Student Full Name *"}
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={editFullName}
+                      onChange={e => setEditFullName(e.target.value)}
+                      className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 font-bold focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">
-                    {isArabic ? "رقم الطالب (اختياري)" : "Student Phone"}
-                  </label>
-                  <input
-                    type="tel"
-                    value={editStudentNumber}
-                    onChange={e => setEditStudentNumber(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 dir-ltr text-right"
-                  />
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                      {isArabic ? "رقم ولي الأمر (واتساب) *" : "Parent Phone (WhatsApp) *"}
+                    </label>
+                    <input
+                      type="tel"
+                      required
+                      value={editParentContact}
+                      onChange={e => setEditParentContact(e.target.value)}
+                      className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 font-mono font-bold dir-ltr text-right focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
                 </div>
 
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">
-                    {isArabic ? "رقم ولي الأمر (للواتساب)" : "Parent Phone"}
-                  </label>
-                  <input
-                    type="tel"
-                    required
-                    value={editParentContact}
-                    onChange={e => setEditParentContact(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-mono dir-ltr text-right"
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                      {isArabic ? "رقم/كود الطالب (اختياري)" : "Student ID (Optional)"}
+                    </label>
+                    <input
+                      type="tel"
+                      value={editStudentNumber}
+                      onChange={e => setEditStudentNumber(e.target.value)}
+                      className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 dir-ltr text-right focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                      {isArabic ? "رابط جروب الواتساب" : "WhatsApp Group Link"}
+                    </label>
+                    <input
+                      type="url"
+                      value={editWhatsappGroupLink}
+                      onChange={e => setEditWhatsappGroupLink(e.target.value)}
+                      placeholder="https://chat.whatsapp.com/..."
+                      className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 font-medium focus:outline-none focus:border-blue-500 text-left dir-ltr"
+                    />
+                  </div>
                 </div>
               </div>
 
+              {/* Multi-Subject Editor - Space Efficient Bento Rows */}
               <div>
-                <label className="block font-bold text-slate-700 mb-1">
-                  {isArabic ? "المادة الدراسية" : "Subject"}
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={editSubject}
-                  onChange={e => setEditSubject(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">
-                    {isArabic ? "نوع الدراسة" : "Study Type"}
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block font-black text-slate-800 flex items-center gap-1.5 text-xs">
+                    <BookOpen className="w-3.5 h-3.5 text-blue-600" />
+                    <span>{isArabic ? "المواد الدراسية ونظام الدفع لكل مادة" : "Subjects & Payment Plans"}</span>
+                    <span className="px-1.5 py-0.2 rounded-full bg-blue-100 text-blue-800 text-[9.5px] font-bold">
+                      {editStudentSubjects.length}
+                    </span>
                   </label>
-                  <select
-                    value={editStudyType}
-                    onChange={e => setEditStudyType(e.target.value as "group" | "private")}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-bold"
+
+                  <button
+                    type="button"
+                    onClick={handleAddEditSubjectField}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-[11px] border border-blue-200 transition"
                   >
-                    <option value="private">{isArabic ? "خاص (فردي)" : "Private"}</option>
-                    <option value="group">{isArabic ? "مجموعة (سنتر)" : "Group"}</option>
-                  </select>
+                    <Plus className="w-3 h-3" />
+                    <span>{isArabic ? "+ مادة أخرى" : "+ Subject"}</span>
+                  </button>
                 </div>
 
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">
-                    {editSubscriptionType === "monthly"
-                      ? (isArabic ? "سعر الحصة في الشهر (ج.م)" : "Lesson Cost per Month")
-                      : (isArabic ? "سعر الحصة في الباقة (ج.م)" : "Lesson Cost in Package")}
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    required
-                    value={editLessonCost}
-                    onChange={e => setEditLessonCost(Number(e.target.value))}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold text-slate-800 focus:outline-none focus:border-blue-500"
-                  />
+                <div className="space-y-2">
+                  {editStudentSubjects.map((sub, idx) => (
+                    <div
+                      key={sub.id || idx}
+                      className="p-3 rounded-2xl bg-slate-50/90 border border-slate-200 hover:border-slate-300 shadow-2xs space-y-2 relative transition-all"
+                    >
+                      {/* Row 1: Subject Name + Suggestions + Study Type + Delete */}
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-2 justify-between">
+                        <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                          <span className="w-5 h-5 rounded-md bg-blue-600 text-white font-black text-[10px] flex items-center justify-center shrink-0">
+                            {idx + 1}
+                          </span>
+                          <input
+                            type="text"
+                            required
+                            value={sub.subject}
+                            onChange={e => handleUpdateEditSubjectField(idx, { subject: e.target.value })}
+                            className="bg-white border border-slate-200 rounded-xl px-2.5 py-1 text-xs text-slate-800 font-bold focus:outline-none focus:border-blue-500 flex-1 min-w-[120px]"
+                          />
+                          {/* Quick Chips */}
+                          <div className="hidden lg:flex items-center gap-1 overflow-hidden">
+                            {COMMON_SUBJECT_SUGGESTIONS.slice(0, 4).map(sugg => (
+                              <button
+                                key={sugg}
+                                type="button"
+                                onClick={() => handleUpdateEditSubjectField(idx, { subject: sugg })}
+                                className={`px-1.5 py-0.5 rounded-md text-[9px] font-bold border transition shrink-0 ${
+                                  sub.subject === sugg
+                                    ? "bg-blue-600 text-white border-blue-600"
+                                    : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"
+                                }`}
+                              >
+                                {sugg}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Controls: Study Type & Delete */}
+                        <div className="flex items-center gap-1.5 self-end sm:self-auto">
+                          {/* Study Type Segmented Control */}
+                          <div className="inline-flex p-0.5 rounded-lg bg-slate-200/80 text-[10px] font-bold">
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateEditSubjectField(idx, { studyType: "private" })}
+                              className={`px-2 py-0.5 rounded-md transition ${
+                                sub.studyType === "private"
+                                  ? "bg-white text-blue-700 shadow-2xs font-black"
+                                  : "text-slate-600 hover:text-slate-900"
+                              }`}
+                            >
+                              👤 {isArabic ? "خاص" : "Private"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateEditSubjectField(idx, { studyType: "group" })}
+                              className={`px-2 py-0.5 rounded-md transition ${
+                                sub.studyType === "group"
+                                  ? "bg-white text-blue-700 shadow-2xs font-black"
+                                  : "text-slate-600 hover:text-slate-900"
+                              }`}
+                            >
+                              👥 {isArabic ? "مجموعة" : "Group"}
+                            </button>
+                          </div>
+
+                          {editStudentSubjects.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveEditSubjectField(idx)}
+                              className="p-1 rounded-lg text-rose-500 hover:bg-rose-50 hover:text-rose-700 transition"
+                              title={isArabic ? "حذف المادة" : "Remove"}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Row 2: Price + Subscription Mode + Payment Plan in a sleek unified row */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1.5 border-t border-slate-200/60 items-center">
+                        {/* 1. Price */}
+                        <div className="flex items-center gap-1 bg-white px-2 py-1 rounded-xl border border-slate-200">
+                          <span className="text-[10px] font-bold text-slate-400 shrink-0">
+                            {isArabic ? "سعر الحصة:" : "Cost:"}
+                          </span>
+                          <input
+                            type="number"
+                            min="1"
+                            required
+                            value={sub.lessonCost}
+                            onChange={e => handleUpdateEditSubjectField(idx, { lessonCost: Number(e.target.value) })}
+                            className="w-full font-black text-slate-800 text-xs focus:outline-none"
+                          />
+                          <span className="text-[9.5px] font-bold text-slate-400 shrink-0">ج.م</span>
+                        </div>
+
+                        {/* 2. Subscription Type (Monthly vs Package) */}
+                        <div className="flex items-center gap-1">
+                          <div className="inline-flex w-full p-0.5 rounded-lg bg-slate-200/80 text-[10px] font-bold">
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateEditSubjectField(idx, { subscriptionType: "monthly" })}
+                              className={`flex-1 py-1 rounded-md transition text-center ${
+                                sub.subscriptionType === "monthly"
+                                  ? "bg-blue-600 text-white shadow-2xs font-black"
+                                  : "text-slate-600 hover:text-slate-900"
+                              }`}
+                            >
+                              📅 {isArabic ? "شهري" : "Monthly"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateEditSubjectField(idx, { subscriptionType: "lessons_count" })}
+                              className={`flex-1 py-1 rounded-md transition text-center ${
+                                sub.subscriptionType === "lessons_count"
+                                  ? "bg-blue-600 text-white shadow-2xs font-black"
+                                  : "text-slate-600 hover:text-slate-900"
+                              }`}
+                            >
+                              🔢 {isArabic ? "باقة" : "Pack"}
+                            </button>
+                          </div>
+
+                          {sub.subscriptionType === "lessons_count" && (
+                            <div className="flex items-center gap-1 bg-white px-2 py-1 rounded-xl border border-blue-200 w-24 shrink-0">
+                              <input
+                                type="number"
+                                min="1"
+                                value={sub.totalPurchasedLessons || 8}
+                                onChange={e => handleUpdateEditSubjectField(idx, { totalPurchasedLessons: Number(e.target.value) })}
+                                className="w-full font-bold text-blue-700 text-xs focus:outline-none"
+                                title={isArabic ? "عدد حصص الباقة" : "Lessons Count"}
+                              />
+                              <span className="text-[9px] font-bold text-blue-500 shrink-0">حصة</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* 3. Payment Timing (Prepaid / Postpaid / Split) */}
+                        <div className="inline-flex p-0.5 rounded-lg bg-slate-200/80 text-[10px] font-bold">
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateEditSubjectField(idx, { paymentPlan: "beginning_of_month" })}
+                            className={`flex-1 py-1 rounded-md transition text-center ${
+                              sub.paymentPlan === "beginning_of_month"
+                                ? "bg-emerald-600 text-white shadow-2xs font-black"
+                                : "text-slate-600 hover:text-slate-900"
+                            }`}
+                            title={isArabic ? "دفع أول الشهر (مقدماً)" : "Prepaid"}
+                          >
+                            🟢 {isArabic ? "مقدم" : "Prepaid"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateEditSubjectField(idx, { paymentPlan: "end_of_month" })}
+                            className={`flex-1 py-1 rounded-md transition text-center ${
+                              sub.paymentPlan === "end_of_month"
+                                ? "bg-amber-600 text-white shadow-2xs font-black"
+                                : "text-slate-600 hover:text-slate-900"
+                            }`}
+                            title={isArabic ? "دفع آخر الشهر (مؤخر)" : "Postpaid"}
+                          >
+                            🟡 {isArabic ? "مؤخر" : "Postpaid"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateEditSubjectField(idx, { paymentPlan: "mixed" })}
+                            className={`flex-1 py-1 rounded-md transition text-center ${
+                              sub.paymentPlan === "mixed"
+                                ? "bg-indigo-600 text-white shadow-2xs font-black"
+                                : "text-slate-600 hover:text-slate-900"
+                            }`}
+                            title={isArabic ? "دفع مختلط (دفعات)" : "Split"}
+                          >
+                            🔵 {isArabic ? "دفعات" : "Split"}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              </div>
 
-              {/* Subscription & Payment Options */}
-              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3.5">
-                <div>
-                  <label className="block font-black text-slate-800 mb-1.5 flex items-center gap-1.5">
-                    <Calendar className="w-4 h-4 text-blue-600" />
-                    <span>{isArabic ? "نظام الاشتراك" : "Subscription System"}</span>
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setEditSubscriptionType("monthly")}
-                      className={`p-2.5 rounded-xl border text-right transition font-bold ${
-                        editSubscriptionType === "monthly"
-                          ? "bg-blue-600 text-white border-blue-600 shadow-sm"
-                          : "bg-white text-slate-700 border-slate-200 hover:border-slate-300"
-                      }`}
-                    >
-                      <p className="text-xs">📅 {isArabic ? "بالشهر (شهري)" : "Monthly"}</p>
-                      <p className={`text-[10px] mt-0.5 font-normal ${editSubscriptionType === "monthly" ? "text-blue-100" : "text-slate-500"}`}>
-                        {isArabic ? "حساب الحصص نهاية الشهر" : "End of month calc"}
-                      </p>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setEditSubscriptionType("lessons_count")}
-                      className={`p-2.5 rounded-xl border text-right transition font-bold ${
-                        editSubscriptionType === "lessons_count"
-                          ? "bg-blue-600 text-white border-blue-600 shadow-sm"
-                          : "bg-white text-slate-700 border-slate-200 hover:border-slate-300"
-                      }`}
-                    >
-                      <p className="text-xs">🔢 {isArabic ? "بعدد الحصص (باقة)" : "Fixed Package"}</p>
-                      <p className={`text-[10px] mt-0.5 font-normal ${editSubscriptionType === "lessons_count" ? "text-blue-100" : "text-slate-500"}`}>
-                        {isArabic ? "تحديد باقة حصص تنتهي باستهلاكها" : "Specific package"}
-                      </p>
-                    </button>
-                  </div>
-                </div>
-
-                <div className="pt-2 border-t border-slate-200/70">
-                  <label className="block font-black text-slate-800 mb-1.5 flex items-center gap-1.5">
-                    <DollarSign className="w-4 h-4 text-emerald-600" />
-                    <span>{isArabic ? "طريقة ونظام الدفع" : "Payment System"}</span>
-                  </label>
-                  <div className="grid grid-cols-3 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setEditPaymentPlan("beginning_of_month")}
-                      className={`p-2.5 rounded-xl border text-center transition font-bold text-xs ${
-                        editPaymentPlan === "beginning_of_month"
-                          ? "bg-emerald-600 text-white border-emerald-600 shadow-sm"
-                          : "bg-white text-slate-700 border-slate-200 hover:border-slate-300"
-                      }`}
-                    >
-                      <p className="text-[11px]">🟢 {isArabic ? "أول الشهر" : "Prepaid"}</p>
-                      <p className={`text-[9px] mt-0.5 font-normal ${editPaymentPlan === "beginning_of_month" ? "text-emerald-100" : "text-slate-500"}`}>
-                        {isArabic ? "مقدم" : "Advance"}
-                      </p>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setEditPaymentPlan("end_of_month")}
-                      className={`p-2.5 rounded-xl border text-center transition font-bold text-xs ${
-                        editPaymentPlan === "end_of_month"
-                          ? "bg-amber-600 text-white border-amber-600 shadow-sm"
-                          : "bg-white text-slate-700 border-slate-200 hover:border-slate-300"
-                      }`}
-                    >
-                      <p className="text-[11px]">🟡 {isArabic ? "آخر الشهر" : "Postpaid"}</p>
-                      <p className={`text-[9px] mt-0.5 font-normal ${editPaymentPlan === "end_of_month" ? "text-amber-100" : "text-slate-500"}`}>
-                        {isArabic ? "مؤخر" : "Postpaid"}
-                      </p>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setEditPaymentPlan("mixed")}
-                      className={`p-2.5 rounded-xl border text-center transition font-bold text-xs ${
-                        editPaymentPlan === "mixed"
-                          ? "bg-indigo-600 text-white border-indigo-600 shadow-sm"
-                          : "bg-white text-slate-700 border-slate-200 hover:border-slate-300"
-                      }`}
-                    >
-                      <p className="text-[11px]">🔵 {isArabic ? "دفع مختلط" : "Hybrid"}</p>
-                      <p className={`text-[9px] mt-0.5 font-normal ${editPaymentPlan === "mixed" ? "text-indigo-100" : "text-slate-500"}`}>
-                        {isArabic ? "دفعات" : "Split"}
-                      </p>
-                    </button>
-                  </div>
-                </div>
+                <button
+                  type="button"
+                  onClick={handleAddEditSubjectField}
+                  className="w-full mt-2 py-1.5 rounded-xl border border-dashed border-blue-300 bg-blue-50/40 hover:bg-blue-50 text-blue-700 font-bold text-[11px] flex items-center justify-center gap-1.5 transition"
+                >
+                  <PlusCircle className="w-3.5 h-3.5 text-blue-600" />
+                  <span>{isArabic ? "+ إضافة مادة دراسية أخرى لهذا الطالب" : "+ Add Another Subject"}</span>
+                </button>
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">
+                <label className="block font-bold text-slate-700 mb-1 text-[11px]">
                   {isArabic ? "ملاحظات إضافية" : "Notes"}
                 </label>
                 <textarea
-                  rows={2}
+                  rows={1}
                   value={editNotes}
                   onChange={e => setEditNotes(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-800"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-blue-500"
                 />
               </div>
 
-              <div className="pt-3 flex justify-end gap-2 border-t border-slate-100">
+              <div className="pt-2 flex justify-end gap-2 border-t border-slate-100">
                 <button
                   type="button"
                   onClick={() => setShowEditStudentModal(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold"
+                  className="px-3.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs"
                 >
                   {isArabic ? "إلغاء" : "Cancel"}
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-md shadow-blue-600/30"
+                  className="px-4 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md shadow-blue-600/30"
                 >
-                  {isArabic ? "حفظ التعديلات" : "Save Changes"}
+                  {isArabic ? "حفظ التعديلات والمواد" : "Save Changes & Subjects"}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: WhatsApp Multi-App Target Chooser */}
+      {showWhatsAppChooserModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-3xl p-5 sm:p-6 max-w-md w-full shadow-2xl animate-in fade-in space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-2xl bg-emerald-600 text-white flex items-center justify-center font-black shadow-xs">
+                  <Share2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-slate-900 text-sm">
+                    {isArabic ? "إرسال التقرير عبر الواتساب" : "Send Report via WhatsApp"}
+                  </h3>
+                  <p className="text-[11px] text-slate-500 font-medium">
+                    {isArabic ? "اختر تطبيق الواتساب أو الطريقة المفضلة لديك للإرسال" : "Choose which WhatsApp app or method to open"}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowWhatsAppChooserModal(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Target Information */}
+            <div className="p-3 rounded-2xl bg-emerald-50/70 border border-emerald-200/80 flex items-center justify-between text-xs">
+              <div>
+                <span className="text-[10.5px] font-bold text-emerald-800 block">
+                  {isArabic ? "الطالب المستلم:" : "Recipient Student:"}
+                </span>
+                <span className="font-black text-slate-900 text-xs">
+                  {pendingWhatsAppTargetStudent?.fullName || selectedStudent?.fullName || "الطالب"}
+                </span>
+              </div>
+
+              <div className="text-left font-mono text-[11px] font-bold text-emerald-700 bg-white px-2.5 py-1 rounded-xl border border-emerald-200 shadow-2xs">
+                {pendingWhatsAppTargetStudent?.whatsappGroupLink ||
+                 pendingWhatsAppTargetStudent?.parentContact ||
+                 (isArabic ? "مشاركة عامة" : "Direct share")}
+              </div>
+            </div>
+
+            {/* Application Options */}
+            <div className="space-y-2">
+              <label className="block font-black text-slate-700 text-xs">
+                {isArabic ? "اختر نوع الواتساب / وسيلة الإرسال:" : "Select WhatsApp Version / Mode:"}
+              </label>
+
+              {/* 1. System Chooser / Native Dialog (Android/iOS/App Chooser) */}
+              {"share" in navigator && (
+                <button
+                  type="button"
+                  onClick={() => handleSendViaWhatsAppMode("intent_android")}
+                  className="w-full p-3 rounded-2xl border-2 border-emerald-500 bg-emerald-500 hover:bg-emerald-600 text-white font-black text-xs transition flex items-center justify-between shadow-md shadow-emerald-500/20 group text-right"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center">
+                      <Smartphone className="w-4 h-4 text-white" />
+                    </div>
+                    <div>
+                      <div className="font-black text-xs flex items-center gap-1.5">
+                        <span>{isArabic ? "📱 اختيار التطبيق عبر الهاتف (نافذة النظام)" : "📱 System App Chooser"}</span>
+                        <span className="text-[9px] bg-white text-emerald-800 px-1.5 py-0.2 rounded-full font-black">
+                          {isArabic ? "موصى به" : "Recommended"}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-emerald-100 font-normal mt-0.5">
+                        {isArabic ? "يظهر لك كل تطبيقات الواتساب المثبتة (العادي، الأعمال، المنسوخ)" : "Shows all installed WhatsApp apps on device"}
+                      </p>
+                    </div>
+                  </div>
+                  <ExternalLink className="w-4 h-4 text-white/80 group-hover:translate-x-0.5 transition" />
+                </button>
+              )}
+
+              {/* 2. WhatsApp Business App */}
+              <button
+                type="button"
+                onClick={() => handleSendViaWhatsAppMode("business_scheme")}
+                className="w-full p-3 rounded-2xl border border-slate-200 hover:border-emerald-400 bg-white hover:bg-emerald-50/40 text-slate-800 font-bold text-xs transition flex items-center justify-between shadow-2xs group text-right"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center font-black text-sm">
+                    B
+                  </div>
+                  <div>
+                    <div className="font-bold text-slate-900 text-xs">
+                      {isArabic ? "واتساب الأعمال (WhatsApp Business)" : "WhatsApp Business"}
+                    </div>
+                    <p className="text-[10px] text-slate-500 mt-0.5">
+                      {isArabic ? "فتح المحادثة مباشرة في واتساب الأعمال (wa.me)" : "Direct launch for WhatsApp Business"}
+                    </p>
+                  </div>
+                </div>
+                <ExternalLink className="w-4 h-4 text-slate-400 group-hover:text-emerald-600 transition" />
+              </button>
+
+              {/* 3. Standard WhatsApp Mobile App */}
+              <button
+                type="button"
+                onClick={() => handleSendViaWhatsAppMode("app_scheme")}
+                className="w-full p-3 rounded-2xl border border-slate-200 hover:border-emerald-400 bg-white hover:bg-emerald-50/40 text-slate-800 font-bold text-xs transition flex items-center justify-between shadow-2xs group text-right"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold">
+                    <MessageSquare className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="font-bold text-slate-900 text-xs">
+                      {isArabic ? "واتساب العادي (WhatsApp Messenger)" : "WhatsApp Messenger"}
+                    </div>
+                    <p className="text-[10px] text-slate-500 mt-0.5">
+                      {isArabic ? "فتح تطبيق الواتساب الأساسي مباشرة (whatsapp://)" : "Open official WhatsApp application"}
+                    </p>
+                  </div>
+                </div>
+                <ExternalLink className="w-4 h-4 text-slate-400 group-hover:text-emerald-600 transition" />
+              </button>
+
+              {/* 4. WhatsApp Web (Desktop / Browser) */}
+              <button
+                type="button"
+                onClick={() => handleSendViaWhatsAppMode("web")}
+                className="w-full p-3 rounded-2xl border border-slate-200 hover:border-emerald-400 bg-white hover:bg-emerald-50/40 text-slate-800 font-bold text-xs transition flex items-center justify-between shadow-2xs group text-right"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
+                    <Globe className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="font-bold text-slate-900 text-xs">
+                      {isArabic ? "واتساب ويب بالمتصفح (WhatsApp Web)" : "WhatsApp Web (Browser)"}
+                    </div>
+                    <p className="text-[10px] text-slate-500 mt-0.5">
+                      {isArabic ? "مخصص للكمبيوتر والمتصفح (web.whatsapp.com)" : "Opens in browser web.whatsapp.com"}
+                    </p>
+                  </div>
+                </div>
+                <ExternalLink className="w-4 h-4 text-slate-400 group-hover:text-emerald-600 transition" />
+              </button>
+
+              {/* 5. Universal Link */}
+              <button
+                type="button"
+                onClick={() => handleSendViaWhatsAppMode("universal")}
+                className="w-full p-3 rounded-2xl border border-slate-200 hover:border-emerald-400 bg-white hover:bg-emerald-50/40 text-slate-800 font-bold text-xs transition flex items-center justify-between shadow-2xs group text-right"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center font-bold">
+                    <Share2 className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="font-bold text-slate-900 text-xs">
+                      {isArabic ? "الرابط العام التلقائي (Universal Link)" : "Universal WhatsApp Link"}
+                    </div>
+                    <p className="text-[10px] text-slate-500 mt-0.5">
+                      {isArabic ? "توجيه المتصفح لاختيار التطبيق المتوفر (api.whatsapp.com)" : "Let browser route automatically"}
+                    </p>
+                  </div>
+                </div>
+                <ExternalLink className="w-4 h-4 text-slate-400 group-hover:text-emerald-600 transition" />
+              </button>
+            </div>
+
+            {/* Quick Copy Report Fallback */}
+            <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (pendingWhatsAppText) {
+                    navigator.clipboard.writeText(pendingWhatsAppText);
+                    setWhatsappSentNotice(isArabic ? "تم نسخ نص التقرير للحافظة بنجاح!" : "Report text copied to clipboard!");
+                    setTimeout(() => setWhatsappSentNotice(""), 3500);
+                  }
+                }}
+                className="py-2 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs flex items-center gap-1.5 transition"
+              >
+                <Copy className="w-3.5 h-3.5" />
+                <span>{isArabic ? "نسخ نص التقرير فقط" : "Copy Text Only"}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowWhatsAppChooserModal(false)}
+                className="py-2 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs transition"
+              >
+                {isArabic ? "إغلاق" : "Close"}
+              </button>
+            </div>
           </div>
         </div>
       )}

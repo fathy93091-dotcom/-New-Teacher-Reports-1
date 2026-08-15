@@ -19,6 +19,20 @@ export type SubscriptionType = "monthly" | "lessons_count";
 
 export type PaymentPlan = "beginning_of_month" | "end_of_month" | "mixed";
 
+export interface StudentSubjectPlan {
+  id: string;
+  subject: string;
+  studyType: StudyType; // "group" | "private"
+  subscriptionType: SubscriptionType; // "monthly" (بالشهر) | "lessons_count" (بعدد الحصص)
+  paymentPlan: PaymentPlan; // "beginning_of_month" (أول الشهر) | "end_of_month" (آخر الشهر) | "mixed" (مختلط)
+  lessonCost: number; // سعر الحصة للمادة
+  totalPurchasedLessons?: number; // إجمالي الحصص المشتراة في الباقة
+  remainingLessons?: number; // الحصص المتبقية
+  totalPaidAmount?: number; // إجمالي المسدد لهذه المادة
+  totalAttendedLessons?: number; // إجمالي الحصص المنفذة لهذه المادة
+  notes?: string;
+}
+
 export interface Student {
   id: string;
   fullName: string;
@@ -29,6 +43,7 @@ export interface Student {
   groupId?: string;
   groupName?: string;
   subject: string;
+  subjects?: StudentSubjectPlan[]; // Multi-subject enrollment with individual subscription & payment systems
   status: StudentStatus;
   
   // Subscription & Payment System
@@ -45,16 +60,24 @@ export interface Student {
   remainingBalance: number; // calculated = remainingLessons * lessonCost
   
   notes?: string;
+  scheduleSlots?: ScheduleSlot[]; // Direct custom schedules for this student
   createdAt: string;
+}
+
+export interface ScheduleSlot {
+  day: string; // e.g. "السبت", "الأحد"
+  time: string; // e.g. "17:00", "19:00", "05:00 PM"
+  durationMinutes?: number; // e.g. 60, 90
 }
 
 export interface Group {
   id: string;
   name: string; // e.g., "مجموعة الفيزياء أ"
   subject: string;
-  days: string[]; // e.g., ["الأحد", "الأربعاء"] or ["Sun", "Wed"]
-  time: string; // e.g., "16:00"
+  days: string[]; // e.g., ["السبت", "الأحد"]
+  time: string; // default/fallback time e.g., "16:00"
   durationMinutes: number; // e.g., 90
+  scheduleSlots?: ScheduleSlot[]; // mixed/custom per-day times e.g. [{day: "السبت", time: "17:00"}, {day: "الأحد", time: "19:00"}]
   studentIds: string[];
   status: "active" | "paused";
   whatsappGroupLink?: string; // WhatsApp group link
@@ -66,9 +89,10 @@ export interface PrivateLesson {
   studentId: string;
   studentName: string;
   subject: string;
-  days: string[];
-  time: string;
+  days: string[]; // e.g., ["السبت", "الأحد"]
+  time: string; // default/fallback time e.g., "16:00"
   durationMinutes: number;
+  scheduleSlots?: ScheduleSlot[]; // mixed/custom per-day times e.g. [{day: "السبت", time: "17:00"}, {day: "الأحد", time: "19:00"}]
   status: "active" | "paused";
   whatsappGroupLink?: string; // WhatsApp group link
   createdAt: string;
@@ -79,12 +103,14 @@ export interface AttendanceRecord {
   lessonId: string;
   studentId: string;
   studentName?: string;
+  subject?: string;
+  lessonNumber?: number;
   attendance: AttendanceStatus;
   homeworkStatus: HomeworkStatus;
   teacherNotes?: string;
   aiInstructions?: string;
   generatedReportText?: string;
-  deducted: boolean; // whether 1 lesson was deducted upon "present"
+  deducted: boolean; // whether 1 lesson was deducted upon "present" or billable absent
   date: string;
 }
 
@@ -142,6 +168,10 @@ export interface GeneratedReport {
   studentName: string;
   date: string;
   subject: string;
+  lessonNumber?: number;
+  attendance?: AttendanceStatus;
+  deductCost?: boolean;
+  homeworkStatus?: HomeworkStatus;
   teacherNotes: string;
   aiInstructions: string;
   reportText?: string;
