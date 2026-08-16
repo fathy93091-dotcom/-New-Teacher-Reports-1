@@ -374,6 +374,16 @@ export function App() {
   const handleDeleteStudent = (studentId: string) => {
     setStudents(prev => prev.filter(s => s.id !== studentId));
     setPrivateLessons(prev => prev.filter(p => p.studentId !== studentId));
+    setGroups(prev =>
+      prev.map(g => ({
+        ...g,
+        studentIds: (g.studentIds || []).filter(id => id !== studentId)
+      }))
+    );
+    setAttendanceRecords(prev => prev.filter(a => a.studentId !== studentId));
+    setExamRecords(prev => prev.filter(e => e.studentId !== studentId));
+    setPaymentTransactions(prev => prev.filter(p => p.studentId !== studentId));
+    setReports(prev => prev.filter(r => r.studentId !== studentId));
   };
 
   const handleUpdateStudentStatus = (studentId: string, status: StudentStatus) => {
@@ -385,47 +395,42 @@ export function App() {
   const handleRecordPayment = (
     studentId: string,
     amount: number,
-    lessonsCount: number,
-    notes?: string
+    notes?: string,
+    date?: string
   ) => {
     const student = students.find(s => s.id === studentId);
-    if (!student) return;
+    if (!student || amount <= 0) return;
 
-    const isLessonsCount = student.subscriptionType === "lessons_count";
-    const effectiveLessons = isLessonsCount ? Math.max(1, lessonsCount || 1) : 0;
-    const lessonCost = student.lessonCost || (effectiveLessons > 0 ? amount / effectiveLessons : 100);
+    const paymentDate = date || new Date().toISOString().split("T")[0];
 
     const newTransaction: PaymentTransaction = {
       id: `pay_${Date.now()}`,
       studentId,
       studentName: student.fullName,
       amount,
-      lessonsCovered: effectiveLessons,
-      lessonCost,
-      date: new Date().toISOString().split("T")[0],
+      date: paymentDate,
       notes
     };
 
     setPaymentTransactions(prev => [newTransaction, ...prev]);
 
     // Update Student Balance & Payment Status
-    const updatedRemainingLessons = isLessonsCount ? (student.remainingLessons + effectiveLessons) : 0;
-    const updatedRemainingBalance = isLessonsCount ? (updatedRemainingLessons * lessonCost) : 0;
-
     setStudents(prev =>
-      prev.map(s =>
-        s.id === studentId
-          ? {
-              ...s,
-              paymentStatus: "paid",
-              totalPaidAmount: (s.totalPaidAmount || 0) + amount,
-              totalPurchasedLessons: isLessonsCount ? ((s.totalPurchasedLessons || 0) + effectiveLessons) : (s.totalPurchasedLessons || 0),
-              lessonCost: s.lessonCost || lessonCost,
-              remainingLessons: updatedRemainingLessons,
-              remainingBalance: updatedRemainingBalance
-            }
-          : s
-      )
+      prev.map(s => {
+        if (s.id === studentId) {
+          const newTotalPaid = (s.totalPaidAmount || 0) + amount;
+          const attended = s.totalAttendedLessons || 0;
+          const cost = s.lessonCost || 100;
+          const isPaid = newTotalPaid >= (attended * cost);
+
+          return {
+            ...s,
+            totalPaidAmount: newTotalPaid,
+            paymentStatus: isPaid ? "paid" : "unpaid"
+          };
+        }
+        return s;
+      })
     );
   };
 
@@ -449,7 +454,7 @@ export function App() {
     setExamRecords(prev => [newExam, ...prev]);
   };
 
-  // Main Attendance & Auto-Deduction Engine
+  // Main Attendance & Notes Engine
   const handleSaveAttendanceAndNotes = (
     lessonId: string,
     attendanceList: { studentId: string; attendance: AttendanceStatus; homeworkStatus: HomeworkStatus }[],
@@ -465,28 +470,19 @@ export function App() {
 
     attendanceList.forEach(item => {
       const studentIndex = updatedStudents.findIndex(s => s.id === item.studentId);
-      let isDeducted = false;
+      const isDeducted = item.attendance === "present";
 
-      if (studentIndex !== -1) {
+      if (studentIndex !== -1 && isDeducted) {
         const student = updatedStudents[studentIndex];
+        const newAttended = (student.totalAttendedLessons || 0) + 1;
+        const totalPaid = student.totalPaidAmount || 0;
+        const totalCost = newAttended * (student.lessonCost || 100);
 
-        // Deduct 1 lesson if Present
-        if (item.attendance === "present") {
-          if (student.subscriptionType === "lessons_count" && student.remainingLessons > 0) {
-            const newRemaining = student.remainingLessons - 1;
-            const newBalance = newRemaining * student.lessonCost;
-
-            updatedStudents[studentIndex] = {
-              ...student,
-              remainingLessons: newRemaining,
-              remainingBalance: newBalance,
-              paymentStatus: newRemaining <= 0 ? "unpaid" : "paid"
-            };
-            isDeducted = true;
-          } else if (student.subscriptionType === "monthly") {
-            isDeducted = true;
-          }
-        }
+        updatedStudents[studentIndex] = {
+          ...student,
+          totalAttendedLessons: newAttended,
+          paymentStatus: totalPaid >= totalCost ? "paid" : "unpaid"
+        };
       }
 
       newRecords.push({
@@ -547,48 +543,29 @@ export function App() {
         prev.map(s => {
           if (s.id === reportData.studentId) {
             let updatedSubjects = s.subjects;
-            let targetCost = s.lessonCost;
 
             if (s.subjects && s.subjects.length > 0 && reportData.subject) {
               const normSubj = reportData.subject.trim().toLowerCase();
               updatedSubjects = s.subjects.map(sp => {
                 if (sp.subject.trim().toLowerCase() === normSubj) {
-                  targetCost = sp.lessonCost || targetCost;
-                  if (sp.subscriptionType === "lessons_count" && (sp.remainingLessons ?? 0) > 0) {
-                    const newRem = (sp.remainingLessons ?? 0) - 1;
-                    return {
-                      ...sp,
-                      remainingLessons: newRem,
-                      totalAttendedLessons: (sp.totalAttendedLessons ?? 0) + 1
-                    };
-                  } else {
-                    return {
-                      ...sp,
-                      totalAttendedLessons: (sp.totalAttendedLessons ?? 0) + 1
-                    };
-                  }
+                  return {
+                    ...sp,
+                    totalAttendedLessons: (sp.totalAttendedLessons ?? 0) + 1
+                  };
                 }
                 return sp;
               });
             }
 
-            let newRemainingLessons = s.remainingLessons;
-            let newBalance = s.remainingBalance;
-            let newPaymentStatus = s.paymentStatus;
-
-            if (s.subscriptionType === "lessons_count" && s.remainingLessons > 0) {
-              newRemainingLessons = s.remainingLessons - 1;
-              newBalance = newRemainingLessons * (s.lessonCost || targetCost || 100);
-              newPaymentStatus = newRemainingLessons <= 0 ? "unpaid" : "paid";
-            }
+            const newAttended = (s.totalAttendedLessons || 0) + 1;
+            const totalPaid = s.totalPaidAmount || 0;
+            const totalCost = newAttended * (s.lessonCost || 100);
 
             return {
               ...s,
               subjects: updatedSubjects,
-              remainingLessons: newRemainingLessons,
-              remainingBalance: newBalance,
-              paymentStatus: newPaymentStatus,
-              totalAttendedLessons: (s.totalAttendedLessons || 0) + 1
+              totalAttendedLessons: newAttended,
+              paymentStatus: totalPaid >= totalCost ? "paid" : "unpaid"
             };
           }
           return s;

@@ -66,28 +66,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     item => item.summary.amountDue > 0
   );
 
-  const allLowBalanceStudents = studentFinancialSummaries.filter(
-    item => item.student.subscriptionType === "lessons_count" && item.summary.remainingLessons <= 1 && item.summary.amountDue === 0
-  );
-
   // Filter out dismissed alerts
   const unpaidStudents = allUnpaidStudents.filter(
     item => !dismissedNotificationIds.includes(`unpaid_${item.student.id}`)
   );
 
-  const lowBalanceStudents = allLowBalanceStudents.filter(
-    item => !dismissedNotificationIds.includes(`low_balance_${item.student.id}`)
-  );
-
-  const totalGeneratedAlerts = allUnpaidStudents.length + allLowBalanceStudents.length;
-  const paymentAlertsCount = unpaidStudents.length + lowBalanceStudents.length;
+  const totalGeneratedAlerts = allUnpaidStudents.length;
+  const paymentAlertsCount = unpaidStudents.length;
   const dismissedCount = totalGeneratedAlerts - paymentAlertsCount;
 
   const handleDismissAll = () => {
     if (onDismissAllNotifications) {
       const idsToDismiss = [
-        ...unpaidStudents.map(u => `unpaid_${u.student.id}`),
-        ...lowBalanceStudents.map(l => `low_balance_${l.student.id}`)
+        ...unpaidStudents.map(u => `unpaid_${u.student.id}`)
       ];
       onDismissAllNotifications(idsToDismiss);
     }
@@ -428,45 +419,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                           </button>
                         )}
                         <ChevronRight className="w-3.5 h-3.5 text-rose-400" />
-                      </div>
-                    </div>
-                  ))}
-
-                  {lowBalanceStudents.map(({ student, summary }) => (
-                    <div
-                      key={student.id}
-                      onClick={() => onNavigateToTab("finance")}
-                      className="p-2.5 rounded-xl bg-amber-50 border border-amber-200/80 hover:bg-amber-100/60 transition cursor-pointer flex items-center justify-between gap-2 group"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <p className="font-bold text-amber-900 text-xs truncate">{student.fullName}</p>
-                          <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-200/80 text-amber-800">
-                            {isArabic ? "رصيد منخفض" : "Low Balance"}
-                          </span>
-                        </div>
-                        <p className="text-[10px] text-amber-800 font-semibold mt-0.5">
-                          {isArabic
-                            ? `رصيد متبقٍ: ${summary.remainingLessons} حصة فقط (${summary.remainingBalance} ج.م)`
-                            : `Low Balance (${summary.remainingLessons} left)`}
-                        </p>
-                      </div>
-
-                      <div className="flex items-center gap-1 shrink-0">
-                        {onDismissNotification && (
-                          <button
-                            type="button"
-                            onClick={e => {
-                              e.stopPropagation();
-                              onDismissNotification(`low_balance_${student.id}`);
-                            }}
-                            title={isArabic ? "حذف هذا التنبيه" : "Dismiss alert"}
-                            className="w-6 h-6 rounded-lg bg-white hover:bg-amber-600 text-amber-500 hover:text-white border border-amber-200 flex items-center justify-center transition"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        )}
-                        <ChevronRight className="w-3.5 h-3.5 text-amber-400" />
                       </div>
                     </div>
                   ))}

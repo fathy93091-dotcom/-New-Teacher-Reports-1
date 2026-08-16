@@ -54,9 +54,7 @@ import {
   StudentStatus,
   PaymentStatus,
   AppSettings,
-  ReportAttachment,
-  SubscriptionType,
-  PaymentPlan
+  ReportAttachment
 } from "../types";
 import { calculateStudentFinancials } from "../lib/financeUtils";
 
@@ -115,7 +113,7 @@ interface StudentsViewProps {
   onEditStudent?: (studentId: string, student: Partial<Student>) => void;
   onDeleteStudent?: (studentId: string) => void;
   onUpdateStudentStatus: (studentId: string, status: StudentStatus) => void;
-  onRecordPayment: (studentId: string, amount: number, lessonsCount: number, notes?: string) => void;
+  onRecordPayment: (studentId: string, amount: number, notes?: string, date?: string) => void;
   onAddExamRecord?: (studentId: string, examName: string, score: number, totalScore: number, date: string) => void;
   onAddReport: (report: Omit<GeneratedReport, "id" | "createdAt">) => void;
   onDeleteReport: (reportId: string) => void;
@@ -395,10 +393,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     id,
     subject: name,
     studyType: "private",
-    subscriptionType: "monthly",
-    paymentPlan: "beginning_of_month",
-    lessonCost: 100,
-    totalPurchasedLessons: 8
+    lessonCost: 100
   });
 
   const [studentSubjects, setStudentSubjects] = useState<StudentSubjectPlan[]>([
@@ -427,24 +422,10 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     );
   };
 
-  // Helper functions for Subscription & Payment labels
-  const getSubscriptionLabel = (type?: SubscriptionType) => {
-    if (type === "monthly") return isArabic ? "📅 بالشهر (شهري)" : "📅 Monthly";
-    if (type === "lessons_count") return isArabic ? "🔢 بعدد الحصص" : "🔢 Package";
-    return isArabic ? "📅 بالشهر (شهري)" : "📅 Monthly";
-  };
-
-  const getPaymentPlanLabel = (plan?: PaymentPlan) => {
-    if (plan === "beginning_of_month") return isArabic ? "🟢 أول الشهر (مقدم)" : "🟢 Prepaid";
-    if (plan === "end_of_month") return isArabic ? "🟡 آخر الشهر (مؤخر)" : "🟡 Postpaid";
-    if (plan === "mixed") return isArabic ? "🔵 دفع مختلط" : "🔵 Hybrid";
-    return isArabic ? "🟢 أول الشهر" : "🟢 Prepaid";
-  };
-
   // Add Payment Modal inside Profile
   const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [paymentAmount, setPaymentAmount] = useState(800);
-  const [paymentLessonsCount, setPaymentLessonsCount] = useState(8);
+  const [paymentAmount, setPaymentAmount] = useState(100);
+  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split("T")[0]);
   const [paymentNotes, setPaymentNotes] = useState("");
 
   // Add Exam Modal inside Profile
@@ -484,10 +465,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
           id: `subj_edit_1`,
           subject: st.subject || "الرياضيات",
           studyType: st.studyType || "private",
-          subscriptionType: st.subscriptionType || "monthly",
-          paymentPlan: st.paymentPlan || "beginning_of_month",
-          lessonCost: st.lessonCost || 100,
-          totalPurchasedLessons: st.totalPurchasedLessons || 8
+          lessonCost: st.lessonCost || 100
         }
       ]);
     }
@@ -536,9 +514,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       studyType: primaryStudyType,
       subject: subjectsSummary,
       subjects: editStudentSubjects,
-      subscriptionType: primarySub.subscriptionType,
-      paymentPlan: primarySub.paymentPlan,
-      lessonCost: primarySub.lessonCost,
+      lessonCost: primarySub.lessonCost || 100,
       notes: editNotes
     };
 
@@ -549,16 +525,11 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     setShowEditStudentModal(false);
   };
 
+  // Delete Student Confirmation Dialog State
+  const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
+
   const handleDeleteStudentClick = (st: Student) => {
-    const confirmMsg = isArabic
-      ? `هل أنت متأكد من رغبتك في حذف الطالب "${st.fullName}" نهائياً من النظام؟`
-      : `Are you sure you want to permanently delete student "${st.fullName}"?`;
-    if (window.confirm(confirmMsg)) {
-      if (onDeleteStudent) {
-        onDeleteStudent(st.id);
-      }
-      setSelectedStudent(null);
-    }
+    setStudentToDelete(st);
   };
 
   // Filter Logic
@@ -589,30 +560,6 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     const primaryStudyType = studentSubjects.some(s => s.studyType === "group") ? "group" : "private";
     const primarySub = studentSubjects[0];
 
-    // Compute aggregate initial numbers
-    let totalInitialPaid = 0;
-    let totalPurchased = 0;
-    let totalRemainingLessons = 0;
-    let totalRemainingBalance = 0;
-
-    studentSubjects.forEach(s => {
-      const cost = Math.max(1, Number(s.lessonCost) || 100);
-      const isPackage = s.subscriptionType === "lessons_count";
-      const lessons = isPackage ? Math.max(1, Number(s.totalPurchasedLessons) || 8) : 0;
-      
-      if (isPackage) {
-        totalPurchased += lessons;
-        totalRemainingLessons += lessons;
-        totalRemainingBalance += lessons * cost;
-      }
-
-      if (s.paymentPlan === "beginning_of_month") {
-        totalInitialPaid += (isPackage ? lessons : 4) * cost;
-      }
-    });
-
-    const isPaidInitially = studentSubjects.some(s => s.paymentPlan === "beginning_of_month");
-
     onAddStudent({
       fullName: fullName.trim(),
       studentNumber: studentNumber.trim() || undefined,
@@ -624,15 +571,12 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       studyType: primaryStudyType,
       subject: subjectsSummary,
       subjects: studentSubjects,
-      subscriptionType: primarySub.subscriptionType,
-      paymentPlan: primarySub.paymentPlan,
       status: "active",
-      paymentStatus: isPaidInitially ? "paid" : "unpaid",
-      totalPaidAmount: totalInitialPaid,
-      totalPurchasedLessons: totalPurchased,
+      paymentStatus: "unpaid",
+      totalPaidAmount: 0,
       lessonCost: primarySub.lessonCost || 100,
-      remainingLessons: totalRemainingLessons,
-      remainingBalance: totalRemainingBalance,
+      remainingLessons: 0,
+      remainingBalance: 0,
       notes
     });
 
@@ -666,24 +610,16 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     e.preventDefault();
     if (!selectedStudent || paymentAmount <= 0) return;
 
-    const isMonthly = selectedStudent.subscriptionType === "monthly";
-    const effectiveLessons = isMonthly ? 0 : Math.max(1, paymentLessonsCount || 1);
-    const updatedCost = selectedStudent.lessonCost || (effectiveLessons > 0 ? paymentAmount / effectiveLessons : 100);
-
-    onRecordPayment(selectedStudent.id, paymentAmount, effectiveLessons, paymentNotes);
+    onRecordPayment(selectedStudent.id, paymentAmount, paymentNotes, paymentDate);
     setShowPaymentModal(false);
     
     // Update local copy of selectedStudent for UI refresh
-    const updatedLessons = isMonthly ? 0 : (selectedStudent.remainingLessons + effectiveLessons);
+    const newTotalPaid = (selectedStudent.totalPaidAmount || 0) + paymentAmount;
     setSelectedStudent({
       ...selectedStudent,
-      paymentStatus: "paid",
-      totalPaidAmount: (selectedStudent.totalPaidAmount || 0) + paymentAmount,
-      totalPurchasedLessons: isMonthly ? (selectedStudent.totalPurchasedLessons || 0) : (selectedStudent.totalPurchasedLessons + effectiveLessons),
-      lessonCost: updatedCost,
-      remainingLessons: updatedLessons,
-      remainingBalance: updatedLessons * updatedCost
+      totalPaidAmount: newTotalPaid
     });
+    setPaymentNotes("");
   };
 
   const handleExamSubmit = (e: React.FormEvent) => {
@@ -991,6 +927,18 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                   >
                     <MessageSquare className="w-3.5 h-3.5" />
                   </button>
+
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setStudentToDelete(student);
+                    }}
+                    title={isArabic ? "حذف الطالب نهائياً" : "Delete Student"}
+                    className="p-1 rounded-lg bg-rose-50 text-rose-500 hover:text-rose-700 hover:bg-rose-100 transition shrink-0"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               </div>
             );
@@ -1149,6 +1097,17 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                             className="p-1 rounded-lg bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition"
                           >
                             <MessageSquare className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setStudentToDelete(student);
+                            }}
+                            title={isArabic ? "حذف الطالب" : "Delete Student"}
+                            className="p-1 rounded-lg bg-rose-50 text-rose-500 hover:text-rose-700 hover:bg-rose-100 transition"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       </td>
@@ -1440,12 +1399,11 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                         </div>
                       </div>
 
-                      {/* Row 2: Price + Subscription Mode + Payment Plan in a sleek unified row */}
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1.5 border-t border-slate-200/60 items-center">
-                        {/* 1. Price */}
-                        <div className="flex items-center gap-1 bg-white px-2 py-1 rounded-xl border border-slate-200">
-                          <span className="text-[10px] font-bold text-slate-400 shrink-0">
-                            {isArabic ? "سعر الحصة:" : "Cost:"}
+                      {/* Row 2: Lesson Cost */}
+                      <div className="pt-1.5 border-t border-slate-200/60 flex items-center justify-between">
+                        <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-xl border border-slate-200 w-full sm:w-48">
+                          <span className="text-[11px] font-bold text-slate-500 shrink-0">
+                            {isArabic ? "سعر الحصة:" : "Lesson Cost:"}
                           </span>
                           <input
                             type="number"
@@ -1456,89 +1414,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                             className="w-full font-black text-slate-800 text-xs focus:outline-none"
                             placeholder="100"
                           />
-                          <span className="text-[9.5px] font-bold text-slate-400 shrink-0">ج.م</span>
-                        </div>
-
-                        {/* 2. Subscription Type (Monthly vs Package) */}
-                        <div className="flex items-center gap-1">
-                          <div className="inline-flex w-full p-0.5 rounded-lg bg-slate-200/80 text-[10px] font-bold">
-                            <button
-                              type="button"
-                              onClick={() => handleUpdateSubjectField(idx, { subscriptionType: "monthly" })}
-                              className={`flex-1 py-1 rounded-md transition text-center ${
-                                sub.subscriptionType === "monthly"
-                                  ? "bg-blue-600 text-white shadow-2xs font-black"
-                                  : "text-slate-600 hover:text-slate-900"
-                              }`}
-                            >
-                              📅 {isArabic ? "شهري" : "Monthly"}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleUpdateSubjectField(idx, { subscriptionType: "lessons_count" })}
-                              className={`flex-1 py-1 rounded-md transition text-center ${
-                                sub.subscriptionType === "lessons_count"
-                                  ? "bg-blue-600 text-white shadow-2xs font-black"
-                                  : "text-slate-600 hover:text-slate-900"
-                              }`}
-                            >
-                              🔢 {isArabic ? "باقة" : "Pack"}
-                            </button>
-                          </div>
-
-                          {sub.subscriptionType === "lessons_count" && (
-                            <div className="flex items-center gap-1 bg-white px-2 py-1 rounded-xl border border-blue-200 w-24 shrink-0">
-                              <input
-                                type="number"
-                                min="1"
-                                value={sub.totalPurchasedLessons || 8}
-                                onChange={e => handleUpdateSubjectField(idx, { totalPurchasedLessons: Number(e.target.value) })}
-                                className="w-full font-bold text-blue-700 text-xs focus:outline-none"
-                                title={isArabic ? "عدد حصص الباقة" : "Lessons Count"}
-                              />
-                              <span className="text-[9px] font-bold text-blue-500 shrink-0">حصة</span>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* 3. Payment Timing (Prepaid / Postpaid / Split) */}
-                        <div className="inline-flex p-0.5 rounded-lg bg-slate-200/80 text-[10px] font-bold">
-                          <button
-                            type="button"
-                            onClick={() => handleUpdateSubjectField(idx, { paymentPlan: "beginning_of_month" })}
-                            className={`flex-1 py-1 rounded-md transition text-center ${
-                              sub.paymentPlan === "beginning_of_month"
-                                ? "bg-emerald-600 text-white shadow-2xs font-black"
-                                : "text-slate-600 hover:text-slate-900"
-                            }`}
-                            title={isArabic ? "دفع أول الشهر (مقدماً)" : "Prepaid"}
-                          >
-                            🟢 {isArabic ? "مقدم" : "Prepaid"}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleUpdateSubjectField(idx, { paymentPlan: "end_of_month" })}
-                            className={`flex-1 py-1 rounded-md transition text-center ${
-                              sub.paymentPlan === "end_of_month"
-                                ? "bg-amber-600 text-white shadow-2xs font-black"
-                                : "text-slate-600 hover:text-slate-900"
-                            }`}
-                            title={isArabic ? "دفع آخر الشهر (مؤخر)" : "Postpaid"}
-                          >
-                            🟡 {isArabic ? "مؤخر" : "Postpaid"}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleUpdateSubjectField(idx, { paymentPlan: "mixed" })}
-                            className={`flex-1 py-1 rounded-md transition text-center ${
-                              sub.paymentPlan === "mixed"
-                                ? "bg-indigo-600 text-white shadow-2xs font-black"
-                                : "text-slate-600 hover:text-slate-900"
-                            }`}
-                            title={isArabic ? "دفع مختلط (دفعات)" : "Split"}
-                          >
-                            🔵 {isArabic ? "دفعات" : "Split"}
-                          </button>
+                          <span className="text-[10px] font-bold text-slate-400 shrink-0">ج.م</span>
                         </div>
                       </div>
                     </div>
@@ -1721,21 +1597,15 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
             {/* Tab 1: Financial Balance & Payments */}
             {profileTab === "finance" && (
               <div className="space-y-4">
-                {/* Subscription & Payment Plan Summary Card */}
+                {/* Unified Financial Summary Card */}
                 {(() => {
                   const finSummary = calculateStudentFinancials(selectedStudent, attendanceRecords);
                   return (
                     <>
                       <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-50/80 via-slate-50 to-indigo-50/80 border border-blue-100 flex flex-wrap items-center justify-between gap-3 text-xs">
                         <div className="space-y-1">
-                          <span className="text-[11px] font-bold text-slate-500 block">{isArabic ? "نظام الاشتراك والدفع الإجمالي للطالب:" : "Student Overall Subscription & Plan:"}</span>
+                          <span className="text-[11px] font-bold text-slate-500 block">{isArabic ? "الحالة المالية للطالب:" : "Student Financial Status:"}</span>
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="px-2.5 py-1 rounded-xl bg-blue-600 text-white font-bold text-xs shadow-2xs">
-                              {getSubscriptionLabel(selectedStudent.subscriptionType)}
-                            </span>
-                            <span className="px-2.5 py-1 rounded-xl bg-emerald-600 text-white font-bold text-xs shadow-2xs">
-                              {getPaymentPlanLabel(selectedStudent.paymentPlan)}
-                            </span>
                             <span className={`px-2.5 py-1 rounded-xl font-bold text-xs shadow-2xs ${
                               finSummary.statusBadge.color === "emerald"
                                 ? "bg-emerald-100 text-emerald-800"
@@ -1756,7 +1626,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 
                       <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-5 grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
                         <div className="bg-white p-3 rounded-xl border border-slate-100">
-                          <p className="text-[11px] font-bold text-slate-500">{isArabic ? "متوسط سعر الحصة" : "Avg Lesson Cost"}</p>
+                          <p className="text-[11px] font-bold text-slate-500">{isArabic ? "سعر الحصة" : "Lesson Cost"}</p>
                           <p className="text-sm font-black text-slate-800 mt-1">
                             {finSummary.lessonCost} {isArabic ? "ج.م" : "EGP"}
                           </p>
@@ -1781,20 +1651,11 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 
                         <div className="bg-white p-3 rounded-xl border border-slate-100">
                           <p className="text-[11px] font-bold text-slate-500">
-                            {selectedStudent.subscriptionType === "lessons_count"
-                              ? (isArabic ? "الحصص المتبقية" : "Lessons Left")
-                              : (finSummary.amountDue > 0 ? (isArabic ? "المستحق للسداد" : "Due Amount") : (isArabic ? "الرصيد المتبقي" : "Credit Left"))}
+                            {finSummary.amountDue > 0 ? (isArabic ? "المستحق للسداد" : "Due Amount") : (isArabic ? "الرصيد المتبقي" : "Credit Left")}
                           </p>
-                          <p className={`text-sm font-black mt-1 ${finSummary.amountDue > 0 ? "text-rose-600" : "text-indigo-600"}`}>
-                            {selectedStudent.subscriptionType === "lessons_count"
-                              ? `${finSummary.remainingLessons} ${isArabic ? "حصة" : "lss"}`
-                              : (finSummary.amountDue > 0 ? `${finSummary.amountDue} ج.م` : `${finSummary.creditRemaining} ج.م`)}
+                          <p className={`text-sm font-black mt-1 ${finSummary.amountDue > 0 ? "text-rose-600" : "text-emerald-700"}`}>
+                            {finSummary.amountDue > 0 ? `${finSummary.amountDue} ج.م` : `${finSummary.creditRemaining} ج.م`}
                           </p>
-                          {selectedStudent.subscriptionType === "lessons_count" && (
-                            <p className="text-[9.5px] text-slate-400 font-bold mt-0.5">
-                              ({finSummary.remainingBalance} ج.م)
-                            </p>
-                          )}
                         </div>
                       </div>
 
@@ -1815,14 +1676,6 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                                   <div className="flex items-center gap-1.5">
                                     <span className="text-sm">{subDet.studyType === "group" ? "👥" : "👤"}</span>
                                     <span className="font-bold text-slate-900 text-xs">{subDet.subject}</span>
-                                  </div>
-                                  <div className="flex items-center gap-1">
-                                    <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-bold text-[9px]">
-                                      {getSubscriptionLabel(subDet.subscriptionType)}
-                                    </span>
-                                    <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 font-bold text-[9px]">
-                                      {getPaymentPlanLabel(subDet.paymentPlan)}
-                                    </span>
                                   </div>
                                 </div>
 
@@ -3014,42 +2867,12 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
               <h3 className="font-bold text-slate-900 text-base">
                 {isArabic ? `تسجيل دفعة مالية لـ ${selectedStudent.fullName}` : "Record Payment"}
               </h3>
-              <span className="text-[11px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full">
-                {selectedStudent.subscriptionType === "monthly"
-                  ? (isArabic ? "📅 اشتراك شهري" : "Monthly")
-                  : (isArabic ? "🔢 باقة حصص" : "Package")}
-              </span>
             </div>
 
             <form onSubmit={handlePaymentSubmit} className="space-y-3 text-xs">
-              <div className="p-2.5 rounded-xl bg-blue-50/60 border border-blue-100 flex items-center justify-between">
-                <span className="font-bold text-slate-600">{isArabic ? "سعر الحصة المسجل:" : "Lesson Cost:"}</span>
-                <span className="font-black text-blue-800 text-sm">{selectedStudent.lessonCost || 100} {isArabic ? "ج.م" : "EGP"}</span>
-              </div>
-
-              {selectedStudent.subscriptionType === "lessons_count" && (
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">
-                    {isArabic ? "عدد الحصص التي يغطيها المبلغ" : "Number of Covered Lessons"}
-                  </label>
-                  <input
-                    type="number"
-                    required
-                    min="1"
-                    value={paymentLessonsCount}
-                    onChange={e => {
-                      const count = Number(e.target.value);
-                      setPaymentLessonsCount(count);
-                      setPaymentAmount(count * (selectedStudent.lessonCost || 100));
-                    }}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold text-slate-800 focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-              )}
-
               <div>
                 <label className="block font-bold text-slate-700 mb-1">
-                  {isArabic ? "المبلغ المدفوع (بالجنيه)" : "Amount Paid (EGP)"}
+                  {isArabic ? "المبلغ المدفوع (بالجنيه) *" : "Amount Paid (EGP) *"}
                 </label>
                 <input
                   type="number"
@@ -3061,14 +2884,18 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                 />
               </div>
 
-              {selectedStudent.subscriptionType === "lessons_count" && paymentAmount > 0 && paymentLessonsCount > 0 && (
-                <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-700 font-medium">
-                  {isArabic ? "قيمة الحصة المحسوبة:" : "Lesson Cost:"}{" "}
-                  <span className="font-black text-blue-700">
-                    {Math.round(paymentAmount / paymentLessonsCount)} {isArabic ? "ج.م/حصة" : "EGP/lesson"}
-                  </span>
-                </div>
-              )}
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">
+                  {isArabic ? "تاريخ التحصيل" : "Payment Date"}
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={paymentDate}
+                  onChange={e => setPaymentDate(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-semibold text-slate-800 focus:outline-none focus:border-blue-500"
+                />
+              </div>
 
               <div>
                 <label className="block font-bold text-slate-700 mb-1">
@@ -3078,7 +2905,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                   type="text"
                   value={paymentNotes}
                   onChange={e => setPaymentNotes(e.target.value)}
-                  placeholder={isArabic ? "سداد رسوم الشهر الحالي، كاش، تحويل بنكي..." : "Payment notes..."}
+                  placeholder={isArabic ? "سداد نقدي، تحويل فودافون كاش، إنستاباي..." : "Payment notes..."}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500"
                 />
               </div>
@@ -3093,7 +2920,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-md shadow-blue-600/30"
+                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-md shadow-emerald-600/30"
                 >
                   {isArabic ? "حفظ الدفعة" : "Save Payment"}
                 </button>
@@ -3448,12 +3275,11 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                         </div>
                       </div>
 
-                      {/* Row 2: Price + Subscription Mode + Payment Plan in a sleek unified row */}
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1.5 border-t border-slate-200/60 items-center">
-                        {/* 1. Price */}
-                        <div className="flex items-center gap-1 bg-white px-2 py-1 rounded-xl border border-slate-200">
-                          <span className="text-[10px] font-bold text-slate-400 shrink-0">
-                            {isArabic ? "سعر الحصة:" : "Cost:"}
+                      {/* Row 2: Lesson Cost */}
+                      <div className="pt-1.5 border-t border-slate-200/60 flex items-center justify-between">
+                        <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-xl border border-slate-200 w-full sm:w-48">
+                          <span className="text-[11px] font-bold text-slate-500 shrink-0">
+                            {isArabic ? "سعر الحصة:" : "Lesson Cost:"}
                           </span>
                           <input
                             type="number"
@@ -3463,89 +3289,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                             onChange={e => handleUpdateEditSubjectField(idx, { lessonCost: Number(e.target.value) })}
                             className="w-full font-black text-slate-800 text-xs focus:outline-none"
                           />
-                          <span className="text-[9.5px] font-bold text-slate-400 shrink-0">ج.م</span>
-                        </div>
-
-                        {/* 2. Subscription Type (Monthly vs Package) */}
-                        <div className="flex items-center gap-1">
-                          <div className="inline-flex w-full p-0.5 rounded-lg bg-slate-200/80 text-[10px] font-bold">
-                            <button
-                              type="button"
-                              onClick={() => handleUpdateEditSubjectField(idx, { subscriptionType: "monthly" })}
-                              className={`flex-1 py-1 rounded-md transition text-center ${
-                                sub.subscriptionType === "monthly"
-                                  ? "bg-blue-600 text-white shadow-2xs font-black"
-                                  : "text-slate-600 hover:text-slate-900"
-                              }`}
-                            >
-                              📅 {isArabic ? "شهري" : "Monthly"}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleUpdateEditSubjectField(idx, { subscriptionType: "lessons_count" })}
-                              className={`flex-1 py-1 rounded-md transition text-center ${
-                                sub.subscriptionType === "lessons_count"
-                                  ? "bg-blue-600 text-white shadow-2xs font-black"
-                                  : "text-slate-600 hover:text-slate-900"
-                              }`}
-                            >
-                              🔢 {isArabic ? "باقة" : "Pack"}
-                            </button>
-                          </div>
-
-                          {sub.subscriptionType === "lessons_count" && (
-                            <div className="flex items-center gap-1 bg-white px-2 py-1 rounded-xl border border-blue-200 w-24 shrink-0">
-                              <input
-                                type="number"
-                                min="1"
-                                value={sub.totalPurchasedLessons || 8}
-                                onChange={e => handleUpdateEditSubjectField(idx, { totalPurchasedLessons: Number(e.target.value) })}
-                                className="w-full font-bold text-blue-700 text-xs focus:outline-none"
-                                title={isArabic ? "عدد حصص الباقة" : "Lessons Count"}
-                              />
-                              <span className="text-[9px] font-bold text-blue-500 shrink-0">حصة</span>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* 3. Payment Timing (Prepaid / Postpaid / Split) */}
-                        <div className="inline-flex p-0.5 rounded-lg bg-slate-200/80 text-[10px] font-bold">
-                          <button
-                            type="button"
-                            onClick={() => handleUpdateEditSubjectField(idx, { paymentPlan: "beginning_of_month" })}
-                            className={`flex-1 py-1 rounded-md transition text-center ${
-                              sub.paymentPlan === "beginning_of_month"
-                                ? "bg-emerald-600 text-white shadow-2xs font-black"
-                                : "text-slate-600 hover:text-slate-900"
-                            }`}
-                            title={isArabic ? "دفع أول الشهر (مقدماً)" : "Prepaid"}
-                          >
-                            🟢 {isArabic ? "مقدم" : "Prepaid"}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleUpdateEditSubjectField(idx, { paymentPlan: "end_of_month" })}
-                            className={`flex-1 py-1 rounded-md transition text-center ${
-                              sub.paymentPlan === "end_of_month"
-                                ? "bg-amber-600 text-white shadow-2xs font-black"
-                                : "text-slate-600 hover:text-slate-900"
-                            }`}
-                            title={isArabic ? "دفع آخر الشهر (مؤخر)" : "Postpaid"}
-                          >
-                            🟡 {isArabic ? "مؤخر" : "Postpaid"}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleUpdateEditSubjectField(idx, { paymentPlan: "mixed" })}
-                            className={`flex-1 py-1 rounded-md transition text-center ${
-                              sub.paymentPlan === "mixed"
-                                ? "bg-indigo-600 text-white shadow-2xs font-black"
-                                : "text-slate-600 hover:text-slate-900"
-                            }`}
-                            title={isArabic ? "دفع مختلط (دفعات)" : "Split"}
-                          >
-                            🔵 {isArabic ? "دفعات" : "Split"}
-                          </button>
+                          <span className="text-[10px] font-bold text-slate-400 shrink-0">ج.م</span>
                         </div>
                       </div>
                     </div>
@@ -3574,20 +3318,35 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                 />
               </div>
 
-              <div className="pt-2 flex justify-end gap-2 border-t border-slate-100">
+              <div className="pt-2 flex items-center justify-between gap-2 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setShowEditStudentModal(false)}
-                  className="px-3.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs"
+                  onClick={() => {
+                    if (selectedStudent) {
+                      setStudentToDelete(selectedStudent);
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold text-xs flex items-center gap-1 border border-rose-200 transition"
                 >
-                  {isArabic ? "إلغاء" : "Cancel"}
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>{isArabic ? "حذف الطالب" : "Delete Student"}</span>
                 </button>
-                <button
-                  type="submit"
-                  className="px-4 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md shadow-blue-600/30"
-                >
-                  {isArabic ? "حفظ التعديلات والمواد" : "Save Changes & Subjects"}
-                </button>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowEditStudentModal(false)}
+                    className="px-3.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs"
+                  >
+                    {isArabic ? "إلغاء" : "Cancel"}
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md shadow-blue-600/30"
+                  >
+                    {isArabic ? "حفظ التعديلات والمواد" : "Save Changes & Subjects"}
+                  </button>
+                </div>
               </div>
             </form>
           </div>
@@ -3785,6 +3544,55 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                 className="py-2 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs transition"
               >
                 {isArabic ? "إغلاق" : "Close"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: In-App Confirmation Dialog for Permanently Deleting Student */}
+      {studentToDelete && (
+        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white border border-slate-200 rounded-3xl p-5 max-w-md w-full shadow-2xl animate-in fade-in zoom-in-95 space-y-4">
+            <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+
+            <div className="text-center">
+              <h3 className="font-black text-slate-900 text-base">
+                {isArabic ? `حذف الطالب: "${studentToDelete.fullName}"؟` : `Delete Student "${studentToDelete.fullName}"?`}
+              </h3>
+              <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                {isArabic
+                  ? "هل أنت متأكد من رغبتك في حذف هذا الطالب نهائياً من النظام؟ سيتم مسح بياناته من جميع المجموعات وحذف سجلات الحضور والاختبارات المرتبطة به."
+                  : "Are you sure you want to permanently delete this student? All group enrollments, attendance, and exam history will be removed."}
+              </p>
+            </div>
+
+            <div className="pt-2 flex items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={() => setStudentToDelete(null)}
+                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition"
+              >
+                {isArabic ? "إلغاء التراجع" : "Cancel"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onDeleteStudent) {
+                    onDeleteStudent(studentToDelete.id);
+                  }
+                  if (selectedStudent && selectedStudent.id === studentToDelete.id) {
+                    setSelectedStudent(null);
+                    setShowEditStudentModal(false);
+                  }
+                  setStudentToDelete(null);
+                }}
+                className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs transition shadow-md shadow-rose-600/30 flex items-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isArabic ? "تأكيد الحذف النهائي" : "Confirm Delete"}</span>
               </button>
             </div>
           </div>

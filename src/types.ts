@@ -15,21 +15,13 @@ export type PaymentStatus = "paid" | "unpaid";
 
 export type LessonStatus = "upcoming" | "starting_soon" | "completed";
 
-export type SubscriptionType = "monthly" | "lessons_count";
-
-export type PaymentPlan = "beginning_of_month" | "end_of_month" | "mixed";
-
 export interface StudentSubjectPlan {
   id: string;
   subject: string;
   studyType: StudyType; // "group" | "private"
   academicYear?: string; // الصف الدراسي e.g. "الصف الأول الثانوي"
   curriculum?: string; // المنهج e.g. "مصري", "سعودي", "إماراتي", "دولي"
-  subscriptionType: SubscriptionType; // "monthly" (بالشهر) | "lessons_count" (بعدد الحصص)
-  paymentPlan: PaymentPlan; // "beginning_of_month" (أول الشهر) | "end_of_month" (آخر الشهر) | "mixed" (مختلط)
   lessonCost: number; // سعر الحصة للمادة
-  totalPurchasedLessons?: number; // إجمالي الحصص المشتراة في الباقة
-  remainingLessons?: number; // الحصص المتبقية
   totalPaidAmount?: number; // إجمالي المسدد لهذه المادة
   totalAttendedLessons?: number; // إجمالي الحصص المنفذة لهذه المادة
   notes?: string;
@@ -41,31 +33,24 @@ export interface Student {
   studentNumber?: string;
   studentPhone?: string;
   academicYear?: string; // الصف الدراسي e.g. "الصف الأول الثانوي", "الصف الثالث الإعدادي"
-  curriculum?: string; // المنهج الدراسي e.g. "منهج مصري", "منهج سعودي", "منهج إماراتي", "منهج كويتي", "لغات / تجريبي", "International"
+  curriculum?: string; // المنهج الدراسي
   parentContact: string; // WhatsApp number e.g. "+201000000000"
-  whatsappGroupLink?: string; // WhatsApp group link e.g. "https://chat.whatsapp.com/..."
+  whatsappGroupLink?: string; // WhatsApp group link
   studyType: StudyType;
   groupId?: string;
   groupName?: string;
   subject: string;
-  subjects?: StudentSubjectPlan[]; // Multi-subject enrollment with individual subscription & payment systems
+  subjects?: StudentSubjectPlan[]; // Multi-subject enrollment
   status: StudentStatus;
   
-  // Subscription & Payment System
-  subscriptionType?: SubscriptionType; // "monthly" (بالشهر) | "lessons_count" (بعدد الحصص)
-  paymentPlan?: PaymentPlan; // "beginning_of_month" (أول الشهر) | "end_of_month" (آخر الشهر) | "mixed" (مختلط)
-
-  // Payment & Lesson Balance
+  // Unified Financial System
   paymentStatus: PaymentStatus;
-  totalPaidAmount: number; // e.g. 800
-  totalPurchasedLessons: number; // e.g. 8
-  totalAttendedLessons?: number; // Total lessons passed and attended by student
-  lessonCost: number; // calculated = totalPaidAmount / totalPurchasedLessons
-  remainingLessons: number; // e.g. 5
-  remainingBalance: number; // calculated = remainingLessons * lessonCost
+  lessonCost: number; // سعر الحصة
+  totalPaidAmount: number; // إجمالي المدفوعات المسددة
+  totalAttendedLessons?: number; // إجمالي الحصص المنفذة
   
   notes?: string;
-  scheduleSlots?: ScheduleSlot[]; // Direct custom schedules for this student
+  scheduleSlots?: ScheduleSlot[];
   createdAt: string;
 }
 
@@ -155,10 +140,10 @@ export interface PaymentTransaction {
   studentId: string;
   studentName: string;
   amount: number;
-  lessonsCovered: number;
-  lessonCost: number;
   date: string;
   notes?: string;
+  lessonsCovered?: number;
+  lessonCost?: number;
 }
 
 export interface ReportAttachment {

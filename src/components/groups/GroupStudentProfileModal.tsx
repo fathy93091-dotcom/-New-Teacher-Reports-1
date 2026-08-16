@@ -57,6 +57,8 @@ export const GroupStudentProfileModal: React.FC<GroupStudentProfileModalProps> =
 }) => {
   const isArabic = settings.preferredLanguage === "ar";
   const [activeSubTab, setActiveSubTab] = useState<"overview" | "finance" | "attendance" | "exams" | "reports">("overview");
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
 
   const financialSummary = calculateStudentFinancials(student, attendanceRecords);
 
@@ -379,7 +381,7 @@ export const GroupStudentProfileModal: React.FC<GroupStudentProfileModalProps> =
             {onRemoveFromGroup && (
               <button
                 type="button"
-                onClick={() => onRemoveFromGroup(student.id)}
+                onClick={() => setShowRemoveConfirm(true)}
                 className="px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold text-xs transition border border-amber-200"
               >
                 {isArabic ? "إلغاء القيد من المجموعة" : "Remove from Group"}
@@ -388,7 +390,7 @@ export const GroupStudentProfileModal: React.FC<GroupStudentProfileModalProps> =
             {onDeleteStudent && (
               <button
                 type="button"
-                onClick={() => onDeleteStudent(student.id)}
+                onClick={() => setShowDeleteConfirm(true)}
                 className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs transition border border-rose-200"
               >
                 <Trash2 className="w-3.5 h-3.5 inline mr-1" />
@@ -405,6 +407,89 @@ export const GroupStudentProfileModal: React.FC<GroupStudentProfileModalProps> =
             {isArabic ? "إغلاق" : "Close"}
           </button>
         </div>
+
+        {/* Confirmation Modal: Remove Student from Group */}
+        {showRemoveConfirm && (
+          <div className="fixed inset-0 z-60 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+            <div className="bg-white border border-slate-200 rounded-3xl p-5 max-w-md w-full shadow-2xl animate-in fade-in zoom-in-95 space-y-3">
+              <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-600 flex items-center justify-center mx-auto">
+                <X className="w-6 h-6" />
+              </div>
+              <div className="text-center">
+                <h3 className="font-black text-slate-900 text-base">
+                  {isArabic ? `إلغاء قيد "${student.fullName}"؟` : `Remove "${student.fullName}"?`}
+                </h3>
+                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                  {isArabic
+                    ? "سيتم استبعاد الطالب من هذه المجموعة فقط، وستظل جميع بياناته وسجلاته المالية محفوظة في النظام."
+                    : "The student will be removed from this group only. All records remain safely in the system."}
+                </p>
+              </div>
+              <div className="pt-2 flex items-center justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowRemoveConfirm(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition"
+                >
+                  {isArabic ? "إلغاء" : "Cancel"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onRemoveFromGroup) onRemoveFromGroup(student.id);
+                    setShowRemoveConfirm(false);
+                    onClose();
+                  }}
+                  className="px-5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs transition shadow-md shadow-amber-600/30"
+                >
+                  {isArabic ? "تأكيد الاستبعاد من المجموعة" : "Confirm Removal"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Confirmation Modal: Delete Student Permanently */}
+        {showDeleteConfirm && (
+          <div className="fixed inset-0 z-60 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+            <div className="bg-white border border-slate-200 rounded-3xl p-5 max-w-md w-full shadow-2xl animate-in fade-in zoom-in-95 space-y-3">
+              <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div className="text-center">
+                <h3 className="font-black text-slate-900 text-base">
+                  {isArabic ? `حذف الطالب "${student.fullName}" نهائياً؟` : `Permanently delete "${student.fullName}"?`}
+                </h3>
+                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                  {isArabic
+                    ? "هل أنت متأكد؟ سيتم مسح هذا الطالب نهائياً من النظام وجميع المجموعات المرتبطة به وسجلاته."
+                    : "Are you sure? This will delete the student and their associated records permanently."}
+                </p>
+              </div>
+              <div className="pt-2 flex items-center justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteConfirm(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition"
+                >
+                  {isArabic ? "إلغاء التراجع" : "Cancel"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onDeleteStudent) onDeleteStudent(student.id);
+                    setShowDeleteConfirm(false);
+                    onClose();
+                  }}
+                  className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs transition shadow-md shadow-rose-600/30 flex items-center gap-1.5"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>{isArabic ? "تأكيد الحذف النهائي" : "Confirm Delete"}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
       </div>
     </div>

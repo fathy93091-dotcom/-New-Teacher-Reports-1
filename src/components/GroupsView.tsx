@@ -178,8 +178,9 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
   const [quickParentPhone, setQuickParentPhone] = useState<string>("");
   const [quickStudentAcademicYear, setQuickStudentAcademicYear] = useState<string>("");
 
-  // Confirmation modal for deleting group
+  // Confirmation modal for deleting group and private lesson
   const [groupToDelete, setGroupToDelete] = useState<Group | null>(null);
+  const [lessonToDelete, setLessonToDelete] = useState<PrivateLesson | null>(null);
 
   // Active Lesson Attendance Session
   const [activeLesson, setActiveLesson] = useState<Lesson | null>(null);
@@ -398,14 +399,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
   };
 
   const handleDeletePrivateLessonClick = (prv: PrivateLesson) => {
-    const confirmMsg = isArabic
-      ? `هل أنت متأكد من حذف موعد الدرس الخاص للطالب "${prv.studentName}"؟`
-      : `Are you sure you want to delete private lesson for "${prv.studentName}"?`;
-    if (window.confirm(confirmMsg)) {
-      if (onDeletePrivateLesson) {
-        onDeletePrivateLesson(prv.id);
-      }
-    }
+    setLessonToDelete(prv);
   };
 
   const getScheduleSummaryText = (item: { days: string[]; time: string; durationMinutes?: number; scheduleSlots?: ScheduleSlot[] }): string => {
@@ -550,13 +544,9 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
       parentContact: quickParentPhone.trim() || undefined,
       status: "active",
       studyType: "group",
-      subscriptionType: "monthly",
       lessonCost: 50,
-      remainingLessons: 0,
-      remainingBalance: 0,
       paymentStatus: "unpaid",
-      totalPaidAmount: 0,
-      totalPurchasedLessons: 0
+      totalPaidAmount: 0
     };
 
     if (onBatchAddStudents) {
@@ -1840,6 +1830,50 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
                 className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-md shadow-rose-600/30"
               >
                 {isArabic ? "نعم، احذف المجموعة الآن" : "Yes, Delete Group"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Confirmation Dialog for Deleting Private Lesson */}
+      {lessonToDelete && (
+        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white border border-slate-200 rounded-3xl p-5 max-w-md w-full shadow-2xl animate-in fade-in zoom-in-95 space-y-3">
+            <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+
+            <div className="text-center">
+              <h3 className="font-black text-slate-900 text-base">
+                {isArabic ? `حذف موعد الدرس الخاص لـ "${lessonToDelete.studentName}"؟` : `Delete private lesson for "${lessonToDelete.studentName}"?`}
+              </h3>
+              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                {isArabic
+                  ? "هل تريد حذف هذا الموعد من جدول الدروس الخاصة؟"
+                  : "Are you sure you want to remove this private lesson schedule?"}
+              </p>
+            </div>
+
+            <div className="pt-2 flex items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={() => setLessonToDelete(null)}
+                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs"
+              >
+                {isArabic ? "إلغاء" : "Cancel"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onDeletePrivateLesson) {
+                    onDeletePrivateLesson(lessonToDelete.id);
+                  }
+                  setLessonToDelete(null);
+                }}
+                className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-md shadow-rose-600/30"
+              >
+                {isArabic ? "تأكيد الحذف" : "Confirm Delete"}
               </button>
             </div>
           </div>
