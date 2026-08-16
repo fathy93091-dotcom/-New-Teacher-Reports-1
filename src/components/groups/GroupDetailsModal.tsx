@@ -42,6 +42,7 @@ interface GroupDetailsModalProps {
   paymentTransactions?: PaymentTransaction[];
   reports?: GeneratedReport[];
   onClose: () => void;
+  onOpenGroupReport?: (group: Group) => void;
   onLaunchAttendance: (group: Group) => void;
   onEditGroup: (group: Group) => void;
   onDeleteGroup: (group: Group) => void;
@@ -63,6 +64,7 @@ export const GroupDetailsModal: React.FC<GroupDetailsModalProps> = ({
   paymentTransactions = [],
   reports = [],
   onClose,
+  onOpenGroupReport,
   onLaunchAttendance,
   onEditGroup,
   onDeleteGroup,
@@ -174,6 +176,20 @@ export const GroupDetailsModal: React.FC<GroupDetailsModalProps> = ({
           </div>
 
           <div className="flex items-center gap-1.5 self-end sm:self-auto shrink-0">
+            {onOpenGroupReport && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onOpenGroupReport(group);
+                }}
+                className="px-3.5 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 font-bold text-xs shadow-2xs flex items-center gap-1.5 transition"
+              >
+                <span>📋</span>
+                <span>{isArabic ? "تقرير المجموعة" : "Group Report"}</span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={() => onLaunchAttendance(group)}

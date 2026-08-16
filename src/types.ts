@@ -86,6 +86,7 @@ export interface Group {
   studentIds: string[];
   status: "active" | "paused";
   whatsappGroupLink?: string; // WhatsApp group link
+  parentWhatsapp?: string; // Parent or group WhatsApp link/number
   createdAt: string;
 }
 
@@ -100,6 +101,7 @@ export interface PrivateLesson {
   scheduleSlots?: ScheduleSlot[]; // mixed/custom per-day times e.g. [{day: "السبت", time: "17:00"}, {day: "الأحد", time: "19:00"}]
   status: "active" | "paused";
   whatsappGroupLink?: string; // WhatsApp group link
+  parentWhatsapp?: string;
   createdAt: string;
 }
 

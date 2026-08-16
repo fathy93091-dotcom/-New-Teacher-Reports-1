@@ -45,6 +45,7 @@ import {
 import { MixedScheduleEditor, formatTime12h } from "./MixedScheduleEditor";
 import { GroupDetailsModal } from "./groups/GroupDetailsModal";
 import { GroupStudentProfileModal } from "./groups/GroupStudentProfileModal";
+import { GroupReportView } from "./GroupReportView";
 
 interface GroupsViewProps {
   settings: AppSettings;
@@ -128,6 +129,10 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
   ]);
   const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
   const [whatsappGroupLink, setWhatsappGroupLink] = useState("");
+  const [parentWhatsapp, setParentWhatsapp] = useState("");
+
+  // Standalone Full-Page Group Report State
+  const [groupForReport, setGroupForReport] = useState<Group | null>(null);
 
   // Edit Modal State
   const [editingGroup, setEditingGroup] = useState<Group | null>(null);
@@ -138,6 +143,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
   const [editScheduleSlots, setEditScheduleSlots] = useState<ScheduleSlot[]>([]);
   const [editStudentIds, setEditStudentIds] = useState<string[]>([]);
   const [editWhatsappLink, setEditWhatsappLink] = useState("");
+  const [editParentWhatsapp, setEditParentWhatsapp] = useState("");
 
   // Group Details & Management View State
   const [selectedGroupForDetails, setSelectedGroupForDetails] = useState<Group | null>(null);
@@ -252,7 +258,8 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
         scheduleSlots: effectiveSlots,
         studentIds: selectedStudentIds,
         status: "active",
-        whatsappGroupLink: whatsappGroupLink.trim() || undefined
+        whatsappGroupLink: whatsappGroupLink.trim() || undefined,
+        parentWhatsapp: parentWhatsapp.trim() || undefined
       });
     } else {
       const studentObj = students.find(s => s.id === selectedStudentId);
@@ -266,7 +273,8 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
         durationMinutes: primaryDuration,
         scheduleSlots: effectiveSlots,
         status: "active",
-        whatsappGroupLink: whatsappGroupLink.trim() || studentObj.whatsappGroupLink || undefined
+        whatsappGroupLink: whatsappGroupLink.trim() || studentObj.whatsappGroupLink || undefined,
+        parentWhatsapp: parentWhatsapp.trim() || studentObj.parentContact || undefined
       });
     }
     setShowAddModal(false);
@@ -283,6 +291,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
     ]);
     setSelectedStudentIds([]);
     setWhatsappGroupLink("");
+    setParentWhatsapp("");
   };
 
   // Open Edit Group Modal
@@ -292,6 +301,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
     setEditSubject(group.subject);
     setEditStudentIds(group.studentIds || []);
     setEditWhatsappLink(group.whatsappGroupLink || "");
+    setEditParentWhatsapp(group.parentWhatsapp || "");
     if (group.scheduleSlots && group.scheduleSlots.length > 0) {
       setEditScheduleSlots(group.scheduleSlots);
     } else {
@@ -320,7 +330,8 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
       durationMinutes: primaryDuration,
       scheduleSlots: effectiveSlots,
       studentIds: editStudentIds,
-      whatsappGroupLink: editWhatsappLink.trim() || undefined
+      whatsappGroupLink: editWhatsappLink.trim() || undefined,
+      parentWhatsapp: editParentWhatsapp.trim() || undefined
     };
 
     onUpdateGroup(editingGroup.id, updatedData);
@@ -615,6 +626,18 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
     setStudentForExam(null);
   };
 
+  // Render Standalone Group Report Page if active
+  if (groupForReport) {
+    return (
+      <GroupReportView
+        group={groupForReport}
+        students={students}
+        isArabic={isArabic}
+        onBack={() => setGroupForReport(null)}
+      />
+    );
+  }
+
   return (
     <div className="space-y-4 pb-12">
       {/* Top Header & Action Buttons */}
@@ -765,45 +788,63 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
                   </div>
                 </div>
 
-                <div className="mt-3 pt-2 border-t border-slate-100 flex items-center justify-between gap-1.5">
-                  <button
-                    onClick={() => handleOpenAttendanceSession(group)}
-                    className="flex-1 py-1.5 px-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition shadow-2xs flex items-center justify-center gap-1"
-                  >
-                    <Play className="w-3 h-3 fill-current shrink-0" />
-                    <span>{isArabic ? "بدء الحصة" : "Launch"}</span>
-                  </button>
-
-                  {/* Edit Button */}
-                  <button
-                    onClick={() => handleOpenEditGroup(group)}
-                    title={isArabic ? "تعديل المجموعة والمواعيد" : "Edit Group & Schedule"}
-                    className="p-1.5 rounded-xl bg-slate-100 hover:bg-blue-50 text-slate-600 hover:text-blue-700 border border-slate-200 transition shrink-0"
-                  >
-                    <Edit2 className="w-3.5 h-3.5" />
-                  </button>
-
-                  {/* WhatsApp Link */}
-                  {group.whatsappGroupLink && (
-                    <a
-                      href={group.whatsappGroupLink.startsWith("http") ? group.whatsappGroupLink : `https://${group.whatsappGroupLink}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      title={isArabic ? "فتح جروب الواتساب" : "Open WhatsApp Group"}
-                      className="p-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 transition shrink-0 flex items-center justify-center"
+                <div className="mt-3 pt-2 border-t border-slate-100 flex flex-col gap-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => handleOpenAttendanceSession(group)}
+                      className="flex-1 py-1.5 px-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition shadow-2xs flex items-center justify-center gap-1"
                     >
-                      <Share2 className="w-3.5 h-3.5" />
-                    </a>
-                  )}
+                      <Play className="w-3 h-3 fill-current shrink-0" />
+                      <span>{isArabic ? "بدء الحصة" : "Launch"}</span>
+                    </button>
 
-                  {/* Delete Group Button */}
-                  <button
-                    onClick={() => setGroupToDelete(group)}
-                    title={isArabic ? "حذف هذه المجموعة" : "Delete Group"}
-                    className="p-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 transition shrink-0"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                    {/* 📋 تقرير المجموعة Button */}
+                    <button
+                      onClick={() => setGroupForReport(group)}
+                      title={isArabic ? "إنشاء تقرير المجموعة السريع" : "Group Report"}
+                      className="flex-1 py-1.5 px-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 font-bold text-xs transition shadow-2xs flex items-center justify-center gap-1"
+                    >
+                      <FileText className="w-3.5 h-3.5 shrink-0" />
+                      <span>{isArabic ? "📋 تقرير المجموعة" : "Report"}</span>
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-1 pt-0.5">
+                    {/* Edit Button */}
+                    <button
+                      onClick={() => handleOpenEditGroup(group)}
+                      title={isArabic ? "تعديل المجموعة والمواعيد" : "Edit Group & Schedule"}
+                      className="p-1.5 rounded-xl bg-slate-100 hover:bg-blue-50 text-slate-600 hover:text-blue-700 border border-slate-200 transition shrink-0"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </button>
+
+                    {/* WhatsApp Link / Number */}
+                    {(group.parentWhatsapp || group.whatsappGroupLink) && (
+                      <a
+                        href={
+                          (group.parentWhatsapp || group.whatsappGroupLink || "").startsWith("http")
+                            ? (group.parentWhatsapp || group.whatsappGroupLink)
+                            : `https://wa.me/${(group.parentWhatsapp || group.whatsappGroupLink || "").replace(/[^\d+]/g, "")}`
+                        }
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={isArabic ? "فتح واتساب" : "Open WhatsApp"}
+                        className="p-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 transition shrink-0 flex items-center justify-center"
+                      >
+                        <Share2 className="w-3.5 h-3.5" />
+                      </a>
+                    )}
+
+                    {/* Delete Group Button */}
+                    <button
+                      onClick={() => setGroupToDelete(group)}
+                      title={isArabic ? "حذف هذه المجموعة" : "Delete Group"}
+                      className="p-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 transition shrink-0"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
               </div>
             );
@@ -1099,15 +1140,21 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
               <div>
                 <label className="block font-bold text-slate-700 mb-1 flex items-center gap-1.5 text-[11px]">
                   <Share2 className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>{isArabic ? "رابط جروب الواتساب (اختياري)" : "WhatsApp Group Link (Optional)"}</span>
+                  <span>{isArabic ? "رقم أو رابط WhatsApp لولي الأمر / الجروب" : "Parent / Group WhatsApp Number or Link"}</span>
                 </label>
                 <input
-                  type="url"
-                  value={whatsappGroupLink}
-                  onChange={e => setWhatsappGroupLink(e.target.value)}
-                  placeholder="https://chat.whatsapp.com/..."
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-medium focus:outline-none focus:border-blue-500 dir-ltr text-left"
+                  type="text"
+                  value={parentWhatsapp || whatsappGroupLink}
+                  onChange={e => {
+                    setParentWhatsapp(e.target.value);
+                    setWhatsappGroupLink(e.target.value);
+                  }}
+                  placeholder={isArabic ? "مثال: 01012345678 أو https://chat.whatsapp.com/..." : "e.g. 01012345678 or chat link"}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-medium focus:outline-none focus:border-emerald-500 dir-ltr text-left"
                 />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  {isArabic ? "يُستخدم هذا الرابط/الرقم تلقائياً عند الضغط على 'إرسال عبر WhatsApp' في تقرير المجموعة" : "Used automatically to send the group report via WhatsApp"}
+                </p>
               </div>
 
               <div className="pt-3 flex justify-end gap-2 border-t border-slate-100">
@@ -1216,15 +1263,21 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
               <div>
                 <label className="block font-bold text-slate-700 mb-1 flex items-center gap-1.5 text-[11px]">
                   <Share2 className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>{isArabic ? "رابط جروب الواتساب" : "WhatsApp Group Link"}</span>
+                  <span>{isArabic ? "رقم أو رابط WhatsApp لولي الأمر / الجروب" : "Parent / Group WhatsApp Number or Link"}</span>
                 </label>
                 <input
-                  type="url"
-                  value={editWhatsappLink}
-                  onChange={e => setEditWhatsappLink(e.target.value)}
-                  placeholder="https://chat.whatsapp.com/..."
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-medium focus:outline-none focus:border-blue-500 dir-ltr text-left"
+                  type="text"
+                  value={editParentWhatsapp || editWhatsappLink}
+                  onChange={e => {
+                    setEditParentWhatsapp(e.target.value);
+                    setEditWhatsappLink(e.target.value);
+                  }}
+                  placeholder={isArabic ? "مثال: 01012345678 أو https://chat.whatsapp.com/..." : "e.g. 01012345678 or chat link"}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-medium focus:outline-none focus:border-emerald-500 dir-ltr text-left"
                 />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  {isArabic ? "يُستخدم هذا الرابط/الرقم تلقائياً عند الضغط على 'إرسال عبر WhatsApp' في تقرير المجموعة" : "Used automatically to send the group report via WhatsApp"}
+                </p>
               </div>
 
               <div className="pt-3 flex items-center justify-between border-t border-slate-100">
@@ -1372,6 +1425,10 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
           paymentTransactions={paymentTransactions}
           reports={reports}
           onClose={() => setSelectedGroupForDetails(null)}
+          onOpenGroupReport={grp => {
+            setSelectedGroupForDetails(null);
+            setGroupForReport(grp);
+          }}
           onLaunchAttendance={grp => {
             setSelectedGroupForDetails(null);
             handleOpenAttendanceSession(grp);

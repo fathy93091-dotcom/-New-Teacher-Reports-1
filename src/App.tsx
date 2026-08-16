@@ -732,7 +732,7 @@ export function App() {
       />
 
       {/* Main Content View Container */}
-      <main className="flex-1 max-w-[1750px] w-full mx-auto px-2 sm:px-4 lg:px-6 pt-2 sm:pt-3 pb-24 lg:pb-8">
+      <main className="flex-1 max-w-[1920px] w-full mx-auto px-2 sm:px-3 lg:px-5 2xl:px-6 pt-2 pb-24 lg:pb-6">
         {activeTab === "home" && (
           <DashboardView
             settings={settings}

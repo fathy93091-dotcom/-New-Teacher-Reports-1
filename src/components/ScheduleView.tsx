@@ -428,16 +428,16 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2.5 sm:gap-3">
               {todaySessions.map(sess => (
                 <div
                   key={sess.id}
-                  className="bg-white/10 backdrop-blur-md border border-white/15 hover:border-blue-400/60 transition-all rounded-2xl p-4 flex flex-col justify-between space-y-4 shadow-lg hover:bg-white/15"
+                  className="bg-white/10 backdrop-blur-md border border-white/15 hover:border-blue-400/60 transition-all rounded-2xl p-3 sm:p-3.5 flex flex-col justify-between space-y-3 shadow-lg hover:bg-white/15"
                 >
                   <div>
-                    <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center justify-between mb-1.5">
                       <span
-                        className={`px-2.5 py-0.5 rounded-full text-[10px] font-black flex items-center gap-1 ${
+                        className={`px-2 py-0.5 rounded-full text-[9.5px] font-black flex items-center gap-1 ${
                           sess.type === "group"
                             ? "bg-blue-400/20 text-blue-200 border border-blue-400/30"
                             : "bg-purple-400/20 text-purple-200 border border-purple-400/30"
@@ -447,22 +447,22 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
                         <span>{sess.type === "group" ? (isArabic ? "مجموعة" : "Group") : (isArabic ? "درس خاص" : "Private")}</span>
                       </span>
 
-                      <span className="font-mono font-bold text-xs bg-black/40 text-amber-300 px-2.5 py-0.5 rounded-lg border border-white/10 shadow-inner">
+                      <span className="font-mono font-bold text-[11px] bg-black/40 text-amber-300 px-2 py-0.5 rounded-lg border border-white/10 shadow-inner">
                         {sess.time || "غير محدد"}
                       </span>
                     </div>
 
-                    <h3 className="font-black text-white text-base line-clamp-1">{sess.title}</h3>
+                    <h3 className="font-black text-white text-sm line-clamp-1">{sess.title}</h3>
                     <p className="text-xs font-bold text-blue-300 mt-0.5">{sess.subject}</p>
-                    <p className="text-[11px] text-blue-200/70 mt-1">{sess.subtext}</p>
+                    <p className="text-[10.5px] text-blue-200/70 mt-0.5">{sess.subtext}</p>
                   </div>
 
                   <button
                     onClick={() => onOpenLesson(sess.groupObj, sess.privateObj)}
-                    className="w-full py-2.5 rounded-xl bg-blue-500 hover:bg-blue-400 text-slate-950 font-black text-xs transition shadow-md flex items-center justify-center gap-1.5"
+                    className="w-full py-2 rounded-xl bg-blue-500 hover:bg-blue-400 text-slate-950 font-black text-xs transition shadow-md flex items-center justify-center gap-1.5"
                   >
-                    <Play className="w-3.5 h-3.5 fill-current" />
-                    <span>{isArabic ? "بدء الحصة الآن" : "Start Session Now"}</span>
+                    <Play className="w-3 h-3 fill-current" />
+                    <span>{isArabic ? "بدء الحصة" : "Start Session"}</span>
                   </button>
                 </div>
               ))}
