@@ -275,12 +275,20 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
 
   // Helper for saving absent report
   const handleSaveAbsentReport = () => {
+    const isMonthly =
+      student.billingType === "monthly" ||
+      student.subjects?.some(s => s.subject === reportSubject && s.billingType === "monthly");
+
     const absentReportText = isArabic
-      ? `📌 تقرير غياب طالب\n• الطالب: ${student.fullName}\n• المادة: ${reportSubject}\n• الحصة رقم: #${reportLessonNumber}\n• التاريخ: ${reportDate}\n• حالة الحضور: غائب\n• حساب الحصة: ${
-          reportDeductCost ? "تم احتساب الحصة وخصمها من الرصيد" : "لم يتم الخصم (غياب بعذر)"
+      ? `📌 تقرير غياب طالب\n• الطالب: ${student.fullName}\n• المادة: ${reportSubject}\n• الحصة رقم: #${reportLessonNumber}\n• التاريخ: ${reportDate}\n• حالة الحضور: غائب${
+          !isMonthly
+            ? `\n• حساب الحصة: ${reportDeductCost ? "تم احتساب الحصة وخصمها من الرصيد" : "لم يتم الخصم (غياب بعذر)"}`
+            : ""
         }${absentNotes ? `\n• سبب/ملاحظات: ${absentNotes}` : ""}`
-      : `📌 Student Absence Report\n• Student: ${student.fullName}\n• Subject: ${reportSubject}\n• Lesson #: ${reportLessonNumber}\n• Date: ${reportDate}\n• Attendance: Absent\n• Billed: ${
-          reportDeductCost ? "Yes (Deducted)" : "No (Excused)"
+      : `📌 Student Absence Report\n• Student: ${student.fullName}\n• Subject: ${reportSubject}\n• Lesson #: ${reportLessonNumber}\n• Date: ${reportDate}\n• Attendance: Absent${
+          !isMonthly
+            ? `\n• Billed: ${reportDeductCost ? "Yes (Deducted)" : "No (Excused)"}`
+            : ""
         }${absentNotes ? `\n• Notes: ${absentNotes}` : ""}`;
 
     onAddReport({
@@ -290,7 +298,7 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
       lessonNumber: reportLessonNumber,
       date: reportDate,
       attendance: "absent",
-      deductCost: reportDeductCost,
+      deductCost: isMonthly ? true : reportDeductCost,
       homeworkStatus: "not_done",
       teacherNotes: absentNotes || (isArabic ? "غائب" : "Absent"),
       aiInstructions: "",
@@ -754,60 +762,81 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
               </div>
             </div>
 
-            {/* Monthly billing notice */}
-            {(student.billingType === "monthly" || student.subjects?.some(s => s.billingType === "monthly")) && (
-              <div className="p-2.5 rounded-xl bg-purple-100/70 border border-purple-200 text-purple-900 text-xs font-semibold flex items-center gap-2">
-                <span>📅</span>
-                <span>
-                  {isArabic
-                    ? "تنبيه: الطالب مشترك بنظام الاشتراك الشهري الكامل (يتم احتساب الشهر ثابتاً سواء حضر أو غاب). تسجيل الغياب هنا يفيد في المتابعة التربوية والأكاديمية."
-                    : "Note: This student has a monthly fixed subscription. Absence tracking is for academic evaluation."}
-                </span>
-              </div>
-            )}
+            {/* Monthly vs Elapsed Lessons Info & Options */}
+            {(() => {
+              const isMonthly =
+                student.billingType === "monthly" ||
+                student.subjects?.some(s => s.subject === reportSubject && s.billingType === "monthly");
 
-            {/* DEDUCTION OPTIONS */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={() => setReportDeductCost(true)}
-                className={`p-3.5 rounded-xl border text-right transition flex items-center justify-between ${
-                  reportDeductCost
-                    ? "bg-rose-600 text-white border-rose-700 shadow-md shadow-rose-600/20"
-                    : "bg-white text-slate-700 border-rose-200 hover:bg-rose-100/40"
-                }`}
-              >
-                <div>
-                  <p className="font-black text-xs sm:text-sm">
-                    {isArabic ? "✅ نعم - يتم الخصم واحتساب الحصة" : "Yes - Deduct & Bill"}
-                  </p>
-                  <p className={`text-[11px] mt-0.5 ${reportDeductCost ? "text-rose-100" : "text-slate-500"}`}>
-                    {isArabic ? "يتم خصم حصة واحدة من الرصيد والماليات" : "Deducts 1 lesson fee"}
-                  </p>
-                </div>
-                <Check className={`w-4 h-4 ${reportDeductCost ? "text-white" : "text-transparent"}`} />
-              </button>
+              if (isMonthly) {
+                return (
+                  <div className="p-3.5 rounded-2xl bg-blue-50/80 border border-blue-200 text-blue-900 text-xs font-semibold flex items-start gap-2.5">
+                    <span className="text-base">📅</span>
+                    <div className="space-y-1">
+                      <p className="font-bold text-blue-950">
+                        {isArabic ? "نظام المحاسبة: الشهر كامل (اشتراك شهري ثابت)" : "Billing: Full Month Flat Subscription"}
+                      </p>
+                      <p className="text-[11px] text-blue-800 leading-relaxed">
+                        {isArabic
+                          ? "يتم احتساب الشهر ثابتاً للطالب، وتسجيل الغياب هنا يتم لأغراض المتابعة التربوية والأكاديمية وسجل الحضور فقط بدون كتابة أي إشارة للخصم المالي في التقرير."
+                          : "Absence is logged purely for academic attendance tracking. No billing deduction notes will be written to the student report."}
+                      </p>
+                    </div>
+                  </div>
+                );
+              }
 
-              <button
-                type="button"
-                onClick={() => setReportDeductCost(false)}
-                className={`p-3.5 rounded-xl border text-right transition flex items-center justify-between ${
-                  !reportDeductCost
-                    ? "bg-emerald-700 text-white border-emerald-800 shadow-md shadow-emerald-700/20"
-                    : "bg-white text-slate-700 border-rose-200 hover:bg-rose-100/40"
-                }`}
-              >
-                <div>
-                  <p className="font-black text-xs sm:text-sm">
-                    {isArabic ? "❌ لا - لا يتم الخصم (غياب بعذر)" : "No - Excused (No Fee)"}
+              return (
+                <div className="space-y-2">
+                  <p className="text-xs text-slate-700 font-bold">
+                    {isArabic
+                      ? "نظام حصص التقويم المنقضية (تحتسب الحصة إذا حضرها الطالب، أو يتم استثناؤها عند الغياب بعذر):"
+                      : "Calendar Elapsed Lessons (Charge only if attended or non-excused):"}
                   </p>
-                  <p className={`text-[11px] mt-0.5 ${!reportDeductCost ? "text-emerald-100" : "text-slate-500"}`}>
-                    {isArabic ? "لا يخصم من الرصيد ولا تترتب رسوم" : "No balance deducted"}
-                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setReportDeductCost(true)}
+                      className={`p-3.5 rounded-xl border text-right transition flex items-center justify-between ${
+                        reportDeductCost
+                          ? "bg-rose-600 text-white border-rose-700 shadow-md shadow-rose-600/20"
+                          : "bg-white text-slate-700 border-rose-200 hover:bg-rose-100/40"
+                      }`}
+                    >
+                      <div>
+                        <p className="font-black text-xs sm:text-sm">
+                          {isArabic ? "✅ احتساب الحصة وخصمها" : "Yes - Deduct & Bill"}
+                        </p>
+                        <p className={`text-[11px] mt-0.5 ${reportDeductCost ? "text-rose-100" : "text-slate-500"}`}>
+                          {isArabic ? "غياب غير معذور (تحتسب الحصة مالياً)" : "Non-excused absence"}
+                        </p>
+                      </div>
+                      <Check className={`w-4 h-4 ${reportDeductCost ? "text-white" : "text-transparent"}`} />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setReportDeductCost(false)}
+                      className={`p-3.5 rounded-xl border text-right transition flex items-center justify-between ${
+                        !reportDeductCost
+                          ? "bg-emerald-700 text-white border-emerald-800 shadow-md shadow-emerald-700/20"
+                          : "bg-white text-slate-700 border-rose-200 hover:bg-rose-100/40"
+                      }`}
+                    >
+                      <div>
+                        <p className="font-black text-xs sm:text-sm">
+                          {isArabic ? "❌ استثناء الحصة (غياب بعذر)" : "No - Excused (No Charge)"}
+                        </p>
+                        <p className={`text-[11px] mt-0.5 ${!reportDeductCost ? "text-emerald-100" : "text-slate-500"}`}>
+                          {isArabic ? "لا تحتسب الحصة ولا تترتب أي رسوم" : "No charge for excused absence"}
+                        </p>
+                      </div>
+                      <Check className={`w-4 h-4 ${!reportDeductCost ? "text-white" : "text-transparent"}`} />
+                    </button>
+                  </div>
                 </div>
-                <Check className={`w-4 h-4 ${!reportDeductCost ? "text-white" : "text-transparent"}`} />
-              </button>
-            </div>
+              );
+            })()}
 
             {/* Optional Absence Reason */}
             <div>

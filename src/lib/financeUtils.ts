@@ -55,22 +55,33 @@ export function calculateSingleSubjectFinance(
   studentId: string,
   attendanceRecords?: AttendanceRecord[]
 ): SubjectFinancialDetail {
-  const isMonthly = subj.billingType === "monthly";
+  const billingType: BillingType = subj.billingType || "per_lesson";
+  const isMonthly = billingType === "monthly" || billingType === "monthly_fixed_lessons";
   const lessonCost = Math.max(1, subj.lessonCost || 100);
-  const monthlyCost = Math.max(1, subj.monthlyCost || subj.lessonCost || 400);
+  const monthlyCost = Math.max(1, subj.monthlyCost || (subj.lessonsPerMonth ? subj.lessonsPerMonth * lessonCost : lessonCost * 4));
   const billedMonths = Math.max(1, subj.customBilledMonths || 1);
 
   let totalAttended = subj.totalAttendedLessons || 0;
   if (attendanceRecords && attendanceRecords.length > 0) {
     const presentRecords = attendanceRecords.filter(
-      r => r.studentId === studentId && (r.attendance === "present" || r.deducted)
+      r => r.studentId === studentId && (r.subject === subj.subject || (!r.subject)) && (r.attendance === "present" || r.deducted)
     );
     totalAttended = Math.max(totalAttended, presentRecords.length);
   }
 
-  const totalAccruedCost = isMonthly
-    ? billedMonths * monthlyCost
-    : totalAttended * lessonCost;
+  let totalAccruedCost = 0;
+  if (billingType === "monthly") {
+    // شهر كامل ثابت
+    totalAccruedCost = billedMonths * monthlyCost;
+  } else if (billingType === "monthly_fixed_lessons") {
+    // باقة شهرية بعدد حصص محددة
+    const pkgLessons = subj.lessonsPerMonth || 8;
+    const pkgCost = subj.monthlyCost || (pkgLessons * lessonCost);
+    totalAccruedCost = billedMonths * pkgCost;
+  } else {
+    // per_lesson or monthly_elapsed_lessons: حسب الحصص المنفذة / المنقضية
+    totalAccruedCost = totalAttended * lessonCost;
+  }
 
   const totalPaid = subj.totalPaidAmount || 0;
   const netBalance = totalPaid - totalAccruedCost;
@@ -104,14 +115,14 @@ export function calculateSingleSubjectFinance(
     id: subj.id,
     subject: subj.subject,
     studyType: subj.studyType,
-    billingType: subj.billingType || "per_lesson",
+    billingType: billingType,
     lessonCost,
     monthlyCost,
     billedMonthsCount: billedMonths,
     totalAttendedLessons: totalAttended,
     totalAccruedCost,
     totalPaidAmount: totalPaid,
-    remainingLessons: !isMonthly && creditRemaining > 0 ? Math.floor(creditRemaining / lessonCost) : 0,
+    remainingLessons: creditRemaining > 0 ? Math.floor(creditRemaining / lessonCost) : 0,
     remainingBalance: creditRemaining,
     netBalance,
     amountDue,
@@ -182,7 +193,7 @@ export function calculateStudentFinancials(
       .join(" • ");
 
     const explanationAr = isMonthly
-      ? `نظام اشتراك شهري (${billedMonthsCount} شهر × ${monthlyCost} ج.م = ${totalAccruedCost} ج.م) بغض النظر عن الحضور. المواد: [ ${subjectsSummaryText} ]. إجمالي المسدد: ${totalPaidAmount} ج.م. ${
+      ? `نظام اشتراك شهري (${billedMonthsCount} شهر × ${monthlyCost} ج.م = ${totalAccruedCost} ج.م). المواد: [ ${subjectsSummaryText} ]. إجمالي المسدد: ${totalPaidAmount} ج.م. ${
           amountDue > 0 ? `المستحق المطلوب سداده: ${amountDue} ج.م.` : `الرصيد المتبقي: ${creditRemaining} ج.م.`
         }`
       : `مسجل في ${student.subjects.length} مواد: [ ${subjectsSummaryText} ]. إجمالي الحصص المنفذة: ${totalAttendedLessons} حصة بقيمة ${totalAccruedCost} ج.م. المسدد: ${totalPaidAmount} ج.م. ${
@@ -190,7 +201,7 @@ export function calculateStudentFinancials(
         }`;
 
     const explanationEn = isMonthly
-      ? `Monthly subscription (${billedMonthsCount} mo × ${monthlyCost} EGP = ${totalAccruedCost} EGP flat fee). Subjects: [ ${subjectsSummaryText} ]. Paid: ${totalPaidAmount} EGP. ${
+      ? `Monthly subscription (${billedMonthsCount} mo × ${monthlyCost} EGP = ${totalAccruedCost} EGP). Subjects: [ ${subjectsSummaryText} ]. Paid: ${totalPaidAmount} EGP. ${
           amountDue > 0 ? `Due: ${amountDue} EGP.` : `Credit: ${creditRemaining} EGP.`
         }`
       : `Enrolled in ${student.subjects.length} subjects. Attended: ${totalAttendedLessons} lessons (${totalAccruedCost} EGP). Paid: ${totalPaidAmount} EGP. ${

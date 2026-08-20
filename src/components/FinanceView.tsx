@@ -52,7 +52,7 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
 
   // Filter for Student Financial Status
   const [statusFilter, setStatusFilter] = useState<"all" | FinancialStatusType>("all");
-  const [billingTypeFilter, setBillingTypeFilter] = useState<"all" | "per_lesson" | "monthly">("all");
+  const [billingTypeFilter, setBillingTypeFilter] = useState<"all" | "per_lesson" | "monthly" | "monthly_elapsed_lessons" | "monthly_fixed_lessons">("all");
   const [searchQuery, setSearchQuery] = useState("");
 
   // Modals
@@ -120,8 +120,10 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
     return allProfiles.filter(profile => {
       // Billing Type filter
       if (billingTypeFilter !== "all") {
-        if (billingTypeFilter === "monthly" && !profile.isMonthly) return false;
-        if (billingTypeFilter === "per_lesson" && profile.isMonthly) return false;
+        if (billingTypeFilter === "monthly" && profile.billingType !== "monthly") return false;
+        if (billingTypeFilter === "per_lesson" && profile.billingType !== "per_lesson") return false;
+        if (billingTypeFilter === "monthly_elapsed_lessons" && profile.billingType !== "monthly_elapsed_lessons") return false;
+        if (billingTypeFilter === "monthly_fixed_lessons" && profile.billingType !== "monthly_fixed_lessons") return false;
       }
       // Status filter
       if (statusFilter !== "all" && profile.status.type !== statusFilter) {
@@ -331,18 +333,6 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setBillingTypeFilter("per_lesson")}
-                    className={`px-2 py-1 rounded-lg transition flex items-center gap-1 ${
-                      billingTypeFilter === "per_lesson"
-                        ? "bg-white text-blue-700 shadow-2xs font-black"
-                        : "text-slate-600 hover:text-slate-900"
-                    }`}
-                  >
-                    <span>🎟️</span>
-                    <span>{isArabic ? "بالحصة" : "Per Lesson"}</span>
-                  </button>
-                  <button
-                    type="button"
                     onClick={() => setBillingTypeFilter("monthly")}
                     className={`px-2 py-1 rounded-lg transition flex items-center gap-1 ${
                       billingTypeFilter === "monthly"
@@ -351,12 +341,31 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                     }`}
                   >
                     <span>📅</span>
-                    <span>{isArabic ? "اشتراك شهري" : "Monthly"}</span>
-                    {monthlyStudentsCount > 0 && (
-                      <span className="px-1 py-0.2 rounded-full bg-purple-100 text-purple-800 text-[9px]">
-                        {monthlyStudentsCount}
-                      </span>
-                    )}
+                    <span>{isArabic ? "شهر كامل" : "Full Month"}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBillingTypeFilter("monthly_elapsed_lessons")}
+                    className={`px-2 py-1 rounded-lg transition flex items-center gap-1 ${
+                      billingTypeFilter === "monthly_elapsed_lessons"
+                        ? "bg-white text-indigo-700 shadow-2xs font-black"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    <span>🗓️</span>
+                    <span>{isArabic ? "حصص التقويم" : "Elapsed Month"}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBillingTypeFilter("monthly_fixed_lessons")}
+                    className={`px-2 py-1 rounded-lg transition flex items-center gap-1 ${
+                      billingTypeFilter === "monthly_fixed_lessons"
+                        ? "bg-white text-amber-700 shadow-2xs font-black"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    <span>🎯</span>
+                    <span>{isArabic ? "باقة حصص" : "Fixed Pkg"}</span>
                   </button>
                 </div>
 

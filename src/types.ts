@@ -5,7 +5,18 @@
 
 export type StudyType = "group" | "private";
 
-export type BillingType = "per_lesson" | "monthly";
+/**
+ * Supported Billing Types:
+ * - "monthly": شهر كامل ثابت (اشتراك شهري ثابت)
+ * - "per_lesson": محاسبة بالحصة المنفذة
+ * - "monthly_elapsed_lessons": محاسبة حسب عدد حصص الشهر المنقضية (وفقاً للتقويم/الحصص المنفذة)
+ * - "monthly_fixed_lessons": محاسبة شهرية حسب باقة محددة من الحصص (مثال 8 حصص شهرياً)
+ */
+export type BillingType =
+  | "monthly"
+  | "per_lesson"
+  | "monthly_elapsed_lessons"
+  | "monthly_fixed_lessons";
 
 export type StudentStatus = "active" | "stopped";
 
@@ -21,11 +32,12 @@ export interface StudentSubjectPlan {
   id: string;
   subject: string;
   studyType: StudyType; // "group" | "private"
-  billingType?: BillingType; // "per_lesson" (محاسبة بالحصة المنفذة) | "monthly" (اشتراك شهري كامل ثابت)
+  billingType?: BillingType; // طريقة الدفع والمحاسبة للمادة
   academicYear?: string; // الصف الدراسي e.g. "الصف الأول الثانوي"
   curriculum?: string; // المنهج e.g. "مصري", "سعودي", "إماراتي", "دولي"
-  lessonCost: number; // سعر الحصة للمادة (إذا كان بالحصة)
-  monthlyCost?: number; // قيمة الاشتراك الشهري الكامل (إذا كان بالنظام الشهري)
+  lessonCost: number; // سعر الحصة للمادة
+  monthlyCost?: number; // قيمة الاشتراك الشهري الكامل
+  lessonsPerMonth?: number; // عدد الحصص المحددة شهرياً (في حالة باقة الحصص الشهرية مثل 8 حصص)
   customBilledMonths?: number; // عدد الشهور المحتسبة للاشتراك الشهري
   totalPaidAmount?: number; // إجمالي المسدد لهذه المادة
   totalAttendedLessons?: number; // إجمالي الحصص المنفذة لهذه المادة
@@ -49,8 +61,9 @@ export interface Student {
   status: StudentStatus;
   
   // Unified Financial & Billing System
-  billingType?: BillingType; // "per_lesson" (بالحصة المنفذة) أو "monthly" (بالشهر كامل سواء حضر أو لا)
+  billingType?: BillingType; // طريقة الدفع والمحاسبة للطالب
   monthlyCost?: number; // قيمة الاشتراك الشهري الكامل (مثلاً 400 ج.م شهرياً)
+  lessonsPerMonth?: number; // عدد الحصص المحددة شهرياً (مثلاً 8 حصص شهرياً)
   monthlyBillingDay?: number; // يوم تجديد الاشتراك الشهري (الافتراضي 1)
   customBilledMonths?: number; // عدد الأشهر المحتسبة (إذا تم تخصيصها يدوياً)
   subscriptionStartDate?: string; // تاريخ بدء الاشتراك الشهري

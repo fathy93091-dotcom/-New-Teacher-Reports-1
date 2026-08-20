@@ -397,7 +397,10 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     id,
     subject: name,
     studyType: "private",
-    lessonCost: 100
+    billingType: "monthly",
+    lessonCost: 100,
+    monthlyCost: 400,
+    lessonsPerMonth: 8
   });
 
   const [studentSubjects, setStudentSubjects] = useState<StudentSubjectPlan[]>([
@@ -469,7 +472,10 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
           id: `subj_edit_1`,
           subject: st.subject || "الرياضيات",
           studyType: st.studyType || "private",
-          lessonCost: st.lessonCost || 100
+          billingType: st.billingType || "monthly",
+          lessonCost: st.lessonCost || 100,
+          monthlyCost: st.monthlyCost || 400,
+          lessonsPerMonth: st.lessonsPerMonth || 8
         }
       ]);
     }
@@ -518,7 +524,10 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       studyType: primaryStudyType,
       subject: subjectsSummary,
       subjects: editStudentSubjects,
+      billingType: primarySub.billingType || "monthly",
       lessonCost: primarySub.lessonCost || 100,
+      monthlyCost: primarySub.monthlyCost || 400,
+      lessonsPerMonth: primarySub.lessonsPerMonth || 8,
       notes: editNotes
     };
 
@@ -578,7 +587,10 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       status: "active",
       paymentStatus: "unpaid",
       totalPaidAmount: 0,
+      billingType: primarySub.billingType || "monthly",
       lessonCost: primarySub.lessonCost || 100,
+      monthlyCost: primarySub.monthlyCost || 400,
+      lessonsPerMonth: primarySub.lessonsPerMonth || 8,
       remainingLessons: 0,
       remainingBalance: 0,
       notes
@@ -1377,12 +1389,12 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                             required
                             value={sub.subject}
                             onChange={e => handleUpdateSubjectField(idx, { subject: e.target.value })}
-                            placeholder={isArabic ? "اسم المادة (مثال: الرياضيات)" : "Subject"}
-                            className="bg-white border border-slate-200 rounded-xl px-2.5 py-1 text-xs text-slate-800 font-bold focus:outline-none focus:border-blue-500 flex-1 min-w-[120px]"
+                            placeholder={isArabic ? "اكتب اسم المادة (مثال: فيزياء، لغة عربية، كيمياء...)" : "Subject name (e.g. Physics, Arabic, Math...)"}
+                            className="bg-white border border-slate-200 rounded-xl px-2.5 py-1 text-xs text-slate-800 font-bold focus:outline-none focus:border-blue-500 flex-1 min-w-[150px]"
                           />
-                          {/* Quick Chips */}
-                          <div className="hidden lg:flex items-center gap-1 overflow-hidden">
-                            {COMMON_SUBJECT_SUGGESTIONS.slice(0, 4).map(sugg => (
+                          {/* Quick Subject Suggestion Chips */}
+                          <div className="hidden md:flex items-center gap-1 overflow-x-auto py-0.5 max-w-xs">
+                            {COMMON_SUBJECT_SUGGESTIONS.slice(0, 5).map(sugg => (
                               <button
                                 key={sugg}
                                 type="button"
@@ -1440,22 +1452,147 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                         </div>
                       </div>
 
-                      {/* Row 2: Lesson Cost */}
-                      <div className="pt-1.5 border-t border-slate-200/60 flex items-center justify-between">
-                        <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-xl border border-slate-200 w-full sm:w-48">
-                          <span className="text-[11px] font-bold text-slate-500 shrink-0">
-                            {isArabic ? "سعر الحصة:" : "Lesson Cost:"}
-                          </span>
-                          <input
-                            type="number"
-                            min="1"
-                            required
-                            value={sub.lessonCost}
-                            onChange={e => handleUpdateSubjectField(idx, { lessonCost: Number(e.target.value) })}
-                            className="w-full font-black text-slate-800 text-xs focus:outline-none"
-                            placeholder="100"
-                          />
-                          <span className="text-[10px] font-bold text-slate-400 shrink-0">ج.م</span>
+                      {/* Row 2: Billing Type Selection */}
+                      <div className="pt-2 border-t border-slate-200/60">
+                        <div className="text-[10px] font-bold text-slate-500 mb-1.5 flex items-center gap-1">
+                          <DollarSign className="w-3 h-3 text-blue-600" />
+                          <span>{isArabic ? "طريقة الدفع والمحاسبة للمادة:" : "Billing Method for Subject:"}</span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 mb-2">
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateSubjectField(idx, { billingType: "monthly" })}
+                            className={`p-2 rounded-xl border text-[10.5px] font-bold text-center transition flex flex-col items-center justify-center gap-0.5 ${
+                              (sub.billingType || "monthly") === "monthly"
+                                ? "bg-blue-50 border-blue-500 text-blue-800 shadow-2xs"
+                                : "bg-white border-slate-200 text-slate-600 hover:border-slate-300"
+                            }`}
+                          >
+                            <span>📅 {isArabic ? "الشهر كامل" : "Full Month"}</span>
+                            <span className="text-[9px] opacity-75 font-medium">{isArabic ? "اشتراك شهري ثابت (سعر الشهر)" : "Flat Monthly Subscription"}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateSubjectField(idx, { billingType: "monthly_elapsed_lessons" })}
+                            className={`p-2 rounded-xl border text-[10.5px] font-bold text-center transition flex flex-col items-center justify-center gap-0.5 ${
+                              sub.billingType === "monthly_elapsed_lessons"
+                                ? "bg-blue-50 border-blue-500 text-blue-800 shadow-2xs"
+                                : "bg-white border-slate-200 text-slate-600 hover:border-slate-300"
+                            }`}
+                          >
+                            <span>🗓️ {isArabic ? "حصص التقويم المنقضية" : "Elapsed Month Lessons"}</span>
+                            <span className="text-[9px] opacity-75 font-medium">{isArabic ? "حسب حصص الشهر بالتقويم" : "Calendar Elapsed"}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateSubjectField(idx, { billingType: "monthly_fixed_lessons" })}
+                            className={`p-2 rounded-xl border text-[10.5px] font-bold text-center transition flex flex-col items-center justify-center gap-0.5 ${
+                              sub.billingType === "monthly_fixed_lessons"
+                                ? "bg-blue-50 border-blue-500 text-blue-800 shadow-2xs"
+                                : "bg-white border-slate-200 text-slate-600 hover:border-slate-300"
+                            }`}
+                          >
+                            <span>🎯 {isArabic ? "باقة حصص محددة" : "Fixed Lessons / Mo"}</span>
+                            <span className="text-[9px] opacity-75 font-medium">{isArabic ? "عدد حصص ثابت شهرياً" : "Set Lessons Count"}</span>
+                          </button>
+                        </div>
+
+                        {/* Cost Inputs matching selected billing mode */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                          {/* Case 1: Full Month - Only Monthly Cost */}
+                          {(sub.billingType === "monthly" || !sub.billingType) && (
+                            <div className="sm:col-span-2 flex items-center gap-2 bg-white px-3 py-2 rounded-xl border border-blue-200/80 shadow-2xs">
+                              <span className="text-xs font-bold text-slate-700 shrink-0">
+                                {isArabic ? "سعر الاشتراك للشهر الكامل:" : "Full Month Cost:"}
+                              </span>
+                              <input
+                                type="number"
+                                min="1"
+                                required
+                                value={sub.monthlyCost || 400}
+                                onChange={e => {
+                                  const val = Number(e.target.value);
+                                  handleUpdateSubjectField(idx, {
+                                    monthlyCost: val,
+                                    lessonCost: Math.max(1, Math.round(val / 4))
+                                  });
+                                }}
+                                className="w-full font-black text-blue-900 text-sm focus:outline-none"
+                                placeholder="400"
+                              />
+                              <span className="text-xs font-bold text-blue-600 shrink-0">{isArabic ? "ج.م / شهر" : "EGP / month"}</span>
+                            </div>
+                          )}
+
+                          {/* Case 2: Calendar Elapsed Lessons - Lesson Cost */}
+                          {sub.billingType === "monthly_elapsed_lessons" && (
+                            <div className="sm:col-span-2 flex items-center gap-2 bg-white px-3 py-2 rounded-xl border border-slate-200 shadow-2xs">
+                              <span className="text-xs font-bold text-slate-700 shrink-0">
+                                {isArabic ? "سعر الحصة المحتسبة بالتقويم:" : "Lesson Cost (Calendar):"}
+                              </span>
+                              <input
+                                type="number"
+                                min="1"
+                                required
+                                value={sub.lessonCost}
+                                onChange={e => handleUpdateSubjectField(idx, { lessonCost: Number(e.target.value) })}
+                                className="w-full font-black text-slate-800 text-xs focus:outline-none"
+                                placeholder="100"
+                              />
+                              <span className="text-xs font-bold text-slate-500 shrink-0">{isArabic ? "ج.م لكل حصة" : "EGP / lesson"}</span>
+                            </div>
+                          )}
+
+                          {/* Case 3: Fixed Lessons Package - Lesson Cost + Lessons Per Month */}
+                          {sub.billingType === "monthly_fixed_lessons" && (
+                            <>
+                              <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-xl border border-slate-200">
+                                <span className="text-[11px] font-bold text-slate-500 shrink-0">
+                                  {isArabic ? "سعر الحصة:" : "Lesson Cost:"}
+                                </span>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  required
+                                  value={sub.lessonCost}
+                                  onChange={e => {
+                                    const cost = Number(e.target.value);
+                                    handleUpdateSubjectField(idx, {
+                                      lessonCost: cost,
+                                      monthlyCost: cost * (sub.lessonsPerMonth || 8)
+                                    });
+                                  }}
+                                  className="w-full font-black text-slate-800 text-xs focus:outline-none"
+                                  placeholder="100"
+                                />
+                                <span className="text-[10px] font-bold text-slate-400 shrink-0">ج.م</span>
+                              </div>
+
+                              <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-xl border border-slate-200">
+                                <span className="text-[11px] font-bold text-slate-500 shrink-0">
+                                  {isArabic ? "عدد الحصص شهرياً:" : "Lessons / Month:"}
+                                </span>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  max="30"
+                                  value={sub.lessonsPerMonth || 8}
+                                  onChange={e => {
+                                    const count = Number(e.target.value);
+                                    handleUpdateSubjectField(idx, {
+                                      lessonsPerMonth: count,
+                                      monthlyCost: count * (sub.lessonCost || 100)
+                                    });
+                                  }}
+                                  className="w-full font-black text-slate-800 text-xs focus:outline-none"
+                                  placeholder="8"
+                                />
+                                <span className="text-[10px] font-bold text-slate-400 shrink-0">{isArabic ? "حصة" : "lessons"}</span>
+                              </div>
+                            </>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -2098,54 +2235,82 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                           </div>
                         </div>
 
-                        {/* DEDUCTION OPTION */}
-                        <div className="space-y-1.5">
-                          <label className="block font-black text-slate-800 text-xs">
-                            {isArabic ? "هل يتم حساب الحصة وخصم سعرها؟ *" : "Deduct & Charge Lesson Fee? *"}
-                          </label>
+                        {/* Monthly vs Elapsed Lessons Info & Options */}
+                        {(() => {
+                          const isMonthly =
+                            selectedStudent.billingType === "monthly" ||
+                            selectedStudent.subjects?.some(s => s.subject === reportSubject && s.billingType === "monthly");
 
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            <button
-                              type="button"
-                              onClick={() => setReportDeductCost(true)}
-                              className={`p-3 rounded-xl border text-right transition flex items-center justify-between ${
-                                reportDeductCost
-                                  ? "bg-rose-600 text-white border-rose-700 shadow-sm"
-                                  : "bg-white text-slate-700 border-rose-200 hover:bg-rose-100/40"
-                              }`}
-                            >
-                              <div>
-                                <p className="font-bold text-xs">
-                                  {isArabic ? "✅ نعم - يتم الخصم واحتساب الحصة" : "Yes - Deduct & Bill"}
-                                </p>
-                                <p className={`text-[10px] mt-0.5 ${reportDeductCost ? "text-rose-100" : "text-slate-500"}`}>
-                                  {isArabic ? "يتم خصم حصة واحدة من رصيد الطالب" : "Deducts 1 lesson from balance"}
-                                </p>
+                          if (isMonthly) {
+                            return (
+                              <div className="p-3 rounded-xl bg-blue-50 border border-blue-200 text-blue-900 text-xs font-semibold flex items-start gap-2">
+                                <span className="text-sm">📅</span>
+                                <div className="space-y-0.5">
+                                  <p className="font-bold text-blue-950">
+                                    {isArabic ? "نظام المحاسبة: الشهر كامل (اشتراك شهري ثابت)" : "Billing: Full Month Subscription"}
+                                  </p>
+                                  <p className="text-[10.5px] text-blue-800 leading-relaxed">
+                                    {isArabic
+                                      ? "يتم احتساب الشهر ثابتاً، وتسجيل الغياب هنا للمتابعة الأكاديمية فقط بدون كتابة أي إشارة للخصم المالي في التقرير."
+                                      : "Logged purely for academic tracking. No billing deduction text will appear in the report."}
+                                  </p>
+                                </div>
                               </div>
-                              <Check className={`w-4 h-4 ${reportDeductCost ? "text-white" : "text-transparent"}`} />
-                            </button>
+                            );
+                          }
 
-                            <button
-                              type="button"
-                              onClick={() => setReportDeductCost(false)}
-                              className={`p-3 rounded-xl border text-right transition flex items-center justify-between ${
-                                !reportDeductCost
-                                  ? "bg-emerald-700 text-white border-emerald-800 shadow-sm"
-                                  : "bg-white text-slate-700 border-rose-200 hover:bg-rose-100/40"
-                              }`}
-                            >
-                              <div>
-                                <p className="font-bold text-xs">
-                                  {isArabic ? "❌ لا - لا يتم الخصم (غياب بعذر)" : "No - Excused (No Fee)"}
-                                </p>
-                                <p className={`text-[10px] mt-0.5 ${!reportDeductCost ? "text-emerald-100" : "text-slate-500"}`}>
-                                  {isArabic ? "لا يخصم من الرصيد ولا تترتب رسوم" : "No balance deducted"}
-                                </p>
+                          return (
+                            <div className="space-y-1.5">
+                              <label className="block font-black text-slate-800 text-xs">
+                                {isArabic
+                                  ? "نظام حصص التقويم المنقضية (تحتسب الحصة إذا حضرها، أو تستثنى لغياب بعذر):"
+                                  : "Calendar Elapsed Lessons (Charge if attended or non-excused):"}
+                              </label>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setReportDeductCost(true)}
+                                  className={`p-3 rounded-xl border text-right transition flex items-center justify-between ${
+                                    reportDeductCost
+                                      ? "bg-rose-600 text-white border-rose-700 shadow-sm"
+                                      : "bg-white text-slate-700 border-rose-200 hover:bg-rose-100/40"
+                                  }`}
+                                >
+                                  <div>
+                                    <p className="font-bold text-xs">
+                                      {isArabic ? "✅ احتساب الحصة وخصمها" : "Yes - Deduct & Bill"}
+                                    </p>
+                                    <p className={`text-[10px] mt-0.5 ${reportDeductCost ? "text-rose-100" : "text-slate-500"}`}>
+                                      {isArabic ? "غياب غير معذور (تحتسب الحصة مالياً)" : "Non-excused absence"}
+                                    </p>
+                                  </div>
+                                  <Check className={`w-4 h-4 ${reportDeductCost ? "text-white" : "text-transparent"}`} />
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => setReportDeductCost(false)}
+                                  className={`p-3 rounded-xl border text-right transition flex items-center justify-between ${
+                                    !reportDeductCost
+                                      ? "bg-emerald-700 text-white border-emerald-800 shadow-sm"
+                                      : "bg-white text-slate-700 border-rose-200 hover:bg-rose-100/40"
+                                  }`}
+                                >
+                                  <div>
+                                    <p className="font-bold text-xs">
+                                      {isArabic ? "❌ استثناء الحصة (غياب بعذر)" : "No - Excused (No Fee)"}
+                                    </p>
+                                    <p className={`text-[10px] mt-0.5 ${!reportDeductCost ? "text-emerald-100" : "text-slate-500"}`}>
+                                      {isArabic ? "لا تحتسب الحصة ولا تترتب رسوم" : "No balance deducted"}
+                                    </p>
+                                  </div>
+                                  <Check className={`w-4 h-4 ${!reportDeductCost ? "text-white" : "text-transparent"}`} />
+                                </button>
                               </div>
-                              <Check className={`w-4 h-4 ${!reportDeductCost ? "text-white" : "text-transparent"}`} />
-                            </button>
-                          </div>
-                        </div>
+                            </div>
+                          );
+                        })()}
 
                         {/* Optional Absent Note */}
                         <div>
@@ -2174,9 +2339,21 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                           <button
                             type="button"
                             onClick={() => {
+                              const isMonthly =
+                                selectedStudent.billingType === "monthly" ||
+                                selectedStudent.subjects?.some(s => s.subject === reportSubject && s.billingType === "monthly");
+
                               const absentReportText = isArabic
-                                ? `📌 تقرير غياب طالب\n• الطالب: ${selectedStudent.fullName}\n• المادة: ${reportSubject}\n• الحصة رقم: #${reportLessonNumber}\n• التاريخ: ${reportDate}\n• حالة الحضور: غائب\n• حساب الحصة: ${reportDeductCost ? "تم احتساب الحصة وخصمها من الرصيد" : "لم يتم الخصم (غياب بعذر)"}${absentNotes ? `\n• سبب/ملاحظات: ${absentNotes}` : ""}`
-                                : `📌 Student Absence Report\n• Student: ${selectedStudent.fullName}\n• Subject: ${reportSubject}\n• Lesson #: ${reportLessonNumber}\n• Date: ${reportDate}\n• Attendance: Absent\n• Billed: ${reportDeductCost ? "Yes (Deducted)" : "No (Excused)"}${absentNotes ? `\n• Notes: ${absentNotes}` : ""}`;
+                                ? `📌 تقرير غياب طالب\n• الطالب: ${selectedStudent.fullName}\n• المادة: ${reportSubject}\n• الحصة رقم: #${reportLessonNumber}\n• التاريخ: ${reportDate}\n• حالة الحضور: غائب${
+                                    !isMonthly
+                                      ? `\n• حساب الحصة: ${reportDeductCost ? "تم احتساب الحصة وخصمها من الرصيد" : "لم يتم الخصم (غياب بعذر)"}`
+                                      : ""
+                                  }${absentNotes ? `\n• سبب/ملاحظات: ${absentNotes}` : ""}`
+                                : `📌 Student Absence Report\n• Student: ${selectedStudent.fullName}\n• Subject: ${reportSubject}\n• Lesson #: ${reportLessonNumber}\n• Date: ${reportDate}\n• Attendance: Absent${
+                                    !isMonthly
+                                      ? `\n• Billed: ${reportDeductCost ? "Yes (Deducted)" : "No (Excused)"}`
+                                      : ""
+                                  }${absentNotes ? `\n• Notes: ${absentNotes}` : ""}`;
 
                               onAddReport({
                                 studentId: selectedStudent.id,
@@ -2185,7 +2362,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                                 lessonNumber: reportLessonNumber,
                                 date: reportDate,
                                 attendance: "absent",
-                                deductCost: reportDeductCost,
+                                deductCost: isMonthly ? true : reportDeductCost,
                                 homeworkStatus: "not_done",
                                 teacherNotes: absentNotes || (isArabic ? "غائب" : "Absent"),
                                 aiInstructions: "",
@@ -3261,11 +3438,12 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                             required
                             value={sub.subject}
                             onChange={e => handleUpdateEditSubjectField(idx, { subject: e.target.value })}
-                            className="bg-white border border-slate-200 rounded-xl px-2.5 py-1 text-xs text-slate-800 font-bold focus:outline-none focus:border-blue-500 flex-1 min-w-[120px]"
+                            placeholder={isArabic ? "اكتب اسم المادة (مثال: فيزياء، لغة عربية، كيمياء...)" : "Subject name (e.g. Physics, Arabic, Math...)"}
+                            className="bg-white border border-slate-200 rounded-xl px-2.5 py-1 text-xs text-slate-800 font-bold focus:outline-none focus:border-blue-500 flex-1 min-w-[150px]"
                           />
-                          {/* Quick Chips */}
-                          <div className="hidden lg:flex items-center gap-1 overflow-hidden">
-                            {COMMON_SUBJECT_SUGGESTIONS.slice(0, 4).map(sugg => (
+                          {/* Quick Subject Suggestion Chips */}
+                          <div className="hidden md:flex items-center gap-1 overflow-x-auto py-0.5 max-w-xs">
+                            {COMMON_SUBJECT_SUGGESTIONS.slice(0, 5).map(sugg => (
                               <button
                                 key={sugg}
                                 type="button"
@@ -3323,21 +3501,147 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                         </div>
                       </div>
 
-                      {/* Row 2: Lesson Cost */}
-                      <div className="pt-1.5 border-t border-slate-200/60 flex items-center justify-between">
-                        <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-xl border border-slate-200 w-full sm:w-48">
-                          <span className="text-[11px] font-bold text-slate-500 shrink-0">
-                            {isArabic ? "سعر الحصة:" : "Lesson Cost:"}
-                          </span>
-                          <input
-                            type="number"
-                            min="1"
-                            required
-                            value={sub.lessonCost}
-                            onChange={e => handleUpdateEditSubjectField(idx, { lessonCost: Number(e.target.value) })}
-                            className="w-full font-black text-slate-800 text-xs focus:outline-none"
-                          />
-                          <span className="text-[10px] font-bold text-slate-400 shrink-0">ج.م</span>
+                      {/* Row 2: Billing Type Selection */}
+                      <div className="pt-2 border-t border-slate-200/60">
+                        <div className="text-[10px] font-bold text-slate-500 mb-1.5 flex items-center gap-1">
+                          <DollarSign className="w-3 h-3 text-blue-600" />
+                          <span>{isArabic ? "طريقة الدفع والمحاسبة للمادة:" : "Billing Method for Subject:"}</span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 mb-2">
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateEditSubjectField(idx, { billingType: "monthly" })}
+                            className={`p-2 rounded-xl border text-[10.5px] font-bold text-center transition flex flex-col items-center justify-center gap-0.5 ${
+                              (sub.billingType || "monthly") === "monthly"
+                                ? "bg-blue-50 border-blue-500 text-blue-800 shadow-2xs"
+                                : "bg-white border-slate-200 text-slate-600 hover:border-slate-300"
+                            }`}
+                          >
+                            <span>📅 {isArabic ? "الشهر كامل" : "Full Month"}</span>
+                            <span className="text-[9px] opacity-75 font-medium">{isArabic ? "اشتراك شهري ثابت (سعر الشهر)" : "Flat Monthly Subscription"}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateEditSubjectField(idx, { billingType: "monthly_elapsed_lessons" })}
+                            className={`p-2 rounded-xl border text-[10.5px] font-bold text-center transition flex flex-col items-center justify-center gap-0.5 ${
+                              sub.billingType === "monthly_elapsed_lessons"
+                                ? "bg-blue-50 border-blue-500 text-blue-800 shadow-2xs"
+                                : "bg-white border-slate-200 text-slate-600 hover:border-slate-300"
+                            }`}
+                          >
+                            <span>🗓️ {isArabic ? "حصص التقويم المنقضية" : "Elapsed Month Lessons"}</span>
+                            <span className="text-[9px] opacity-75 font-medium">{isArabic ? "حسب حصص الشهر بالتقويم" : "Calendar Elapsed"}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateEditSubjectField(idx, { billingType: "monthly_fixed_lessons" })}
+                            className={`p-2 rounded-xl border text-[10.5px] font-bold text-center transition flex flex-col items-center justify-center gap-0.5 ${
+                              sub.billingType === "monthly_fixed_lessons"
+                                ? "bg-blue-50 border-blue-500 text-blue-800 shadow-2xs"
+                                : "bg-white border-slate-200 text-slate-600 hover:border-slate-300"
+                            }`}
+                          >
+                            <span>🎯 {isArabic ? "باقة حصص محددة" : "Fixed Lessons / Mo"}</span>
+                            <span className="text-[9px] opacity-75 font-medium">{isArabic ? "عدد حصص ثابت شهرياً" : "Set Lessons Count"}</span>
+                          </button>
+                        </div>
+
+                        {/* Cost Inputs matching selected billing mode */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                          {/* Case 1: Full Month - Only Monthly Cost */}
+                          {(sub.billingType === "monthly" || !sub.billingType) && (
+                            <div className="sm:col-span-2 flex items-center gap-2 bg-white px-3 py-2 rounded-xl border border-blue-200/80 shadow-2xs">
+                              <span className="text-xs font-bold text-slate-700 shrink-0">
+                                {isArabic ? "سعر الاشتراك للشهر الكامل:" : "Full Month Cost:"}
+                              </span>
+                              <input
+                                type="number"
+                                min="1"
+                                required
+                                value={sub.monthlyCost || 400}
+                                onChange={e => {
+                                  const val = Number(e.target.value);
+                                  handleUpdateEditSubjectField(idx, {
+                                    monthlyCost: val,
+                                    lessonCost: Math.max(1, Math.round(val / 4))
+                                  });
+                                }}
+                                className="w-full font-black text-blue-900 text-sm focus:outline-none"
+                                placeholder="400"
+                              />
+                              <span className="text-xs font-bold text-blue-600 shrink-0">{isArabic ? "ج.م / شهر" : "EGP / month"}</span>
+                            </div>
+                          )}
+
+                          {/* Case 2: Calendar Elapsed Lessons - Lesson Cost */}
+                          {sub.billingType === "monthly_elapsed_lessons" && (
+                            <div className="sm:col-span-2 flex items-center gap-2 bg-white px-3 py-2 rounded-xl border border-slate-200 shadow-2xs">
+                              <span className="text-xs font-bold text-slate-700 shrink-0">
+                                {isArabic ? "سعر الحصة المحتسبة بالتقويم:" : "Lesson Cost (Calendar):"}
+                              </span>
+                              <input
+                                type="number"
+                                min="1"
+                                required
+                                value={sub.lessonCost}
+                                onChange={e => handleUpdateEditSubjectField(idx, { lessonCost: Number(e.target.value) })}
+                                className="w-full font-black text-slate-800 text-xs focus:outline-none"
+                                placeholder="100"
+                              />
+                              <span className="text-xs font-bold text-slate-500 shrink-0">{isArabic ? "ج.م لكل حصة" : "EGP / lesson"}</span>
+                            </div>
+                          )}
+
+                          {/* Case 3: Fixed Lessons Package - Lesson Cost + Lessons Per Month */}
+                          {sub.billingType === "monthly_fixed_lessons" && (
+                            <>
+                              <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-xl border border-slate-200">
+                                <span className="text-[11px] font-bold text-slate-500 shrink-0">
+                                  {isArabic ? "سعر الحصة:" : "Lesson Cost:"}
+                                </span>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  required
+                                  value={sub.lessonCost}
+                                  onChange={e => {
+                                    const cost = Number(e.target.value);
+                                    handleUpdateEditSubjectField(idx, {
+                                      lessonCost: cost,
+                                      monthlyCost: cost * (sub.lessonsPerMonth || 8)
+                                    });
+                                  }}
+                                  className="w-full font-black text-slate-800 text-xs focus:outline-none"
+                                  placeholder="100"
+                                />
+                                <span className="text-[10px] font-bold text-slate-400 shrink-0">ج.م</span>
+                              </div>
+
+                              <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-xl border border-slate-200">
+                                <span className="text-[11px] font-bold text-slate-500 shrink-0">
+                                  {isArabic ? "عدد الحصص شهرياً:" : "Lessons / Month:"}
+                                </span>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  max="30"
+                                  value={sub.lessonsPerMonth || 8}
+                                  onChange={e => {
+                                    const count = Number(e.target.value);
+                                    handleUpdateEditSubjectField(idx, {
+                                      lessonsPerMonth: count,
+                                      monthlyCost: count * (sub.lessonCost || 100)
+                                    });
+                                  }}
+                                  className="w-full font-black text-slate-800 text-xs focus:outline-none"
+                                  placeholder="8"
+                                />
+                                <span className="text-[10px] font-bold text-slate-400 shrink-0">{isArabic ? "حصة" : "lessons"}</span>
+                              </div>
+                            </>
+                          )}
                         </div>
                       </div>
                     </div>

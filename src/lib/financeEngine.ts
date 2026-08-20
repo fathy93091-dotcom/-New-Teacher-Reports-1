@@ -158,11 +158,11 @@ export function calculateStudentFinancialProfile(
   const totalPaidAmount = Math.max(sumOfTransactions, student.totalPaidAmount || 0);
 
   // Determine Billing Type
-  const isMonthly = student.billingType === "monthly" || (student.subjects && student.subjects.length > 0 && student.subjects.every(s => s.billingType === "monthly"));
-  const billingType: BillingType = isMonthly ? "monthly" : "per_lesson";
+  const billingType: BillingType = student.billingType || (student.subjects && student.subjects[0]?.billingType) || "per_lesson";
+  const isMonthly = billingType === "monthly" || billingType === "monthly_fixed_lessons";
 
   const lessonCost = Math.max(1, student.lessonCost || 100);
-  const monthlyCost = Math.max(1, student.monthlyCost || student.lessonCost || 400);
+  const monthlyCost = Math.max(1, student.monthlyCost || (student.lessonsPerMonth ? student.lessonsPerMonth * lessonCost : lessonCost * 4));
 
   const defaultElapsedMonths = getElapsedMonths(student.subscriptionStartDate || student.createdAt);
   const billedMonthsCount = Math.max(1, student.customBilledMonths || defaultElapsedMonths);
@@ -172,26 +172,38 @@ export function calculateStudentFinancialProfile(
   // Handle Multi-subject breakdown if defined
   if (student.subjects && student.subjects.length > 0) {
     attendedLessonsCost = student.subjects.reduce((sum, subj) => {
-      if (subj.billingType === "monthly") {
-        const subMonths = Math.max(1, subj.customBilledMonths || billedMonthsCount);
-        const subCost = Math.max(1, subj.monthlyCost || subj.lessonCost || 400);
-        return sum + (subMonths * subCost);
+      const subBilling = subj.billingType || "per_lesson";
+      const subLessonCost = Math.max(1, subj.lessonCost || 100);
+      const subMonthlyCost = Math.max(1, subj.monthlyCost || (subj.lessonsPerMonth ? subj.lessonsPerMonth * subLessonCost : subLessonCost * 4));
+      const subMonths = Math.max(1, subj.customBilledMonths || billedMonthsCount);
+
+      if (subBilling === "monthly") {
+        return sum + (subMonths * subMonthlyCost);
+      } else if (subBilling === "monthly_fixed_lessons") {
+        const pkgLessons = subj.lessonsPerMonth || 8;
+        const pkgCost = subj.monthlyCost || (pkgLessons * subLessonCost);
+        return sum + (subMonths * pkgCost);
       } else {
-        // Per lesson
+        // Per lesson or elapsed lessons
         const subjAttended = attendanceRecords.filter(
           ar => ar.studentId === student.id && (ar.subject === subj.subject || (!ar.subject && student.subjects?.length === 1)) && (ar.attendance === "present" || ar.deducted)
         ).length;
-        const count = Math.max(subjAttended, subj.totalAttendedLessons || (attendedLessonsCount / (student.subjects?.length || 1)));
-        return sum + (Math.round(count) * (subj.lessonCost || 100));
+        const count = Math.max(subjAttended, subj.totalAttendedLessons || 0);
+        return sum + (count * subLessonCost);
       }
     }, 0);
   } else {
     // Single subject
-    if (isMonthly) {
-      // Monthly Subscription - flat fee per month regardless of attendance
+    if (billingType === "monthly") {
+      // Monthly Flat Subscription
       attendedLessonsCost = billedMonthsCount * monthlyCost;
+    } else if (billingType === "monthly_fixed_lessons") {
+      // Monthly Fixed Lesson Package
+      const pkgLessons = student.lessonsPerMonth || 8;
+      const pkgCost = student.monthlyCost || (pkgLessons * lessonCost);
+      attendedLessonsCost = billedMonthsCount * pkgCost;
     } else {
-      // Per Lesson billing
+      // Per Lesson billing or calendar elapsed lessons
       attendedLessonsCost = attendedLessonsCount * lessonCost;
     }
   }
