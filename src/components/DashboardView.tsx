@@ -398,9 +398,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                           </span>
                         </div>
                         <p className="text-[10px] text-rose-700 font-semibold mt-0.5">
-                          {isArabic
-                            ? `مستحق سداد: ${summary.amountDue} ج.م (${summary.totalAttendedLessons} حصص منفذة)`
-                            : `Due: ${summary.amountDue} EGP (${summary.totalAttendedLessons} attended)`}
+                          {student.billingType === "monthly" || student.subjects?.some(s => s.billingType === "monthly")
+                            ? (isArabic
+                                ? `مستحق سداد: ${summary.amountDue} ج.م (اشتراك شهري كامل)`
+                                : `Due: ${summary.amountDue} EGP (Monthly Subscription)`)
+                            : (isArabic
+                                ? `مستحق سداد: ${summary.amountDue} ج.م (${summary.totalAttendedLessons} حصص منفذة)`
+                                : `Due: ${summary.amountDue} EGP (${summary.totalAttendedLessons} attended)`)}
                         </p>
                       </div>
                       

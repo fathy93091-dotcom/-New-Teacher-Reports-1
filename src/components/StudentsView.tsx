@@ -2510,15 +2510,10 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                     }
                   });
 
-                  // Classify reports as Active or Archived
+                  // Classify reports as Active or Archived (Only manual archive by teacher, NO auto-hiding or deleting)
                   const classifiedReports = allPastReports.map(rep => {
-                    const isOld = isReportOlderThan6Months(rep.date || rep.createdAt);
-                    const isArchived = rep.archived === true || (rep.archived !== false && isOld);
-                    const archiveReason: "auto_6_months" | "manual" | null = isArchived
-                      ? isOld
-                        ? "auto_6_months"
-                        : "manual"
-                      : null;
+                    const isArchived = rep.archived === true;
+                    const archiveReason: "manual" | null = isArchived ? "manual" : null;
 
                     return {
                       ...rep,
@@ -2566,7 +2561,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                         <div className="p-2 rounded-2xl bg-slate-100/90 border border-slate-200/80 space-y-2">
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <div className="flex items-center gap-1.5 p-1 bg-white rounded-xl border border-slate-200 shadow-2xs">
-                              {/* Tab 1: Active Reports (< 6 months) */}
+                              {/* Tab 1: Active Reports */}
                               <button
                                 type="button"
                                 onClick={() => setReportArchiveFilter("active")}
@@ -2577,7 +2572,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                                 }`}
                               >
                                 <Sparkles className="w-3.5 h-3.5" />
-                                <span>{isArabic ? "التقارير النشطة" : "Active"}</span>
+                                <span>{isArabic ? "سجل التقارير الحالية" : "Active Reports"}</span>
                                 <span className={`px-1.5 py-0.2 text-[10px] rounded-full font-black ${
                                   reportArchiveFilter === "active"
                                     ? "bg-purple-800 text-purple-100"
@@ -2587,7 +2582,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                                 </span>
                               </button>
 
-                              {/* Tab 2: Archived Reports (> 6 months) */}
+                              {/* Tab 2: Archived Reports */}
                               <button
                                 type="button"
                                 onClick={() => setReportArchiveFilter("archived")}
@@ -2598,7 +2593,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                                 }`}
                               >
                                 <FolderArchive className="w-3.5 h-3.5 text-amber-400" />
-                                <span>{isArabic ? "أرشيف التقارير (+6 أشهر)" : "Archive (+6m)"}</span>
+                                <span>{isArabic ? "التقارير المؤرشفة" : "Archived Reports"}</span>
                                 <span className={`px-1.5 py-0.2 text-[10px] rounded-full font-black ${
                                   reportArchiveFilter === "archived"
                                     ? "bg-slate-950 text-amber-300"
@@ -2629,10 +2624,10 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                               </button>
                             </div>
 
-                            {/* Auto-archive optimization badge */}
-                            <span className="text-[10.5px] font-bold text-slate-500 flex items-center gap-1 px-2">
-                              <Clock className="w-3.5 h-3.5 text-slate-400" />
-                              <span>{isArabic ? "الأرشفة التلقائية بعد 6 أشهر مفعلة ⚡" : "Auto-archive (>6m) active ⚡"}</span>
+                            {/* Data permanence badge */}
+                            <span className="text-[10.5px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200/70 rounded-xl px-2.5 py-1 flex items-center gap-1.5">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>{isArabic ? "الحفظ الدائم مفعل (لا يتم مسح أي بيانات إلا يدويًا)" : "Permanent storage active (manual delete only)"}</span>
                             </span>
                           </div>
 

@@ -1,5 +1,5 @@
 import express from "express";
-import { generateGoStarsReportAI } from "./ai";
+import { generateGoStarsReportAI, generateGoStarsGroupReportAI } from "./ai";
 
 export const app = express();
 
@@ -14,7 +14,7 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
-// AI Report Generation endpoint
+// Single Student AI Report Generation endpoint
 app.post("/api/ai/generate-report", async (req, res) => {
   try {
     const reportText = await generateGoStarsReportAI(req.body);
@@ -22,6 +22,17 @@ app.post("/api/ai/generate-report", async (req, res) => {
   } catch (err: any) {
     console.error("Error in AI report route:", err);
     res.status(500).json({ error: "Failed to generate report", details: err.message });
+  }
+});
+
+// Group Follow-up AI Report Generation endpoint
+app.post("/api/ai/generate-group-report", async (req, res) => {
+  try {
+    const reportText = await generateGoStarsGroupReportAI(req.body);
+    res.json({ success: true, reportText });
+  } catch (err: any) {
+    console.error("Error in AI group report route:", err);
+    res.status(500).json({ error: "Failed to generate group report", details: err.message });
   }
 });
 

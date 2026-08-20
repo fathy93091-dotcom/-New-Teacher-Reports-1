@@ -1,10 +1,14 @@
-import { Student, AttendanceRecord, StudentSubjectPlan, StudyType } from "../types";
+import { Student, AttendanceRecord, StudentSubjectPlan, StudyType, BillingType } from "../types";
+import { getElapsedMonths } from "./financeEngine";
 
 export interface SubjectFinancialDetail {
   id: string;
   subject: string;
   studyType: StudyType;
+  billingType?: BillingType;
   lessonCost: number;
+  monthlyCost?: number;
+  billedMonthsCount?: number;
   totalAttendedLessons: number;
   totalAccruedCost: number;
   totalPaidAmount: number;
@@ -22,8 +26,12 @@ export interface SubjectFinancialDetail {
 }
 
 export interface StudentFinancialSummary {
+  billingType: BillingType;
+  isMonthly: boolean;
   totalAttendedLessons: number;
   lessonCost: number;
+  monthlyCost?: number;
+  billedMonthsCount?: number;
   totalAccruedCost: number;
   totalPaidAmount: number;
   remainingLessons: number;
@@ -47,9 +55,12 @@ export function calculateSingleSubjectFinance(
   studentId: string,
   attendanceRecords?: AttendanceRecord[]
 ): SubjectFinancialDetail {
+  const isMonthly = subj.billingType === "monthly";
   const lessonCost = Math.max(1, subj.lessonCost || 100);
-  let totalAttended = subj.totalAttendedLessons || 0;
+  const monthlyCost = Math.max(1, subj.monthlyCost || subj.lessonCost || 400);
+  const billedMonths = Math.max(1, subj.customBilledMonths || 1);
 
+  let totalAttended = subj.totalAttendedLessons || 0;
   if (attendanceRecords && attendanceRecords.length > 0) {
     const presentRecords = attendanceRecords.filter(
       r => r.studentId === studentId && (r.attendance === "present" || r.deducted)
@@ -57,7 +68,10 @@ export function calculateSingleSubjectFinance(
     totalAttended = Math.max(totalAttended, presentRecords.length);
   }
 
-  const totalAccruedCost = totalAttended * lessonCost;
+  const totalAccruedCost = isMonthly
+    ? billedMonths * monthlyCost
+    : totalAttended * lessonCost;
+
   const totalPaid = subj.totalPaidAmount || 0;
   const netBalance = totalPaid - totalAccruedCost;
   const amountDue = netBalance < 0 ? Math.abs(netBalance) : 0;
@@ -90,11 +104,14 @@ export function calculateSingleSubjectFinance(
     id: subj.id,
     subject: subj.subject,
     studyType: subj.studyType,
+    billingType: subj.billingType || "per_lesson",
     lessonCost,
+    monthlyCost,
+    billedMonthsCount: billedMonths,
     totalAttendedLessons: totalAttended,
     totalAccruedCost,
     totalPaidAmount: totalPaid,
-    remainingLessons: creditRemaining > 0 ? Math.floor(creditRemaining / lessonCost) : 0,
+    remainingLessons: !isMonthly && creditRemaining > 0 ? Math.floor(creditRemaining / lessonCost) : 0,
     remainingBalance: creditRemaining,
     netBalance,
     amountDue,
@@ -112,6 +129,12 @@ export function calculateStudentFinancials(
   student: Student,
   attendanceRecords?: AttendanceRecord[]
 ): StudentFinancialSummary {
+  const isMonthly = student.billingType === "monthly" || (student.subjects && student.subjects.length > 0 && student.subjects.every(s => s.billingType === "monthly"));
+  const billingType: BillingType = isMonthly ? "monthly" : "per_lesson";
+  const defaultElapsedMonths = getElapsedMonths(student.subscriptionStartDate || student.createdAt);
+  const billedMonthsCount = Math.max(1, student.customBilledMonths || defaultElapsedMonths);
+  const monthlyCost = Math.max(1, student.monthlyCost || student.lessonCost || 400);
+
   // If student has multiple subjects defined
   if (student.subjects && student.subjects.length > 0) {
     const subjectsDetails = student.subjects.map(subj =>
@@ -125,7 +148,7 @@ export function calculateStudentFinancials(
     const amountDue = netBalance < 0 ? Math.abs(netBalance) : 0;
     const creditRemaining = netBalance > 0 ? netBalance : 0;
     const remainingBalance = creditRemaining;
-    const remainingLessons = creditRemaining > 0 ? Math.floor(creditRemaining / Math.max(1, student.lessonCost || 100)) : 0;
+    const remainingLessons = !isMonthly && creditRemaining > 0 ? Math.floor(creditRemaining / Math.max(1, student.lessonCost || 100)) : 0;
     const isFullyPaid = amountDue === 0;
 
     const avgLessonCost = Math.round(
@@ -155,20 +178,32 @@ export function calculateStudentFinancials(
     }
 
     const subjectsSummaryText = student.subjects
-      .map(s => `${s.subject} (${s.lessonCost} ج.م)`)
+      .map(s => `${s.subject} (${s.billingType === "monthly" ? `${s.monthlyCost || s.lessonCost} ج.م/شهر` : `${s.lessonCost} ج.م/حصة`})`)
       .join(" • ");
 
-    const explanationAr = `مسجل في ${student.subjects.length} مواد: [ ${subjectsSummaryText} ]. إجمالي الحصص المنفذة: ${totalAttendedLessons} حصة بقيمة ${totalAccruedCost} ج.م. المسدد: ${totalPaidAmount} ج.م. ${
-      amountDue > 0 ? `المستحق المطلوب سداده: ${amountDue} ج.م.` : `الرصيد المتبقي: ${creditRemaining} ج.م.`
-    }`;
+    const explanationAr = isMonthly
+      ? `نظام اشتراك شهري (${billedMonthsCount} شهر × ${monthlyCost} ج.م = ${totalAccruedCost} ج.م) بغض النظر عن الحضور. المواد: [ ${subjectsSummaryText} ]. إجمالي المسدد: ${totalPaidAmount} ج.م. ${
+          amountDue > 0 ? `المستحق المطلوب سداده: ${amountDue} ج.م.` : `الرصيد المتبقي: ${creditRemaining} ج.م.`
+        }`
+      : `مسجل في ${student.subjects.length} مواد: [ ${subjectsSummaryText} ]. إجمالي الحصص المنفذة: ${totalAttendedLessons} حصة بقيمة ${totalAccruedCost} ج.م. المسدد: ${totalPaidAmount} ج.م. ${
+          amountDue > 0 ? `المستحق المطلوب سداده: ${amountDue} ج.م.` : `الرصيد المتبقي: ${creditRemaining} ج.م.`
+        }`;
 
-    const explanationEn = `Enrolled in ${student.subjects.length} subjects. Attended: ${totalAttendedLessons} lessons (${totalAccruedCost} EGP). Paid: ${totalPaidAmount} EGP. ${
-      amountDue > 0 ? `Due: ${amountDue} EGP.` : `Credit: ${creditRemaining} EGP.`
-    }`;
+    const explanationEn = isMonthly
+      ? `Monthly subscription (${billedMonthsCount} mo × ${monthlyCost} EGP = ${totalAccruedCost} EGP flat fee). Subjects: [ ${subjectsSummaryText} ]. Paid: ${totalPaidAmount} EGP. ${
+          amountDue > 0 ? `Due: ${amountDue} EGP.` : `Credit: ${creditRemaining} EGP.`
+        }`
+      : `Enrolled in ${student.subjects.length} subjects. Attended: ${totalAttendedLessons} lessons (${totalAccruedCost} EGP). Paid: ${totalPaidAmount} EGP. ${
+          amountDue > 0 ? `Due: ${amountDue} EGP.` : `Credit: ${creditRemaining} EGP.`
+        }`;
 
     return {
+      billingType,
+      isMonthly,
       totalAttendedLessons,
       lessonCost: avgLessonCost,
+      monthlyCost,
+      billedMonthsCount,
       totalAccruedCost,
       totalPaidAmount,
       remainingLessons,
@@ -200,12 +235,15 @@ export function calculateStudentFinancials(
     totalAttended = Math.max(totalAttended, presentRecords.length);
   }
 
-  const totalAccruedCost = totalAttended * lessonCost;
+  const totalAccruedCost = isMonthly
+    ? billedMonthsCount * monthlyCost
+    : totalAttended * lessonCost;
+
   const netBalance = totalPaidAmount - totalAccruedCost;
   const amountDue = netBalance < 0 ? Math.abs(netBalance) : 0;
   const creditRemaining = netBalance > 0 ? netBalance : 0;
   const remainingBalance = creditRemaining;
-  const remainingLessons = creditRemaining > 0 ? Math.floor(creditRemaining / lessonCost) : 0;
+  const remainingLessons = !isMonthly && creditRemaining > 0 ? Math.floor(creditRemaining / lessonCost) : 0;
   const isFullyPaid = netBalance >= 0;
 
   let badgeLabelAr = "";
@@ -214,7 +252,7 @@ export function calculateStudentFinancials(
   let explanationAr = "";
   let explanationEn = "";
 
-  if (totalAttended === 0 && totalPaidAmount === 0) {
+  if (totalAttended === 0 && totalPaidAmount === 0 && (!isMonthly || totalAccruedCost === 0)) {
     badgeLabelAr = "لا توجد حركة";
     badgeLabelEn = "No Activity";
     badgeColor = "blue";
@@ -224,25 +262,39 @@ export function calculateStudentFinancials(
     badgeLabelAr = `مستحق سداد: ${amountDue} ج.م`;
     badgeLabelEn = `Due: ${amountDue} EGP`;
     badgeColor = "rose";
-    explanationAr = `حضر ${totalAttended} حصص بقيمة ${totalAccruedCost} ج.م، والمسدد ${totalPaidAmount} ج.م. المطلوب سداده: ${amountDue} ج.م.`;
-    explanationEn = `Attended ${totalAttended} lessons (${totalAccruedCost} EGP), paid ${totalPaidAmount} EGP. Due amount: ${amountDue} EGP.`;
+    explanationAr = isMonthly
+      ? `اشتراك شهري: ${billedMonthsCount} شهر × ${monthlyCost} ج.م = ${totalAccruedCost} ج.م (يحسب الشهر كاملاً سواء حضر أو غاب)، والمسدد ${totalPaidAmount} ج.م. المطلوب سداده: ${amountDue} ج.م.`
+      : `حضر ${totalAttended} حصص بقيمة ${totalAccruedCost} ج.م، والمسدد ${totalPaidAmount} ج.م. المطلوب سداده: ${amountDue} ج.م.`;
+    explanationEn = isMonthly
+      ? `Monthly subscription: ${billedMonthsCount} mo × ${monthlyCost} EGP = ${totalAccruedCost} EGP (flat fee), paid ${totalPaidAmount} EGP. Due: ${amountDue} EGP.`
+      : `Attended ${totalAttended} lessons (${totalAccruedCost} EGP), paid ${totalPaidAmount} EGP. Due amount: ${amountDue} EGP.`;
   } else if (creditRemaining > 0) {
     badgeLabelAr = `رصيد متبقي: +${creditRemaining} ج.م`;
     badgeLabelEn = `Credit: +${creditRemaining} EGP`;
     badgeColor = "emerald";
-    explanationAr = `حضر ${totalAttended} حصص بقيمة ${totalAccruedCost} ج.م، والمسدد ${totalPaidAmount} ج.م. الرصيد المتبقي له: ${creditRemaining} ج.م.`;
-    explanationEn = `Attended ${totalAttended} lessons (${totalAccruedCost} EGP), paid ${totalPaidAmount} EGP. Credit left: ${creditRemaining} EGP.`;
+    explanationAr = isMonthly
+      ? `اشتراك شهري: ${billedMonthsCount} شهر × ${monthlyCost} ج.م = ${totalAccruedCost} ج.م، والمسدد ${totalPaidAmount} ج.م. الرصيد المتبقي له: +${creditRemaining} ج.م.`
+      : `حضر ${totalAttended} حصص بقيمة ${totalAccruedCost} ج.م، والمسدد ${totalPaidAmount} ج.م. الرصيد المتبقي له: ${creditRemaining} ج.م.`;
+    explanationEn = isMonthly
+      ? `Monthly subscription: ${billedMonthsCount} mo × ${monthlyCost} EGP = ${totalAccruedCost} EGP, paid ${totalPaidAmount} EGP. Credit left: +${creditRemaining} EGP.`
+      : `Attended ${totalAttended} lessons (${totalAccruedCost} EGP), paid ${totalPaidAmount} EGP. Credit left: ${creditRemaining} EGP.`;
   } else {
     badgeLabelAr = "مسدد بالكامل";
     badgeLabelEn = "Fully Settled";
     badgeColor = "emerald";
-    explanationAr = `حضر ${totalAttended} حصص بقيمة ${totalAccruedCost} ج.م، والمسدد ${totalPaidAmount} ج.م. الحساب مسدد بالكامل.`;
-    explanationEn = `Attended ${totalAttended} lessons (${totalAccruedCost} EGP), paid ${totalPaidAmount} EGP. Fully settled.`;
+    explanationAr = isMonthly
+      ? `اشتراك شهري: ${billedMonthsCount} شهر × ${monthlyCost} ج.م = ${totalAccruedCost} ج.م، والمسدد ${totalPaidAmount} ج.م. الحساب مسدد بالكامل.`
+      : `حضر ${totalAttended} حصص بقيمة ${totalAccruedCost} ج.م، والمسدد ${totalPaidAmount} ج.م. الحساب مسدد بالكامل.`;
+    explanationEn = `Paid ${totalPaidAmount} EGP. Fully settled.`;
   }
 
   return {
+    billingType,
+    isMonthly,
     totalAttendedLessons: totalAttended,
     lessonCost,
+    monthlyCost,
+    billedMonthsCount,
     totalAccruedCost,
     totalPaidAmount,
     remainingLessons,

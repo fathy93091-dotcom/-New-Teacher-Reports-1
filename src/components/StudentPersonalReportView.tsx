@@ -379,15 +379,11 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
   ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   const activeReports = allMergedReports.filter(r => {
-    if (r.archived === true) return false;
-    if (r.archived === false) return true;
-    return !isReportOlderThan6Months(r.date);
+    return r.archived !== true;
   });
 
   const archivedReports = allMergedReports.filter(r => {
-    if (r.archived === true) return true;
-    if (r.archived === false) return false;
-    return isReportOlderThan6Months(r.date);
+    return r.archived === true;
   });
 
   const filteredReportsList = (
@@ -517,7 +513,7 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
             </span>
           )}
 
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 flex-wrap">
             {student.subjects && student.subjects.length > 0 ? (
               student.subjects.map((sub, idx) => (
                 <span
@@ -526,11 +522,23 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
                 >
                   <span>{sub.studyType === "group" ? "👥" : "👤"}</span>
                   <span>{sub.subject}</span>
+                  <span className="text-purple-500">•</span>
+                  <span>
+                    {sub.billingType === "monthly"
+                      ? `${sub.monthlyCost || 400} ج.م/شهر 📅`
+                      : `${sub.lessonCost || 100} ج.م/حصة 🎟️`}
+                  </span>
                 </span>
               ))
             ) : (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-purple-50 border border-purple-200 text-purple-800 text-[11px] font-bold">
                 <span>{student.subject}</span>
+                <span className="text-purple-500">•</span>
+                <span>
+                  {student.billingType === "monthly"
+                    ? `${student.monthlyCost || 400} ج.م/شهر 📅`
+                    : `${student.lessonCost || 100} ج.م/حصة 🎟️`}
+                </span>
               </span>
             )}
           </div>
@@ -745,6 +753,18 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
                 </p>
               </div>
             </div>
+
+            {/* Monthly billing notice */}
+            {(student.billingType === "monthly" || student.subjects?.some(s => s.billingType === "monthly")) && (
+              <div className="p-2.5 rounded-xl bg-purple-100/70 border border-purple-200 text-purple-900 text-xs font-semibold flex items-center gap-2">
+                <span>📅</span>
+                <span>
+                  {isArabic
+                    ? "تنبيه: الطالب مشترك بنظام الاشتراك الشهري الكامل (يتم احتساب الشهر ثابتاً سواء حضر أو غاب). تسجيل الغياب هنا يفيد في المتابعة التربوية والأكاديمية."
+                    : "Note: This student has a monthly fixed subscription. Absence tracking is for academic evaluation."}
+                </span>
+              </div>
+            )}
 
             {/* DEDUCTION OPTIONS */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1071,8 +1091,8 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
             </h3>
             <p className="text-xs text-slate-500 font-medium mt-0.5">
               {isArabic
-                ? "عرض التقارير المحفوظة السابقة، البحث، والأرشفة التلقائية بعد 6 أشهر."
-                : "Browse previous saved reports and auto-archived history."}
+                ? "جميع تقارير وملاحظات الحصص محفوظة بشكل دائم ولا يتم مسحها إلا بواسطة المعلم."
+                : "All reports and lesson logs are permanently saved and only deleted manually."}
             </p>
           </div>
 

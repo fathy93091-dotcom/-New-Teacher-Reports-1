@@ -89,8 +89,9 @@ export function App() {
     } catch {}
   };
 
-  // Flag to prevent triggering Firestore write loop during incoming remote state update
+  // Flags to prevent sync race conditions
   const isSyncingFromRemoteRef = useRef(false);
+  const hasLoadedRemoteRef = useRef(false);
 
   // Listen for Firebase Auth changes
   useEffect(() => {
@@ -99,6 +100,7 @@ export function App() {
       setAuthLoading(false);
 
       if (user) {
+        hasLoadedRemoteRef.current = false;
         // Load this specific user's scoped local data immediately
         const userSettings = StorageEngine.getSettings(user.uid);
         const userStudents = StorageEngine.getStudents(user.uid);
@@ -120,6 +122,7 @@ export function App() {
         setPaymentTransactions(userPayments);
         setReports(userReports);
       } else {
+        hasLoadedRemoteRef.current = false;
         // Clear in-memory state on logout so no information is shared between user sessions
         setSettings(StorageEngine.cleanSettings(StorageEngine.getSettings()));
         setStudents([]);
@@ -156,78 +159,71 @@ export function App() {
           StorageEngine.saveSettings(cleanedRemote, uid);
         }
         if (Array.isArray(remoteData.students)) {
-          const valid = remoteData.students.filter(s => !s.id.startsWith("std_10") && !s.id.startsWith("demo_"));
-          setStudents(valid);
-          StorageEngine.saveStudents(valid, uid);
+          setStudents(remoteData.students);
+          StorageEngine.saveStudents(remoteData.students, uid);
         }
         if (Array.isArray(remoteData.groups)) {
-          const valid = remoteData.groups.filter(g => !g.id.startsWith("grp_10") && !g.id.startsWith("demo_"));
-          setGroups(valid);
-          StorageEngine.saveGroups(valid, uid);
+          setGroups(remoteData.groups);
+          StorageEngine.saveGroups(remoteData.groups, uid);
         }
         if (Array.isArray(remoteData.privateLessons)) {
-          const valid = remoteData.privateLessons.filter(p => !p.id.startsWith("prv_10") && !p.id.startsWith("demo_"));
-          setPrivateLessons(valid);
-          StorageEngine.savePrivateLessons(valid, uid);
+          setPrivateLessons(remoteData.privateLessons);
+          StorageEngine.savePrivateLessons(remoteData.privateLessons, uid);
         }
         if (Array.isArray(remoteData.lessons)) {
-          const valid = remoteData.lessons.filter(l => !l.id.startsWith("les_10") && !l.id.startsWith("demo_"));
-          setLessons(valid);
-          StorageEngine.saveLessons(valid, uid);
+          setLessons(remoteData.lessons);
+          StorageEngine.saveLessons(remoteData.lessons, uid);
         }
         if (Array.isArray(remoteData.attendanceRecords)) {
-          const valid = remoteData.attendanceRecords.filter(a => !a.id.startsWith("att_10") && !a.id.startsWith("demo_"));
-          setAttendanceRecords(valid);
-          StorageEngine.saveAttendanceRecords(valid, uid);
+          setAttendanceRecords(remoteData.attendanceRecords);
+          StorageEngine.saveAttendanceRecords(remoteData.attendanceRecords, uid);
         }
         if (Array.isArray(remoteData.examRecords)) {
-          const valid = remoteData.examRecords.filter(e => !e.id.startsWith("ex_10") && !e.id.startsWith("demo_"));
-          setExamRecords(valid);
-          StorageEngine.saveExams(valid, uid);
+          setExamRecords(remoteData.examRecords);
+          StorageEngine.saveExams(remoteData.examRecords, uid);
         }
         if (Array.isArray(remoteData.paymentTransactions)) {
-          const valid = remoteData.paymentTransactions.filter(p => !p.id.startsWith("pay_10") && !p.id.startsWith("demo_"));
-          setPaymentTransactions(valid);
-          StorageEngine.savePayments(valid, uid);
+          setPaymentTransactions(remoteData.paymentTransactions);
+          StorageEngine.savePayments(remoteData.paymentTransactions, uid);
         }
         if (Array.isArray(remoteData.reports)) {
-          const valid = remoteData.reports.filter(r => !r.id.startsWith("rep_10") && !r.id.startsWith("demo_"));
-          setReports(valid);
-          StorageEngine.saveReports(valid, uid);
+          setReports(remoteData.reports);
+          StorageEngine.saveReports(remoteData.reports, uid);
         }
+        hasLoadedRemoteRef.current = true;
         setTimeout(() => {
           isSyncingFromRemoteRef.current = false;
         }, 500);
       } else {
-        // First login for this email: initialize isolated clean user workspace in Firestore
+        // First login for this email or no remote document yet: preserve any local data and save to Firestore
         const cleanInitial = StorageEngine.cleanSettings(settings, currentUser.displayName || "");
+        const localStudents = StorageEngine.getStudents(uid);
+        const localGroups = StorageEngine.getGroups(uid);
+        const localPrivateLessons = StorageEngine.getPrivateLessons(uid);
+        const localLessons = StorageEngine.getLessons(uid);
+        const localAttendance = StorageEngine.getAttendanceRecords(uid);
+        const localExams = StorageEngine.getExams(uid);
+        const localPayments = StorageEngine.getPayments(uid);
+        const localReports = StorageEngine.getReports(uid);
+
         setSettings(cleanInitial);
-        StorageEngine.saveUserWorkspace(uid, {
+        const initialWorkspace: GoStarsBackupData = {
           version: "1.0",
           exportedAt: new Date().toISOString(),
           settings: cleanInitial,
-          students,
-          groups,
-          privateLessons,
-          lessons,
-          attendanceRecords,
-          examRecords,
-          paymentTransactions,
-          reports
-        });
-        saveUserDataToFirestore(uid, {
-          version: "1.0",
-          exportedAt: new Date().toISOString(),
-          settings: cleanInitial,
-          students,
-          groups,
-          privateLessons,
-          lessons,
-          attendanceRecords,
-          examRecords,
-          paymentTransactions,
-          reports
-        });
+          students: localStudents.length > 0 ? localStudents : students,
+          groups: localGroups.length > 0 ? localGroups : groups,
+          privateLessons: localPrivateLessons.length > 0 ? localPrivateLessons : privateLessons,
+          lessons: localLessons.length > 0 ? localLessons : lessons,
+          attendanceRecords: localAttendance.length > 0 ? localAttendance : attendanceRecords,
+          examRecords: localExams.length > 0 ? localExams : examRecords,
+          paymentTransactions: localPayments.length > 0 ? localPayments : paymentTransactions,
+          reports: localReports.length > 0 ? localReports : reports
+        };
+
+        StorageEngine.saveUserWorkspace(uid, initialWorkspace);
+        saveUserDataToFirestore(uid, initialWorkspace);
+        hasLoadedRemoteRef.current = true;
       }
     });
 
@@ -254,7 +250,8 @@ export function App() {
     StorageEngine.savePayments(paymentTransactions, uid);
     StorageEngine.saveReports(reports, uid);
 
-    if (!isSyncingFromRemoteRef.current) {
+    // Only sync to Firestore if initial remote load has already completed and we are not processing an incoming remote update
+    if (hasLoadedRemoteRef.current && !isSyncingFromRemoteRef.current) {
       saveUserDataToFirestore(uid, {
         version: "1.0",
         exportedAt: new Date().toISOString(),

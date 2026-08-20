@@ -1,15 +1,31 @@
 import {
   Student,
   AttendanceRecord,
-  PaymentTransaction
+  PaymentTransaction,
+  BillingType
 } from "../types";
 
 /**
+ * Calculates calendar months elapsed between a start date and current date (inclusive of start month, min 1)
+ */
+export function getElapsedMonths(startDateStr?: string): number {
+  if (!startDateStr) return 1;
+  const start = new Date(startDateStr);
+  if (isNaN(start.getTime())) return 1;
+  
+  const now = new Date();
+  const yearDiff = now.getFullYear() - start.getFullYear();
+  const monthDiff = now.getMonth() - start.getMonth();
+  const totalMonths = yearDiff * 12 + monthDiff + 1;
+  return Math.max(1, totalMonths);
+}
+
+/**
  * 4 Financial States for Unified Collection:
- * 🟢 available_credit: رصيد متبقي (له رصيد فائض: المدفوع > قيمة الحصص)
- * 🔴 balance_due: مستحق عليه (المدفوع < قيمة الحصص)
- * 🟢 settled: مسدد بالكامل (المدفوع == قيمة الحصص، وأكبر من صفر)
- * ⚪ no_activity: لا توجد حركة (0 حصص و 0 مدفوع)
+ * 🟢 available_credit: رصيد متبقي (له رصيد فائض: المدفوع > قيمة الحصص أو الاشتراك)
+ * 🔴 balance_due: مستحق عليه (المدفوع < قيمة الحصص أو الاشتراك)
+ * 🟢 settled: مسدد بالكامل (المدفوع == قيمة الحصص أو الاشتراك، وأكبر من صفر)
+ * ⚪ no_activity: لا توجد حركة (0 حصص/شهور و 0 مدفوع)
  */
 export type FinancialStatusType = "available_credit" | "balance_due" | "settled" | "no_activity";
 
@@ -28,11 +44,15 @@ export interface StudentFinancialProfile {
   fullName: string;
   subjectName: string;
   studyTypeLabel: string;
+  billingType: BillingType; // "per_lesson" | "monthly"
+  isMonthly: boolean;
   lessonCost: number;
+  monthlyCost: number;
+  billedMonthsCount: number; // عدد الشهور المحتسبة للاشتراك
 
-  // Auto-calculated Metrics strictly from attendance & payments
-  attendedLessonsCount: number; // عدد الحصص المنفذة
-  attendedLessonsCost: number;  // إجمالي قيمة الحصص = عدد الحصص * سعر الحصة
+  // Metrics
+  attendedLessonsCount: number; // عدد الحصص المنفذة فعلياً
+  attendedLessonsCost: number;  // إجمالي القيمة المحسوبة (إما بالحصة أو بالاشتراك الشهري الكامل)
   totalPaidAmount: number;      // إجمالي المدفوعات المسددة
   
   // Balance calculations:
@@ -58,11 +78,11 @@ export interface StudentFinancialProfile {
  * Helper to determine Financial Status Badge
  */
 export function getFinancialStatus(
-  attendedLessonsCount: number,
-  attendedLessonsCost: number,
+  activityCount: number,
+  totalAccruedCost: number,
   totalPaidAmount: number
 ): FinancialStatusBadge {
-  if (attendedLessonsCount === 0 && totalPaidAmount === 0) {
+  if (activityCount === 0 && totalAccruedCost === 0 && totalPaidAmount === 0) {
     return {
       type: "no_activity",
       labelAr: "لا توجد حركة",
@@ -72,7 +92,7 @@ export function getFinancialStatus(
     };
   }
 
-  const net = totalPaidAmount - attendedLessonsCost;
+  const net = totalPaidAmount - totalAccruedCost;
 
   if (net < 0) {
     const due = Math.abs(net);
@@ -106,10 +126,14 @@ export function getFinancialStatus(
 }
 
 /**
- * Calculates financial profile for a single student strictly adhering to:
- * - قيمة الحصص المنفذة = عدد الحصص المنفذة من سجل الحضور * سعر الحصة
- * - إجمالي المدفوعات = مجموع كافة الدفعات المسجلة للطالب
- * - إذا كانت المدفوعات أقل يظهر المبلغ المستحق، وإذا كانت أكبر يظهر الرصيد المتبقي
+ * Calculates financial profile for a single student adhering to:
+ * 1. إذا كان نظام المحاسبة "اشتراك شهري كامل" (monthly):
+ *    - يحسب الشهر كاملاً ثابتاً سواء حضر الطالب الحصص أو غاب
+ *    - إجمالي القيمة المستحقة = عدد الشهور المحتسبة × قيمة الاشتراك الشهري
+ * 2. إذا كان نظام المحاسبة "بالحصة" (per_lesson):
+ *    - قيمة الحصص المنفذة = عدد الحصص المنفذة من سجل الحضور × سعر الحصة
+ * 3. إجمالي المدفوعات = مجموع كافة الدفعات المسجلة للطالب
+ * 4. الرصيد = المدفوع - المستحق (موجب = رصيد، سالب = مستحق)
  */
 export function calculateStudentFinancialProfile(
   student: Student,
@@ -126,18 +150,51 @@ export function calculateStudentFinancialProfile(
     pt => pt.studentId === student.id
   );
 
-  // Lesson Cost
-  const lessonCost = Math.max(1, student.lessonCost || 100);
-
   // Real attended lessons count
   const attendedLessonsCount = Math.max(studentAttendance.length, student.totalAttendedLessons || 0);
-
-  // Attended lessons cost
-  const attendedLessonsCost = attendedLessonsCount * lessonCost;
 
   // Sum of all payments
   const sumOfTransactions = studentPayments.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
   const totalPaidAmount = Math.max(sumOfTransactions, student.totalPaidAmount || 0);
+
+  // Determine Billing Type
+  const isMonthly = student.billingType === "monthly" || (student.subjects && student.subjects.length > 0 && student.subjects.every(s => s.billingType === "monthly"));
+  const billingType: BillingType = isMonthly ? "monthly" : "per_lesson";
+
+  const lessonCost = Math.max(1, student.lessonCost || 100);
+  const monthlyCost = Math.max(1, student.monthlyCost || student.lessonCost || 400);
+
+  const defaultElapsedMonths = getElapsedMonths(student.subscriptionStartDate || student.createdAt);
+  const billedMonthsCount = Math.max(1, student.customBilledMonths || defaultElapsedMonths);
+
+  let attendedLessonsCost = 0;
+
+  // Handle Multi-subject breakdown if defined
+  if (student.subjects && student.subjects.length > 0) {
+    attendedLessonsCost = student.subjects.reduce((sum, subj) => {
+      if (subj.billingType === "monthly") {
+        const subMonths = Math.max(1, subj.customBilledMonths || billedMonthsCount);
+        const subCost = Math.max(1, subj.monthlyCost || subj.lessonCost || 400);
+        return sum + (subMonths * subCost);
+      } else {
+        // Per lesson
+        const subjAttended = attendanceRecords.filter(
+          ar => ar.studentId === student.id && (ar.subject === subj.subject || (!ar.subject && student.subjects?.length === 1)) && (ar.attendance === "present" || ar.deducted)
+        ).length;
+        const count = Math.max(subjAttended, subj.totalAttendedLessons || (attendedLessonsCount / (student.subjects?.length || 1)));
+        return sum + (Math.round(count) * (subj.lessonCost || 100));
+      }
+    }, 0);
+  } else {
+    // Single subject
+    if (isMonthly) {
+      // Monthly Subscription - flat fee per month regardless of attendance
+      attendedLessonsCost = billedMonthsCount * monthlyCost;
+    } else {
+      // Per Lesson billing
+      attendedLessonsCost = attendedLessonsCount * lessonCost;
+    }
+  }
 
   // Calculations
   const netDifference = totalPaidAmount - attendedLessonsCost;
@@ -146,7 +203,7 @@ export function calculateStudentFinancialProfile(
 
   // Status Badge
   const statusBadge = getFinancialStatus(
-    attendedLessonsCount,
+    isMonthly ? billedMonthsCount : attendedLessonsCount,
     attendedLessonsCost,
     totalPaidAmount
   );
@@ -155,18 +212,35 @@ export function calculateStudentFinancialProfile(
   let explanationAr = "";
   let explanationEn = "";
 
-  if (attendedLessonsCount === 0 && totalPaidAmount === 0) {
-    explanationAr = "لم تسجل أي حصص حضور أو دفعات مالية للطالب حتى الآن.";
-    explanationEn = "No lessons or payments recorded yet.";
-  } else if (amountDue > 0) {
-    explanationAr = `حضر ${attendedLessonsCount} حصص بقيمة ${attendedLessonsCost} ج.م، والمسدد ${totalPaidAmount} ج.م. المبلغ المستحق: ${amountDue} ج.م.`;
-    explanationEn = `Attended ${attendedLessonsCount} lessons (${attendedLessonsCost} EGP), paid ${totalPaidAmount} EGP. Due amount: ${amountDue} EGP.`;
-  } else if (creditRemaining > 0) {
-    explanationAr = `حضر ${attendedLessonsCount} حصص بقيمة ${attendedLessonsCost} ج.م، والمسدد ${totalPaidAmount} ج.م. الرصيد المتبقي له: +${creditRemaining} ج.م.`;
-    explanationEn = `Attended ${attendedLessonsCount} lessons (${attendedLessonsCost} EGP), paid ${totalPaidAmount} EGP. Remaining credit: +${creditRemaining} EGP.`;
+  if (isMonthly) {
+    if (totalPaidAmount === 0 && attendedLessonsCost === 0) {
+      explanationAr = "نظام اشتراك شهري كامل (يحسب الشهر كاملاً سواء حضر أو غاب) - لا توجد حركة دفع حتى الآن.";
+      explanationEn = "Full Monthly Subscription (flat fee regardless of attendance) - No payments recorded yet.";
+    } else if (amountDue > 0) {
+      explanationAr = `نظام اشتراك شهري: ${billedMonthsCount} شهر × ${monthlyCost} ج.م = ${attendedLessonsCost} ج.م (يحسب الشهر كاملاً سواء حضر أو غاب). المسدد: ${totalPaidAmount} ج.م. المبلغ المطلوب سداده: ${amountDue} ج.م. (حضر فعلياً: ${attendedLessonsCount} حصص)`;
+      explanationEn = `Monthly subscription: ${billedMonthsCount} mo × ${monthlyCost} EGP = ${attendedLessonsCost} EGP (flat monthly fee). Paid: ${totalPaidAmount} EGP. Due: ${amountDue} EGP. (Attended: ${attendedLessonsCount} lessons)`;
+    } else if (creditRemaining > 0) {
+      explanationAr = `نظام اشتراك شهري: ${billedMonthsCount} شهر × ${monthlyCost} ج.م = ${attendedLessonsCost} ج.م (يحسب الشهر كاملاً). المسدد: ${totalPaidAmount} ج.م. الرصيد الفائض المتبقي له: +${creditRemaining} ج.م.`;
+      explanationEn = `Monthly subscription: ${billedMonthsCount} mo × ${monthlyCost} EGP = ${attendedLessonsCost} EGP. Paid: ${totalPaidAmount} EGP. Credit: +${creditRemaining} EGP.`;
+    } else {
+      explanationAr = `نظام اشتراك شهري: ${billedMonthsCount} شهر × ${monthlyCost} ج.م = ${attendedLessonsCost} ج.م (يحسب الشهر كاملاً). المسدد: ${totalPaidAmount} ج.م. الحساب مسدد بالكامل ومضبوط.`;
+      explanationEn = `Monthly subscription: ${billedMonthsCount} mo × ${monthlyCost} EGP = ${attendedLessonsCost} EGP. Paid: ${totalPaidAmount} EGP. Fully settled.`;
+    }
   } else {
-    explanationAr = `حضر ${attendedLessonsCount} حصص بقيمة ${attendedLessonsCost} ج.م، والمسدد ${totalPaidAmount} ج.م. الحساب متوازن ومسدد بالكامل.`;
-    explanationEn = `Attended ${attendedLessonsCount} lessons (${attendedLessonsCost} EGP), paid ${totalPaidAmount} EGP. Fully settled.`;
+    // Per lesson
+    if (attendedLessonsCount === 0 && totalPaidAmount === 0) {
+      explanationAr = "نظام المحاسبة بالحصة المنفذة - لم تسجل أي حصص حضور أو دفعات مالية للطالب حتى الآن.";
+      explanationEn = "Per-lesson billing - No lessons or payments recorded yet.";
+    } else if (amountDue > 0) {
+      explanationAr = `حضر ${attendedLessonsCount} حصص بقيمة ${attendedLessonsCost} ج.م (${lessonCost} ج.م/حصة)، والمسدد ${totalPaidAmount} ج.م. المبلغ المستحق: ${amountDue} ج.م.`;
+      explanationEn = `Attended ${attendedLessonsCount} lessons (${attendedLessonsCost} EGP @ ${lessonCost}/lesson), paid ${totalPaidAmount} EGP. Due amount: ${amountDue} EGP.`;
+    } else if (creditRemaining > 0) {
+      explanationAr = `حضر ${attendedLessonsCount} حصص بقيمة ${attendedLessonsCost} ج.م (${lessonCost} ج.م/حصة)، والمسدد ${totalPaidAmount} ج.م. الرصيد المتبقي له: +${creditRemaining} ج.م.`;
+      explanationEn = `Attended ${attendedLessonsCount} lessons (${attendedLessonsCost} EGP), paid ${totalPaidAmount} EGP. Remaining credit: +${creditRemaining} EGP.`;
+    } else {
+      explanationAr = `حضر ${attendedLessonsCount} حصص بقيمة ${attendedLessonsCost} ج.م (${lessonCost} ج.م/حصة)، والمسدد ${totalPaidAmount} ج.م. الحساب متوازن ومسدد بالكامل.`;
+      explanationEn = `Attended ${attendedLessonsCount} lessons (${attendedLessonsCost} EGP), paid ${totalPaidAmount} EGP. Fully settled.`;
+    }
   }
 
   return {
@@ -175,7 +249,11 @@ export function calculateStudentFinancialProfile(
     fullName: student.fullName,
     subjectName: student.subject,
     studyTypeLabel: student.studyType === "group" ? "مجموعة" : "خاص",
+    billingType,
+    isMonthly,
     lessonCost,
+    monthlyCost,
+    billedMonthsCount,
     attendedLessonsCount,
     attendedLessonsCost,
     totalPaidAmount,

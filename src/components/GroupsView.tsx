@@ -486,12 +486,51 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
     if (!activeLesson) return;
     setIsGeneratingAi(true);
 
-    const targetStudentName =
-      activeLesson.studyType === "private"
-        ? activeLesson.studentName || "الطالب"
-        : activeLesson.groupName || "طلاب المجموعة";
-
     try {
+      if (activeLesson.studyType === "group" && activeLesson.groupId) {
+        const targetGroup = groups.find(g => g.id === activeLesson.groupId);
+        const groupStudentObjs = students.filter(s => targetGroup?.studentIds?.includes(s.id));
+        const payloadStudents = groupStudentObjs.map(st => {
+          const att = attendanceMap[st.id]?.attendance === "absent" ? "غائب" : "حاضر";
+          const hwStatus = attendanceMap[st.id]?.homeworkStatus;
+          const hw = hwStatus === "not_done" ? "غير منجز" : hwStatus === "partial" ? "أنجز بعضه" : "منجز";
+          return {
+            name: st.fullName,
+            attendance: att,
+            homework: hw,
+            score: "10",
+            notes: ""
+          };
+        });
+
+        const res = await fetch("/api/ai/generate-group-report", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            subject: activeLesson.subject || "عام",
+            date: activeLesson.date || new Date().toISOString().split("T")[0],
+            teacherName: settings.teacherName || (isArabic ? "المعلم" : "Teacher"),
+            students: payloadStudents,
+            generalNotes: teacherNotes,
+            aiInstructions: aiInstructions
+          })
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.reportText) {
+            setGeneratedReportText(data.reportText);
+            setIsGeneratingAi(false);
+            return;
+          }
+        }
+      }
+
+      const targetStudentName =
+        activeLesson.studyType === "private"
+          ? activeLesson.studentName || "الطالب"
+          : activeLesson.groupName || "طلاب المجموعة";
+
       const result = await onGenerateReportAi({
         studentName: targetStudentName,
         subject: activeLesson.subject,
@@ -622,6 +661,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
       <GroupReportView
         group={groupForReport}
         students={students}
+        settings={settings}
         isArabic={isArabic}
         onBack={() => setGroupForReport(null)}
       />

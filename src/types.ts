@@ -5,6 +5,8 @@
 
 export type StudyType = "group" | "private";
 
+export type BillingType = "per_lesson" | "monthly";
+
 export type StudentStatus = "active" | "stopped";
 
 export type AttendanceStatus = "present" | "absent" | "late";
@@ -19,9 +21,12 @@ export interface StudentSubjectPlan {
   id: string;
   subject: string;
   studyType: StudyType; // "group" | "private"
+  billingType?: BillingType; // "per_lesson" (محاسبة بالحصة المنفذة) | "monthly" (اشتراك شهري كامل ثابت)
   academicYear?: string; // الصف الدراسي e.g. "الصف الأول الثانوي"
   curriculum?: string; // المنهج e.g. "مصري", "سعودي", "إماراتي", "دولي"
-  lessonCost: number; // سعر الحصة للمادة
+  lessonCost: number; // سعر الحصة للمادة (إذا كان بالحصة)
+  monthlyCost?: number; // قيمة الاشتراك الشهري الكامل (إذا كان بالنظام الشهري)
+  customBilledMonths?: number; // عدد الشهور المحتسبة للاشتراك الشهري
   totalPaidAmount?: number; // إجمالي المسدد لهذه المادة
   totalAttendedLessons?: number; // إجمالي الحصص المنفذة لهذه المادة
   notes?: string;
@@ -43,7 +48,13 @@ export interface Student {
   subjects?: StudentSubjectPlan[]; // Multi-subject enrollment
   status: StudentStatus;
   
-  // Unified Financial System
+  // Unified Financial & Billing System
+  billingType?: BillingType; // "per_lesson" (بالحصة المنفذة) أو "monthly" (بالشهر كامل سواء حضر أو لا)
+  monthlyCost?: number; // قيمة الاشتراك الشهري الكامل (مثلاً 400 ج.م شهرياً)
+  monthlyBillingDay?: number; // يوم تجديد الاشتراك الشهري (الافتراضي 1)
+  customBilledMonths?: number; // عدد الأشهر المحتسبة (إذا تم تخصيصها يدوياً)
+  subscriptionStartDate?: string; // تاريخ بدء الاشتراك الشهري
+  
   paymentStatus: PaymentStatus;
   lessonCost: number; // سعر الحصة
   totalPaidAmount: number; // إجمالي المدفوعات المسددة
