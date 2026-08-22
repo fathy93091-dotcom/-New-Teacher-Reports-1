@@ -127,6 +127,12 @@ export const GroupReportView: React.FC<GroupReportViewProps> = ({
     return "";
   });
 
+  const [aiInstructions, setAiInstructions] = useState<string>(() => {
+    return settings
+      ? findSubjectAiInstruction(settings.subjectDefaults, group.subject || "عام", settings.generalAiInstructions)
+      : "";
+  });
+
   // Generated / Live Final Output
   const [finalReportText, setFinalReportText] = useState<string>("");
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
@@ -276,9 +282,9 @@ export const GroupReportView: React.FC<GroupReportViewProps> = ({
     });
 
     try {
-      const subjAiInst = settings
+      const subjAiInst = (aiInstructions || "").trim() || (settings
         ? findSubjectAiInstruction(settings.subjectDefaults, subjectName, settings.generalAiInstructions)
-        : "";
+        : "");
 
       const res = await fetch("/api/ai/generate-group-report", {
         method: "POST",
@@ -709,6 +715,41 @@ export const GroupReportView: React.FC<GroupReportViewProps> = ({
                 })}
               </div>
             )}
+          </div>
+
+          {/* AI Custom Template & Instructions */}
+          <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-2xs space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-black text-slate-900 flex items-center gap-1.5">
+                <Sparkles className="w-4 h-4 text-purple-600" />
+                <span>{isArabic ? `تعليمات وقالب الذكاء الاصطناعي لمادة (${subjectName}):` : "AI Instructions & Template:"}</span>
+              </label>
+              <button
+                type="button"
+                onClick={() => {
+                  if (settings) {
+                    const inst = findSubjectAiInstruction(settings.subjectDefaults, subjectName, settings.generalAiInstructions);
+                    setAiInstructions(inst);
+                  }
+                }}
+                className="text-[11px] font-bold text-purple-700 hover:text-purple-900 flex items-center gap-1 transition"
+                title={isArabic ? "استعادة التوجيه الافتراضي من الإعدادات" : "Reset to default"}
+              >
+                <RefreshCw className="w-3 h-3" />
+                <span>{isArabic ? "استعادة من الإعدادات" : "Reset"}</span>
+              </button>
+            </div>
+            <textarea
+              rows={2}
+              value={aiInstructions}
+              onChange={e => setAiInstructions(e.target.value)}
+              placeholder={
+                isArabic
+                  ? "اكتب أي شروط أو هيكل أو قالب ترغب بأن يلتزم به الذكاء الاصطناعي للتقرير الجماعي..."
+                  : "Enter custom instructions or template for AI to follow..."
+              }
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-800 font-medium focus:outline-none focus:border-purple-500 resize-y leading-relaxed"
+            />
           </div>
 
           {/* General Lesson Note (Optional) */}

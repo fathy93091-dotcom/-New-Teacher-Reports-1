@@ -40,7 +40,8 @@ import {
   ExamRecord,
   PaymentTransaction,
   GeneratedReport,
-  StudentStatus
+  StudentStatus,
+  findSubjectAiInstruction
 } from "../types";
 import { MixedScheduleEditor, formatTime12h } from "./MixedScheduleEditor";
 import { GroupDetailsModal } from "./groups/GroupDetailsModal";
@@ -469,17 +470,12 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
     setLessonAttachment(null);
 
     const subjName = newLesson.subject || "";
-    const cleanSubj = subjName.trim().toLowerCase();
-    const match = settings.subjectDefaults?.find(s => {
-      const sClean = s.subject.trim().toLowerCase();
-      return sClean === cleanSubj || cleanSubj.includes(sClean) || sClean.includes(cleanSubj);
-    });
-
-    if (match) {
-      setAiInstructions(match.instruction);
-    } else {
-      setAiInstructions(settings.generalAiInstructions || "");
-    }
+    const effectiveInst = findSubjectAiInstruction(
+      settings.subjectDefaults,
+      subjName,
+      settings.generalAiInstructions
+    );
+    setAiInstructions(effectiveInst);
   };
 
   const handleGenerateAi = async () => {

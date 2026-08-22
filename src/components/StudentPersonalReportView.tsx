@@ -911,7 +911,7 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
               <div className="flex items-center justify-between">
                 <label className="block font-black text-slate-700 text-xs flex items-center gap-1.5">
                   <Sparkles className="w-3.5 h-3.5 text-purple-600" />
-                  <span>{isArabic ? `توجيهات الذكاء الاصطناعي لأسلوب صياغة مادة (${reportSubject}):` : "Subject AI Prompt & Instructions:"}</span>
+                  <span>{isArabic ? `تعليمات وقالب الذكاء الاصطناعي لمادة (${reportSubject}):` : "Subject AI Prompt & Instructions:"}</span>
                 </label>
                 <button
                   type="button"
@@ -926,17 +926,17 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
                   <span>{isArabic ? "استعادة من الإعدادات" : "Reset to default"}</span>
                 </button>
               </div>
-              <input
-                type="text"
+              <textarea
+                rows={3}
                 value={newAiInstructions}
                 onChange={e => setNewAiInstructions(e.target.value)}
-                placeholder={isArabic ? "توجيهات صياغة الذكاء الاصطناعي لأسلوب ونبرة التقرير (يتم جلبها تلقائياً من إعدادات المادة)..." : "AI instructions for tone, style, etc..."}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-slate-700 text-xs focus:outline-none focus:border-purple-500 focus:bg-white font-medium shadow-2xs"
+                placeholder={isArabic ? "اكتب أي قالب محدد أو شروط أو أسلوب تريد من الذكاء الاصطناعي الالتزام به بنسبة 100%..." : "Custom template, rules, tone, or specific instructions for AI to follow 100%..."}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-slate-700 text-xs focus:outline-none focus:border-purple-500 focus:bg-white font-medium shadow-2xs leading-relaxed"
               />
               <p className="text-[10.5px] text-slate-500 font-medium">
                 {isArabic
-                  ? "💡 يتم استخدام هذه التوجيهات لتوجيه صياغة وأسلوب الذكاء الاصطناعي ولن يتم نسخها حرفياً في التقرير."
-                  : "💡 Used as internal directives for tone and structure. Will not be echoed in the report."}
+                  ? "💡 يلتزم الذكاء الاصطناعي بهذه التعليمات أو القالب التزاماً حرفياً وتاماً."
+                  : "💡 AI will strictly follow these instructions, rules, or template with highest priority."}
               </p>
             </div>
 

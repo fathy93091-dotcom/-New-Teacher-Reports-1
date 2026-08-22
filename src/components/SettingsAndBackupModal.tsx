@@ -54,13 +54,26 @@ export const SettingsAndBackupModal: React.FC<SettingsAndBackupModalProps> = ({
 
   const handleSaveAll = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    let finalSubjects = [...subjectDefaults];
+    if (newSubjectName.trim() && newSubjectInstruction.trim()) {
+      const cleanName = newSubjectName.trim();
+      const existsIndex = finalSubjects.findIndex(
+        s => s.subject.trim().toLowerCase() === cleanName.toLowerCase()
+      );
+      if (existsIndex >= 0) {
+        finalSubjects[existsIndex] = { ...finalSubjects[existsIndex], instruction: newSubjectInstruction.trim() };
+      } else {
+        finalSubjects.push({ subject: cleanName, instruction: newSubjectInstruction.trim() });
+      }
+    }
+
     onSaveSettings({
       ...settings,
       teacherName,
       defaultSubject: subject,
       preferredLanguage: lang,
       generalAiInstructions,
-      subjectDefaults
+      subjectDefaults: finalSubjects
     });
     onClose();
   };
