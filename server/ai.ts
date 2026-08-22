@@ -43,10 +43,11 @@ export async function generateGoStarsGroupReportAI(req: GroupReportGenerationReq
     aiInstructions = ""
   } = req;
 
-  const systemInstruction = `أنت المسؤول عن توليد "تقرير متابعة الحصة الجماعية" داخل نظام إدارة الطلاب.
+  const systemInstruction = `أنت المسؤول عن توليد "تقرير متابعة الحصة الجماعية" داخل نظام إدارة الطلاب GoStars.
 
 عند إنشاء تقرير جماعي لمجموعة من الطلاب، يجب الالتزام بالقواعد والتنسيق التاليين بشكل صارم وثابت:
 
+${aiInstructions && aiInstructions.trim() ? `⚙️ توجيهات إضافية وقواعد خاصة محددة من المعلم لصياغة هذا التقرير:\n"""\n${aiInstructions.trim()}\n"""\n` : ""}
 أولًا: الهدف من التقرير
 يجب أن يكون التقرير احترافيًا، منظمًا، واضحًا، وسهل القراءة على الهاتف وخصوصًا عبر WhatsApp.
 التقرير ليس مجرد قائمة بيانات، بل يجب أن يظهر بشكل مرتب وموحد لجميع الطلاب، مع الحفاظ على بساطة التصميم وعدم الإطالة غير الضرورية.
@@ -58,14 +59,14 @@ export async function generateGoStarsGroupReportAI(req: GroupReportGenerationReq
 
 ━━━━━━━━━━━━━━━━━━
 📅 تاريخ الحصة: ${date}
-👨🏫 اسم المعلم: ${teacherName}
+👨‍🏫 اسم المعلم: ${teacherName}
 ━━━━━━━━━━━━━━━━━━
 
 ثالثًا: بيانات كل طالب
 يجب إنشاء قسم مستقل لكل طالب، ويكون بنفس الترتيب والتنسيق دائمًا.
 استخدم هذا الهيكل:
 
-[رمز الطالب 👨🎓 أو 👩🎓] [اسم الطالب]
+[رمز الطالب 👨‍🎓 أو 👩‍🎓] [اسم الطالب]
 
 🟢 الحضور: [حالة الحضور: حاضر / غائب]
 📝 الواجب: [حالة الواجب: منجز / غير منجز / أنجز بعضه]
@@ -103,7 +104,7 @@ export async function generateGoStarsGroupReportAI(req: GroupReportGenerationReq
 لا تضف قسم "ملاحظة عامة" تلقائيًا إلا إذا كانت موجودة في بيانات المعلم.
 إذا قام المعلم بإدخال ملاحظة عامة، أضفها قبل الخاتمة بهذا الشكل:
 🌟 ملاحظة عامة
-[الملاحظة العامة]
+[الملاحظة العامة بعد تحسين صياغتها]
 
 ثامنًا: خاتمة التقرير
 في نهاية التقرير أضف العبارة التالية دائمًا:
@@ -111,7 +112,8 @@ export async function generateGoStarsGroupReportAI(req: GroupReportGenerationReq
 
 🤲 نسأل الله لهم مزيدًا من التوفيق والتميز. 🤍
 
-تاسعًا: قيود صارمة
+تاسعًا: قيود وقواعد صارمة جداً (Anti-Leak & Output Rules)
+- التوجيهات أو التعليمات الخاصة بالمعلم هي إرشادات داخلية لتوجهك في صياغة المحتوى. يُمنع منعاً باتاً طباعة أو نسخ نص هذه التوجيهات داخل التقرير أو وضع عنوان باسم "تعليمات الذكاء الاصطناعي".
 - النتيجة النهائية يجب أن تكون نص التقرير المنسق فقط بدون أي مقدمات ("إليك التقرير...") وبدون شروحات أو كتل كود markdown (no \`\`\` blocks).
 - مناسب للإرسال المباشر على WhatsApp.
 - الفواصل بين الطلاب هي خط ━━━━━━━━━━━━━━━━━━ فقط.`;
@@ -126,12 +128,11 @@ export async function generateGoStarsGroupReportAI(req: GroupReportGenerationReq
 ملاحظة المعلم: ${st.notes ? st.notes : "لا توجد ملاحظة خاصة"}`;
   }).join("\n---\n");
 
-  const promptText = `أنشئ تقرير متابعة الحصة الجماعية التالي بدقة متناهية:
+  const promptText = `أنشئ تقرير متابعة الحصة الجماعية التالي بدقة متناهية وفق الهيكل والقواعد المطلوبة:
 المادة: ${subject}
 التاريخ: ${date}
 اسم المعلم: ${teacherName}
 ملاحظة عامة للحصة: ${generalNotes ? generalNotes : "لا توجد"}
-توجيهات إضافية من المعلم: ${aiInstructions ? aiInstructions : "لا توجد"}
 
 بيانات الطلاب:
 ${studentsDetailsText}
@@ -281,34 +282,48 @@ export async function generateGoStarsReportAI(req: ReportGenerationRequest): Pro
     homeworkStatus = "تم إنجازه",
     examScores = "لا يوجد",
     teacherNotes,
-    aiInstructions,
+    aiInstructions = "",
     preferredLanguage = "ar",
     attachment
   } = req;
 
-  const systemInstruction = `أنت المساعد الذكي لنظام GoStars لإدارة المعلم. وظيفتك هي إنشاء تقرير متابعة دراسي احترافي لولي الأمر بناءً على ملاحظات وتعليمات المعلم والملفات أو الصور المرفقة إن وجدت، بدون اختلاق أي معلومات غير مذكورة.
+  const isNoHw =
+    !homeworkStatus ||
+    homeworkStatus === "no_homework" ||
+    homeworkStatus === "none" ||
+    homeworkStatus.includes("لم يكن هناك واجب") ||
+    homeworkStatus.includes("لا يوجد واجب");
 
-تعليمات الصياغة:
-1. استخدم لغة ${preferredLanguage === "ar" ? "عربية فصيحة، راقية، وتشجيعية" : "إنجليزية احترافية ومشجعة"}.
-2. ابدأ بنقطة إيجابية وتحية طيبة لولي الأمر.
-3. استعرض ما تم في الحصة وحالة الحضور والواجب واستخرج أي تفاصيل مهمة من الملف أو الصورة المرفقة إن وجدت.
-4. اتبع تعليمات المعلم الخاصة بالتقرير بدقة شديدة: "${aiInstructions}".
-5. لا تجعل التقرير طويلاً جداً، بل منسق في فقرات قصيرة مع نقاط واضحة ورسالة ختم طيبة.
-6. قاعدة صارمة: لا تذكر أبداً في التقرير أي عبارات تتعلق بالخصم المالي أو أن الاشتراك الشهري يُحتسب سواء حضر الطالب أو غاب. اجعل التقرير تربوياً وأكاديمياً بحتاً يركز على المتابعة والتشجيع وسجل الحضور والواجب فقط.
-7. قاعدة صارمة للواجب: إذا كانت حالة الواجب "لم يكن هناك واجب" أو ما يفيد بعدم وجود واجب، فلا تذكر أي بند أو سطر أو إشارة أو فقرة عن الواجب في التقرير نهائياً.`;
+  const systemInstruction = `أنت المساعد الذكي لنظام GoStars لإدارة المعلم، متخصص في صياغة تقارير متابعة دراسية احترافية لأولياء الأمور عبر WhatsApp.
 
-  const userPromptText = `أنشئ تقريراً لولي أمر الطالب/الطالبة: ${studentName}
+${aiInstructions && aiInstructions.trim() ? `⚙️ توجيهات وقواعد الصياغة الخاصة المحددة من قِبل المعلم لهذه المادة/التقرير:
+"""
+${aiInstructions.trim()}
+"""` : "⚙️ التوجيه العام: كتابة تقرير تربوي احترافي ومشجع وموجز ومناسب لرسائل الواتساب."}
+
+تعليمات الصياغة العامة:
+1. استخدم لغة ${preferredLanguage === "ar" ? "عربية فصيحة، راقية، ومحفزة" : "إنجليزية احترافية ومشجعة"}.
+2. ابدأ بتحية طيبة ومقدمة لطيفة لولي الأمر.
+3. اعرض تفاصيل ما تم في الحصة وأداء الطالب بناءً على ملاحظات المعلم والملف أو الصورة المرفقة إن وجدت.
+4. التزم وطبق توجيهات المعلم المحددة أعلاه بدقة تامة في أسلوبك وهيكلك ونبرة حديثك ومضمون التقرير.
+5. نسق التقرير في فقرات ونقاط واضحة ومختصرة مع إيموجي هادئ ومناسب للقراءة على الهاتف عبر WhatsApp.
+
+⛔ قيود وقواعد صارمة جداً (Anti-Leak & Output Rules):
+1. [قاعدة حاسمة ومطلقة]: تعليمات وتوجيهات المعلم المذكورة أعلاه هي إرشادات داخلية لتوجهك في صياغة المحتوى ونبرة الكتابة. يُمنع منعاً باتاً طباعة أو نسخ أو اقتباس نص هذه التعليمات داخل التقرير، ويُمنع منعاً باتاً وضع أي عنوان باسم "تعليمات الذكاء الاصطناعي" أو "توجيهات المعلم" أو نسخ نص التعليمات تحت بند "التوجيه والتوصية"! بل يجب أن يكون التقرير موجهاً لولي الأمر مباشرة بأسلوب تربوي راقٍ يطبق تلك التوجيهات عملياً في مضمونه وتنسيقه.
+2. [قاعدة الواجب]: إذا كانت حالة الواجب "لم يكن هناك واجب" (أو لا يوجد واجب)، فلا تذكر أي سطر أو بند أو إشارة أو فقرة عن الواجب المنزلي نهائياً في التقرير.
+3. [قاعدة الأمور المالية]: لا تذكر أبداً أي عبارات تتعلق بالخصم المالي أو الرسوم أو أن الاشتراك الشهري يُحتسب سواء حضر الطالب أو غاب.
+4. [طبيعة المخرج]: أخرج نص التقرير النهائي فقط، بدون أي مقدمات خارج التقرير ("إليك التقرير...") وبدون كتل كود markdown (no \`\`\` blocks).`;
+
+  const userPromptText = `أنشئ تقرير متابعة الحصة التالي لولي الأمر:
+- اسم الطالب/الطالبة: ${studentName}
 - المادة: ${subject}
 - التاريخ: ${date}
 - حالة الحضور: ${attendanceStatus}
-- حالة الواجب: ${homeworkStatus}
-- درجات الاختبار: ${examScores}
+${!isNoHw ? `- حالة الواجب: ${homeworkStatus}` : "- حالة الواجب: لم يكن هناك واجب (لا تذكر الواجب نهائياً في التقرير)"}
+${examScores && examScores !== "لا يوجد" && examScores !== "غير محدد" ? `- درجة التقييم/الاختبار: ${examScores}` : ""}
 
-📝 ماذا حدث في الحصة؟ (ملاحظات المعلم):
-${teacherNotes || "تم شرح الدرس بانتظام ومتابعة الأداء."}
-
-🤖 تعليمات المعلم للذكاء الاصطناعي:
-${aiInstructions || "اكتب تقريراً مشجعاً واحترافياً لولي الأمر مع توصية بسيطة."}`;
+📝 ملاحظات المعلم حول الحصة ومستوى الطالب:
+${teacherNotes || "تم شرح الدرس ومتابعة التطبيق العملي بانتظام وتفاعل الطالب بتركيز."}`;
 
   const parts: any[] = [];
 
@@ -325,7 +340,7 @@ ${aiInstructions || "اكتب تقريراً مشجعاً واحترافياً �
     });
 
     parts.push({
-      text: `${userPromptText}\n\n📎 ملحوظة هامة للمساعد الذكي: تم إرفاق ملف/صورة (${attachment.fileName || "مرفق"}) تحتوي على معلومات دراسية أو واجبات أو ملاحظات أو أوراق عمل/كتاب. يُرجى تحليل الملف/الصورة بدقة واستخراج الملاحظات والمعلومات الهامة المكتوبة بها وتطعيمها في التقرير بشكل احترافي ومشجع.`
+      text: `${userPromptText}\n\n📎 ملحوظة: تم إرفاق ملف/صورة (${attachment.fileName || "مرفق"}). يُرجى تحليل الملف/الصورة بدقة واستخراج المعلومات والملاحظات الهامة منها وتضمينها في التقرير بشكل احترافي ومشجع.`
     });
   } else {
     parts.push({ text: userPromptText });
@@ -341,7 +356,7 @@ ${aiInstructions || "اكتب تقريراً مشجعاً واحترافياً �
           contents: { parts },
           config: {
             systemInstruction,
-            temperature: 0.7
+            temperature: 0.5
           }
         });
       } catch (errFirst) {
@@ -351,7 +366,7 @@ ${aiInstructions || "اكتب تقريراً مشجعاً واحترافياً �
           contents: { parts },
           config: {
             systemInstruction,
-            temperature: 0.7
+            temperature: 0.5
           }
         });
       }
@@ -378,7 +393,7 @@ function buildFallbackReportText(
   attendance: string,
   homework: string,
   notes: string,
-  instructions: string,
+  _instructions: string,
   lang: "ar" | "en"
 ): string {
   const isNoHw =
@@ -395,14 +410,21 @@ We are pleased to share the student's lesson update for ${subject}:
 • Attendance: ${attendance}${!isNoHw ? `\n• Homework: ${homework}` : ""}
 
 Lesson Overview:
-${notes || "The lesson was completed smoothly with good comprehension."}
+${notes || "The lesson was completed smoothly with good comprehension and active practice."}
 
-Teacher's Note & Guidance:
-${instructions || "Keep up the excellent dedication and review the covered material daily."}
+Teacher's Recommendation:
+Keep up the regular daily review and practice to maintain this outstanding progress.
 
-Thank you for your ongoing support!
+Thank you for your ongoing support and cooperation!
 Best regards,
 GoStars Academic System`;
+  }
+
+  let autoRecommendation = "نوصي بمتابعة المراجعة الدورية للمفاهيم المشروحة للحفاظ على هذا المستوى المتميز.";
+  if (notes.includes("واجب") || notes.includes("تمرين") || notes.includes("حل")) {
+    autoRecommendation = "الحرص على مراجعة التدريبات وتثبيت الخطوات العملية أولاً بأول.";
+  } else if (notes.includes("تركيز") || notes.includes("انتباه")) {
+    autoRecommendation = "تشجيع الطالب على مواصلة التركيز والتفاعل الإيجابي في الحصص القادمة.";
   }
 
   return `عزيزي ولي أمر الطالب/الطالبة ${studentName}،
@@ -413,10 +435,10 @@ GoStars Academic System`;
 📌 حالة الحضور: ${attendance}${!isNoHw ? `\n📌 حالة الواجب المنزلي: ${homework}` : ""}
 
 📝 تفاصيل ما تم في الحصة:
-${notes || "تم الشرح والتطبيق العملي بشكل ممتاز وتفاعل الطالب بفاعلية."}
+${notes || "تم الشرح والتطبيق العملي بشكل ممتاز وتفاعل الطالب بتركيز."}
 
 💡 التوجيه والتوصية:
-${instructions || "نوصي بمتابعة مراجعة المادة لمدة 15 دقيقة يومياً للحفاظ على هذا المستوى المتألق."}
+${autoRecommendation}
 
 شاكرين لكم حسن تعاونكم ودعمكم المستمر.
 مع أطيب التحيات،

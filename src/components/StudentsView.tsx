@@ -54,7 +54,8 @@ import {
   StudentStatus,
   PaymentStatus,
   AppSettings,
-  ReportAttachment
+  ReportAttachment,
+  findSubjectAiInstruction
 } from "../types";
 import { calculateStudentFinancials } from "../lib/financeUtils";
 import { StudentPersonalReportView } from "./StudentPersonalReportView";
@@ -320,10 +321,11 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     if (selectedStudent) {
       setReportLessonNumber(calculateNextLessonNumber(selectedStudent, newSubj));
     }
-    const subjInst =
-      settings.subjectDefaults?.find(
-        s => s.subject.trim().toLowerCase() === newSubj.trim().toLowerCase()
-      )?.instruction || settings.generalAiInstructions || "";
+    const subjInst = findSubjectAiInstruction(
+      settings.subjectDefaults,
+      newSubj,
+      settings.generalAiInstructions
+    );
     setNewAiInstructions(subjInst);
   };
 
@@ -341,10 +343,11 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     setNewGeneratedReportText("");
     setReportAttachment(null);
 
-    const subjInst =
-      settings.subjectDefaults?.find(
-        s => s.subject.trim().toLowerCase() === initialSubj.trim().toLowerCase()
-      )?.instruction || settings.generalAiInstructions || "";
+    const subjInst = findSubjectAiInstruction(
+      settings.subjectDefaults,
+      initialSubj,
+      settings.generalAiInstructions
+    );
     setNewAiInstructions(subjInst);
     setShowCreateReportForm(true);
   };
@@ -2509,6 +2512,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                             setIsGeneratingReport(true);
                             try {
                               const notesToUse = newTeacherNotes.trim() || (isArabic ? "تم شرح الدرس ومتابعة التطبيق العملي للدرس بانتظام وتفاعل الطالب بتركيز." : "Lesson covered thoroughly with practice.");
+                              const effectiveAiInst = (newAiInstructions || "").trim() || findSubjectAiInstruction(settings.subjectDefaults, reportSubject, settings.generalAiInstructions);
                               const res = await onGenerateReportAi({
                                 studentName: selectedStudent.fullName,
                                 subject: reportSubject,
@@ -2521,7 +2525,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                                     ? "لم يتم حل الواجب"
                                     : "تم حل الواجب بتأخير أو جزئياً"
                                 }`,
-                                aiInstructions: newAiInstructions || settings.generalAiInstructions,
+                                aiInstructions: effectiveAiInst,
                                 attachment: reportAttachment || undefined
                               });
                               if (res) {

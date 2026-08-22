@@ -202,6 +202,44 @@ export interface SubjectAiInstruction {
   instruction: string;
 }
 
+export function findSubjectAiInstruction(
+  subjectDefaults: SubjectAiInstruction[] | undefined,
+  subject: string,
+  generalFallback: string = ""
+): string {
+  if (!subjectDefaults || subjectDefaults.length === 0) {
+    return generalFallback || "";
+  }
+  const clean = (subject || "").trim().toLowerCase();
+  if (!clean) return generalFallback || "";
+
+  // 1. Exact match (case-insensitive, trimmed)
+  const exact = subjectDefaults.find(
+    s => (s.subject || "").trim().toLowerCase() === clean
+  );
+  if (exact && exact.instruction && exact.instruction.trim()) {
+    return exact.instruction.trim();
+  }
+
+  // 2. Match without Arabic definite article "ال" or common prefixes
+  const stripAl = (str: string) => str.replace(/^(ال|al-?|el-?)/i, "").trim();
+  const strippedClean = stripAl(clean);
+
+  const matchedStripped = subjectDefaults.find(s => {
+    const sClean = stripAl((s.subject || "").trim().toLowerCase());
+    return (
+      (sClean && strippedClean && sClean === strippedClean) ||
+      (sClean && strippedClean && (sClean.includes(strippedClean) || strippedClean.includes(sClean)))
+    );
+  });
+
+  if (matchedStripped && matchedStripped.instruction && matchedStripped.instruction.trim()) {
+    return matchedStripped.instruction.trim();
+  }
+
+  return generalFallback || "";
+}
+
 export interface AppSettings {
   teacherName: string;
   preferredLanguage: "ar" | "en";

@@ -17,7 +17,7 @@ import {
   XCircle,
   Clock
 } from "lucide-react";
-import { Group, Student, AppSettings } from "../types";
+import { Group, Student, AppSettings, findSubjectAiInstruction } from "../types";
 
 export interface StudentReportItem {
   attendance: "present" | "absent";
@@ -276,6 +276,10 @@ export const GroupReportView: React.FC<GroupReportViewProps> = ({
     });
 
     try {
+      const subjAiInst = settings
+        ? findSubjectAiInstruction(settings.subjectDefaults, subjectName, settings.generalAiInstructions)
+        : "";
+
       const res = await fetch("/api/ai/generate-group-report", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -284,7 +288,8 @@ export const GroupReportView: React.FC<GroupReportViewProps> = ({
           date: reportDate,
           teacherName,
           students: payloadStudents,
-          generalNotes: generalNotes.trim()
+          generalNotes: generalNotes.trim(),
+          aiInstructions: subjAiInst
         })
       });
 

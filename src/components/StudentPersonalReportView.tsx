@@ -32,7 +32,8 @@ import {
   AttendanceRecord,
   AttendanceStatus,
   HomeworkStatus,
-  ReportAttachment
+  ReportAttachment,
+  findSubjectAiInstruction
 } from "../types";
 
 interface StudentPersonalReportViewProps {
@@ -99,12 +100,11 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
     student.subject ||
     (isArabic ? "الرياضيات" : "Mathematics");
 
-  const initialAiInst =
-    settings.subjectDefaults?.find(
-      s => s.subject.trim().toLowerCase() === initialSubject.trim().toLowerCase()
-    )?.instruction ||
-    settings.generalAiInstructions ||
-    "";
+  const initialAiInst = findSubjectAiInstruction(
+    settings.subjectDefaults,
+    initialSubject,
+    settings.generalAiInstructions
+  );
 
   // Form State
   const [reportSubject, setReportSubject] = useState<string>(initialSubject);
@@ -139,12 +139,11 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
   const handleSubjectChange = (newSubj: string) => {
     setReportSubject(newSubj);
     setReportLessonNumber(calculateNextLessonNumber(newSubj));
-    const subjInst =
-      settings.subjectDefaults?.find(
-        s => s.subject.trim().toLowerCase() === newSubj.trim().toLowerCase()
-      )?.instruction ||
-      settings.generalAiInstructions ||
-      "";
+    const subjInst = findSubjectAiInstruction(
+      settings.subjectDefaults,
+      newSubj,
+      settings.generalAiInstructions
+    );
     setNewAiInstructions(subjInst);
   };
 
@@ -908,18 +907,37 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
             </div>
 
             {/* Subject AI Instructions */}
-            <div>
-              <label className="block font-black text-slate-700 mb-1 text-xs flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                <span>{isArabic ? `تعليمات وتوجيهات الذكاء الاصطناعي لمادة (${reportSubject}):` : "Subject AI Prompt & Instructions:"}</span>
-              </label>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="block font-black text-slate-700 text-xs flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                  <span>{isArabic ? `توجيهات الذكاء الاصطناعي لأسلوب صياغة مادة (${reportSubject}):` : "Subject AI Prompt & Instructions:"}</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const inst = findSubjectAiInstruction(settings.subjectDefaults, reportSubject, settings.generalAiInstructions);
+                    setNewAiInstructions(inst);
+                  }}
+                  className="text-[11px] font-bold text-purple-700 hover:text-purple-900 flex items-center gap-1 transition"
+                  title={isArabic ? "استعادة التوجيه الافتراضي من الإعدادات" : "Reset to default"}
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  <span>{isArabic ? "استعادة من الإعدادات" : "Reset to default"}</span>
+                </button>
+              </div>
               <input
                 type="text"
                 value={newAiInstructions}
                 onChange={e => setNewAiInstructions(e.target.value)}
-                placeholder={isArabic ? "توجيهات صياغة الذكاء الاصطناعي لهذه المادة..." : "AI instructions for tone, style, etc..."}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-slate-700 text-xs focus:outline-none focus:border-purple-500 focus:bg-white font-medium shadow-2xs"
+                placeholder={isArabic ? "توجيهات صياغة الذكاء الاصطناعي لأسلوب ونبرة التقرير (يتم جلبها تلقائياً من إعدادات المادة)..." : "AI instructions for tone, style, etc..."}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-slate-700 text-xs focus:outline-none focus:border-purple-500 focus:bg-white font-medium shadow-2xs"
               />
+              <p className="text-[10.5px] text-slate-500 font-medium">
+                {isArabic
+                  ? "💡 يتم استخدام هذه التوجيهات لتوجيه صياغة وأسلوب الذكاء الاصطناعي ولن يتم نسخها حرفياً في التقرير."
+                  : "💡 Used as internal directives for tone and structure. Will not be echoed in the report."}
+              </p>
             </div>
 
             {/* File Attachment */}
@@ -993,6 +1011,7 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
                 setIsGeneratingReport(true);
                 try {
                   const notesToUse = newTeacherNotes.trim() || (isArabic ? "تم شرح الدرس ومتابعة التطبيق العملي للدرس بانتظام وتفاعل الطالب بتركيز." : "Lesson covered thoroughly with practice.");
+                  const effectiveAiInst = (newAiInstructions || "").trim() || findSubjectAiInstruction(settings.subjectDefaults, reportSubject, settings.generalAiInstructions);
                   const res = await onGenerateReportAi({
                     studentName: student.fullName,
                     subject: reportSubject,
@@ -1005,7 +1024,7 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
                         ? "لم يتم حل الواجب"
                         : "حل الواجب بتأخير أو جزئياً"
                     }`,
-                    aiInstructions: newAiInstructions || settings.generalAiInstructions,
+                    aiInstructions: effectiveAiInst,
                     attachment: reportAttachment || undefined
                   });
                   if (res) {
