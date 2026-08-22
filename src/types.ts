@@ -22,7 +22,7 @@ export type StudentStatus = "active" | "stopped";
 
 export type AttendanceStatus = "present" | "absent" | "late";
 
-export type HomeworkStatus = "done" | "not_done" | "late";
+export type HomeworkStatus = "done" | "not_done" | "late" | "no_homework";
 
 export type PaymentStatus = "paid" | "unpaid";
 

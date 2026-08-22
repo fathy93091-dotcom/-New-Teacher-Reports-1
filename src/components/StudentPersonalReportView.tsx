@@ -885,6 +885,7 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
                 <option value="done">{isArabic ? "✅ تم حل الواجب كاملاً ومتقن" : "Done (Complete)"}</option>
                 <option value="not_done">{isArabic ? "❌ لم يحل الواجب" : "Not Done"}</option>
                 <option value="late">{isArabic ? "⚠️ حل الواجب بتأخير أو جزئياً" : "Late / Partial"}</option>
+                <option value="no_homework">{isArabic ? "⚪ لم يكن هناك واجب" : "No Homework Assigned"}</option>
               </select>
             </div>
 
@@ -987,34 +988,38 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
             {/* AI Generation Trigger Button */}
             <button
               type="button"
-              disabled={isGeneratingReport || (!newTeacherNotes.trim() && !reportAttachment)}
+              disabled={isGeneratingReport}
               onClick={async () => {
-                if (!newTeacherNotes.trim() && !reportAttachment) return;
                 setIsGeneratingReport(true);
                 try {
+                  const notesToUse = newTeacherNotes.trim() || (isArabic ? "تم شرح الدرس ومتابعة التطبيق العملي للدرس بانتظام وتفاعل الطالب بتركيز." : "Lesson covered thoroughly with practice.");
                   const res = await onGenerateReportAi({
                     studentName: student.fullName,
                     subject: reportSubject,
-                    teacherNotes: `الحصة #${reportLessonNumber} (${reportDate}):\n${newTeacherNotes}\nحالة الواجب: ${
-                      reportHomeworkStatus === "done"
-                        ? "تم حل الواجب"
+                    teacherNotes: `الحصة #${reportLessonNumber} (${reportDate}):\n${notesToUse}\nحالة الواجب: ${
+                      reportHomeworkStatus === "no_homework"
+                        ? "لم يكن هناك واجب (لا تذكر أي بند أو سطر أو إشارة عن الواجب في التقرير نهائياً)"
+                        : reportHomeworkStatus === "done"
+                        ? "تم حل الواجب كاملاً ومتقن"
                         : reportHomeworkStatus === "not_done"
                         ? "لم يتم حل الواجب"
-                        : "متأخر أو جزئي"
+                        : "حل الواجب بتأخير أو جزئياً"
                     }`,
                     aiInstructions: newAiInstructions || settings.generalAiInstructions,
                     attachment: reportAttachment || undefined
                   });
-                  setNewGeneratedReportText(res);
+                  if (res) {
+                    setNewGeneratedReportText(res);
+                  }
                 } catch (err) {
-                  console.error(err);
+                  console.error("Failed to generate AI report:", err);
                 } finally {
                   setIsGeneratingReport(false);
                 }
               }}
-              className="w-full py-3.5 px-5 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-black text-xs sm:text-sm shadow-md shadow-purple-600/25 transition flex items-center justify-center gap-2.5 disabled:opacity-50"
+              className="w-full py-3.5 px-5 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-black text-xs sm:text-sm shadow-md shadow-purple-600/25 transition flex items-center justify-center gap-2.5 disabled:opacity-50 cursor-pointer"
             >
-              <Sparkles className="w-4 h-4 text-amber-300" />
+              <Sparkles className={`w-4 h-4 text-amber-300 ${isGeneratingReport ? "animate-spin" : ""}`} />
               <span>
                 {isGeneratingReport
                   ? (isArabic ? "جاري صياغة وتحليل التقرير بالذكاء الاصطناعي..." : "Refining & Generating...")
@@ -1227,7 +1232,7 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
                           {isArabic ? "🟢 حاضر" : "Present"}
                         </span>
                       )}
-                      {report.homeworkStatus && (
+                      {report.homeworkStatus && report.homeworkStatus !== "no_homework" && (
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
                           {report.homeworkStatus === "done"
                             ? (isArabic ? "واجب كامل" : "HW Done")

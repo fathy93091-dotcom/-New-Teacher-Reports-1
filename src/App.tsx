@@ -625,13 +625,16 @@ export function App() {
         body: JSON.stringify(payload)
       });
       const data = await res.json();
-      if (data.success && data.reportText) {
+      if (data && data.success && data.reportText) {
+        return data.reportText;
+      }
+      if (data && data.reportText) {
         return data.reportText;
       }
     } catch (e) {
-      console.error("API error:", e);
+      console.error("API error during report generation:", e);
     }
-    return `تقرير متابعة الطالب ${payload.studentName} في مادة (${payload.subject}):\n${payload.teacherNotes}`;
+    return `عزيزي ولي أمر الطالب/الطالبة ${payload.studentName}،\n\nتحية طيبة وبعد،،\nيسرنا أن نضع بين أيديكم تقرير المتابعة الخاص بحصة مادة (${payload.subject}):\n\n📝 تفاصيل ما تم في الحصة:\n${payload.teacherNotes}\n\n💡 التوجيه والتوصية:\n${payload.aiInstructions || "متابعة المراجعة الدورية للمادة للحفاظ على هذا المستوى المتألق."}\n\nشاكرين لكم حسن تعاونكم ودعمكم المستمر.\nمع أطيب التحيات،\nنظام GoStars لإدارة المعلم`;
   };
 
   // Backup & Restore

@@ -2399,6 +2399,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                             <option value="done">{isArabic ? "✅ تم حل الواجب كاملاً" : "Done"}</option>
                             <option value="not_done">{isArabic ? "❌ لم يحل الواجب" : "Not Done"}</option>
                             <option value="late">{isArabic ? "⚠️ تم حل الواجب بتأخير أو جزئياً" : "Late / Partial"}</option>
+                            <option value="no_homework">{isArabic ? "⚪ لم يكن هناك واجب" : "No Homework Assigned"}</option>
                           </select>
                         </div>
 
@@ -2503,28 +2504,38 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                         {/* AI Generation Trigger */}
                         <button
                           type="button"
-                          disabled={isGeneratingReport || (!newTeacherNotes.trim() && !reportAttachment)}
+                          disabled={isGeneratingReport}
                           onClick={async () => {
-                            if (!newTeacherNotes.trim() && !reportAttachment) return;
                             setIsGeneratingReport(true);
                             try {
+                              const notesToUse = newTeacherNotes.trim() || (isArabic ? "تم شرح الدرس ومتابعة التطبيق العملي للدرس بانتظام وتفاعل الطالب بتركيز." : "Lesson covered thoroughly with practice.");
                               const res = await onGenerateReportAi({
                                 studentName: selectedStudent.fullName,
                                 subject: reportSubject,
-                                teacherNotes: `الحصة #${reportLessonNumber} (${reportDate}):\n${newTeacherNotes}\nحالة الواجب: ${reportHomeworkStatus === "done" ? "تم حل الواجب" : reportHomeworkStatus === "not_done" ? "لم يتم حل الواجب" : "متأخر"}`,
+                                teacherNotes: `الحصة #${reportLessonNumber} (${reportDate}):\n${notesToUse}\nحالة الواجب: ${
+                                  reportHomeworkStatus === "no_homework"
+                                    ? "لم يكن هناك واجب (لا تذكر أي بند أو سطر أو إشارة عن الواجب في التقرير نهائياً)"
+                                    : reportHomeworkStatus === "done"
+                                    ? "تم حل الواجب كاملاً ومتقن"
+                                    : reportHomeworkStatus === "not_done"
+                                    ? "لم يتم حل الواجب"
+                                    : "تم حل الواجب بتأخير أو جزئياً"
+                                }`,
                                 aiInstructions: newAiInstructions || settings.generalAiInstructions,
                                 attachment: reportAttachment || undefined
                               });
-                              setNewGeneratedReportText(res);
+                              if (res) {
+                                setNewGeneratedReportText(res);
+                              }
                             } catch (err) {
-                              console.error(err);
+                              console.error("Failed to generate report:", err);
                             } finally {
                               setIsGeneratingReport(false);
                             }
                           }}
-                          className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold shadow-md transition flex items-center justify-center gap-2 disabled:opacity-50"
+                          className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold shadow-md transition flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
                         >
-                          <Sparkles className="w-4 h-4 text-amber-300" />
+                          <Sparkles className={`w-4 h-4 text-amber-300 ${isGeneratingReport ? "animate-spin" : ""}`} />
                           <span>
                             {isGeneratingReport
                               ? (isArabic ? "جاري صياغة وتحليل التقرير والمرفقات بالذكاء الاصطناعي..." : "Analyzing & Generating...")

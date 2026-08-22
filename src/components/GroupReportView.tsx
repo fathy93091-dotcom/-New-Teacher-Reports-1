@@ -21,7 +21,7 @@ import { Group, Student, AppSettings } from "../types";
 
 export interface StudentReportItem {
   attendance: "present" | "absent";
-  homework: "done" | "not_done" | "partial";
+  homework: "done" | "not_done" | "partial" | "no_homework";
   score: string;
   notes: string;
   gender?: "male" | "female";
@@ -186,13 +186,15 @@ export const GroupReportView: React.FC<GroupReportViewProps> = ({
       const attendanceText = rep.attendance === "absent" ? "🔴 الحضور: غائب" : "🟢 الحضور: حاضر";
       out += `${attendanceText}\n`;
 
-      let homeworkText = "📝 الواجب: منجز";
-      if (rep.homework === "not_done") {
-        homeworkText = "⚠️ الواجب: غير منجز";
-      } else if (rep.homework === "partial") {
-        homeworkText = "⚠️ الواجب: أنجز بعضه";
+      if (rep.homework !== "no_homework") {
+        let homeworkText = "📝 الواجب: منجز";
+        if (rep.homework === "not_done") {
+          homeworkText = "⚠️ الواجب: غير منجز";
+        } else if (rep.homework === "partial") {
+          homeworkText = "⚠️ الواجب: أنجز بعضه";
+        }
+        out += `${homeworkText}\n`;
       }
-      out += `${homeworkText}\n`;
 
       let scoreVal = "10";
       if (rep.score && rep.score.trim() !== "") {
@@ -259,7 +261,14 @@ export const GroupReportView: React.FC<GroupReportViewProps> = ({
       return {
         name: st.fullName,
         attendance: rep.attendance === "absent" ? "غائب" : "حاضر",
-        homework: rep.homework === "not_done" ? "غير منجز" : rep.homework === "partial" ? "أنجز بعضه" : "منجز",
+        homework:
+          rep.homework === "no_homework"
+            ? "لم يكن هناك واجب (لا تذكر أي إشارة للواجب نهائياً لهذا الطالب)"
+            : rep.homework === "not_done"
+            ? "غير منجز"
+            : rep.homework === "partial"
+            ? "أنجز بعضه"
+            : "منجز",
         score: rep.score || "10",
         notes: rep.notes.trim(),
         gender: rep.gender
@@ -642,6 +651,17 @@ export const GroupReportView: React.FC<GroupReportViewProps> = ({
                               }`}
                             >
                               <span>⚠️ {isArabic ? "غير منجز" : "Not Done"}</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => updateStudentReport(student.id, "homework", "no_homework")}
+                              className={`px-2.5 py-1.5 rounded-lg font-bold text-xs transition whitespace-nowrap ${
+                                rep.homework === "no_homework"
+                                  ? "bg-slate-700 text-white shadow-xs"
+                                  : "text-slate-600 hover:text-slate-900"
+                              }`}
+                            >
+                              <span>⚪ {isArabic ? "لم يكن هناك واجب" : "No HW"}</span>
                             </button>
                           </div>
 

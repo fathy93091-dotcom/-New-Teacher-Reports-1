@@ -3,7 +3,8 @@ import { generateGoStarsReportAI, generateGoStarsGroupReportAI } from "./ai";
 
 export const app = express();
 
-app.use(express.json());
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 // Health check
 app.get("/api/health", (_req, res) => {
@@ -21,7 +22,7 @@ app.post("/api/ai/generate-report", async (req, res) => {
     res.json({ success: true, reportText });
   } catch (err: any) {
     console.error("Error in AI report route:", err);
-    res.status(500).json({ error: "Failed to generate report", details: err.message });
+    res.status(500).json({ error: "Failed to generate report", details: err?.message || String(err) });
   }
 });
 
@@ -32,7 +33,7 @@ app.post("/api/ai/generate-group-report", async (req, res) => {
     res.json({ success: true, reportText });
   } catch (err: any) {
     console.error("Error in AI group report route:", err);
-    res.status(500).json({ error: "Failed to generate group report", details: err.message });
+    res.status(500).json({ error: "Failed to generate group report", details: err?.message || String(err) });
   }
 });
 
@@ -41,3 +42,4 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
   console.error("Server Error:", err);
   res.status(500).json({ error: err?.message || "Internal Server Error" });
 });
+

@@ -1,22 +1,18 @@
 import { GoogleGenAI } from "@google/genai";
 
-let ai: GoogleGenAI | null = null;
-
 function getGeminiClient(): GoogleGenAI | null {
-  if (!ai) {
-    const key = process.env.GEMINI_API_KEY;
-    if (key && key !== "MY_GEMINI_API_KEY") {
-      ai = new GoogleGenAI({
-        apiKey: key,
-        httpOptions: {
-          headers: {
-            "User-Agent": "aistudio-build"
-          }
-        }
-      });
-    }
+  const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+  if (!key || key === "MY_GEMINI_API_KEY") {
+    return null;
   }
-  return ai;
+  return new GoogleGenAI({
+    apiKey: key,
+    httpOptions: {
+      headers: {
+        "User-Agent": "aistudio-build"
+      }
+    }
+  });
 }
 
 export interface GroupReportStudentItem {
@@ -101,6 +97,7 @@ export async function generateGoStarsGroupReportAI(req: GroupReportGenerationReq
 اعرض حالة الحضور وحالة الواجب برموز واضحة:
 🟢 الحضور: حاضر (أو 🔴 الحضور: غائب)
 📝 الواجب: منجز (أو ⚠️ الواجب: غير منجز / أنجز بعضه)
+- استثناء هام جداً وصارم للواجب: إذا كانت حالة الواجب للطالب هي "لم يكن هناك واجب" (أو no_homework أو لا يوجد واجب)، فلا تكتب سطر أو بند "📝 الواجب" نهائياً في قسم ذلك الطالب، واحذفه تماماً دون أي إشارة للواجب.
 
 سابعًا: الملاحظة العامة
 لا تضف قسم "ملاحظة عامة" تلقائيًا إلا إذا كانت موجودة في بيانات المعلم.
@@ -144,16 +141,29 @@ ${studentsDetailsText}
   const client = getGeminiClient();
   if (client) {
     try {
-      const response = await client.models.generateContent({
-        model: "gemini-3.6-flash",
-        contents: promptText,
-        config: {
-          systemInstruction,
-          temperature: 0.3
-        }
-      });
+      let response;
+      try {
+        response = await client.models.generateContent({
+          model: "gemini-3.7-flash",
+          contents: promptText,
+          config: {
+            systemInstruction,
+            temperature: 0.3
+          }
+        });
+      } catch (errFirst) {
+        console.warn("Retrying group report with gemini-flash-latest:", errFirst);
+        response = await client.models.generateContent({
+          model: "gemini-flash-latest",
+          contents: promptText,
+          config: {
+            systemInstruction,
+            temperature: 0.3
+          }
+        });
+      }
 
-      if (response.text) {
+      if (response && response.text) {
         let cleanText = response.text.trim();
         // Remove any markdown code fence if wrapped
         if (cleanText.startsWith("```")) {
@@ -192,13 +202,22 @@ export function buildStandardGroupReportText(
     const attText = st.attendance === "absent" || st.attendance === "غائب" ? "🔴 الحضور: غائب" : "🟢 الحضور: حاضر";
     out += `${attText}\n`;
 
-    let hwText = "📝 الواجب: منجز";
-    if (st.homework === "not_done" || st.homework === "غير منجز" || st.homework === "لم ينجزه") {
-      hwText = "⚠️ الواجب: غير منجز";
-    } else if (st.homework === "partial" || st.homework === "أنجز بعضه") {
-      hwText = "⚠️ الواجب: أنجز بعضه";
+    const isNoHw =
+      !st.homework ||
+      st.homework === "no_homework" ||
+      st.homework === "none" ||
+      st.homework.includes("لم يكن هناك واجب") ||
+      st.homework.includes("لا يوجد واجب");
+
+    if (!isNoHw) {
+      let hwText = "📝 الواجب: منجز";
+      if (st.homework === "not_done" || st.homework === "غير منجز" || st.homework === "لم ينجزه") {
+        hwText = "⚠️ الواجب: غير منجز";
+      } else if (st.homework === "partial" || st.homework === "أنجز بعضه") {
+        hwText = "⚠️ الواجب: أنجز بعضه";
+      }
+      out += `${hwText}\n`;
     }
-    out += `${hwText}\n`;
 
     let scoreDisplay = "10";
     if (st.score && st.score.trim() !== "") {
@@ -275,7 +294,8 @@ export async function generateGoStarsReportAI(req: ReportGenerationRequest): Pro
 3. استعرض ما تم في الحصة وحالة الحضور والواجب واستخرج أي تفاصيل مهمة من الملف أو الصورة المرفقة إن وجدت.
 4. اتبع تعليمات المعلم الخاصة بالتقرير بدقة شديدة: "${aiInstructions}".
 5. لا تجعل التقرير طويلاً جداً، بل منسق في فقرات قصيرة مع نقاط واضحة ورسالة ختم طيبة.
-6. قاعدة صارمة: لا تذكر أبداً في التقرير أي عبارات تتعلق بالخصم المالي أو أن الاشتراك الشهري يُحتسب سواء حضر الطالب أو غاب. اجعل التقرير تربوياً وأكاديمياً بحتاً يركز على المتابعة والتشجيع وسجل الحضور والواجب فقط.`;
+6. قاعدة صارمة: لا تذكر أبداً في التقرير أي عبارات تتعلق بالخصم المالي أو أن الاشتراك الشهري يُحتسب سواء حضر الطالب أو غاب. اجعل التقرير تربوياً وأكاديمياً بحتاً يركز على المتابعة والتشجيع وسجل الحضور والواجب فقط.
+7. قاعدة صارمة للواجب: إذا كانت حالة الواجب "لم يكن هناك واجب" أو ما يفيد بعدم وجود واجب، فلا تذكر أي بند أو سطر أو إشارة أو فقرة عن الواجب في التقرير نهائياً.`;
 
   const userPromptText = `أنشئ تقريراً لولي أمر الطالب/الطالبة: ${studentName}
 - المادة: ${subject}
@@ -314,17 +334,34 @@ ${aiInstructions || "اكتب تقريراً مشجعاً واحترافياً �
   const client = getGeminiClient();
   if (client) {
     try {
-      const response = await client.models.generateContent({
-        model: "gemini-3.6-flash",
-        contents: { parts },
-        config: {
-          systemInstruction,
-          temperature: 0.7
-        }
-      });
+      let response;
+      try {
+        response = await client.models.generateContent({
+          model: "gemini-3.7-flash",
+          contents: { parts },
+          config: {
+            systemInstruction,
+            temperature: 0.7
+          }
+        });
+      } catch (errFirst) {
+        console.warn("Retrying report with gemini-flash-latest:", errFirst);
+        response = await client.models.generateContent({
+          model: "gemini-flash-latest",
+          contents: { parts },
+          config: {
+            systemInstruction,
+            temperature: 0.7
+          }
+        });
+      }
 
-      if (response.text) {
-        return response.text.trim();
+      if (response && response.text) {
+        let cleanText = response.text.trim();
+        if (cleanText.startsWith("```")) {
+          cleanText = cleanText.replace(/^```[a-zA-Z]*\n?/, "").replace(/\n?```$/, "").trim();
+        }
+        return cleanText;
       }
     } catch (e) {
       console.error("Gemini API call failed, generating rule-based report fallback:", e);
@@ -344,12 +381,18 @@ function buildFallbackReportText(
   instructions: string,
   lang: "ar" | "en"
 ): string {
+  const isNoHw =
+    !homework ||
+    homework === "no_homework" ||
+    homework === "none" ||
+    homework.includes("لم يكن هناك واجب") ||
+    homework.includes("لا يوجد واجب");
+
   if (lang === "en") {
     return `Dear Parent of ${studentName},
 
 We are pleased to share the student's lesson update for ${subject}:
-• Attendance: ${attendance}
-• Homework: ${homework}
+• Attendance: ${attendance}${!isNoHw ? `\n• Homework: ${homework}` : ""}
 
 Lesson Overview:
 ${notes || "The lesson was completed smoothly with good comprehension."}
@@ -367,8 +410,7 @@ GoStars Academic System`;
 تحية طيبة وبعد،،
 يسرنا أن نضع بين أيديكم تقرير المتابعة الخاص بحصة مادة (${subject}):
 
-📌 حالة الحضور: ${attendance}
-📌 حالة الواجب المنزلي: ${homework}
+📌 حالة الحضور: ${attendance}${!isNoHw ? `\n📌 حالة الواجب المنزلي: ${homework}` : ""}
 
 📝 تفاصيل ما تم في الحصة:
 ${notes || "تم الشرح والتطبيق العملي بشكل ممتاز وتفاعل الطالب بفاعلية."}
