@@ -14,7 +14,7 @@ export const initialSettings: AppSettings = {
   teacherName: "",
   defaultSubject: "",
   preferredLanguage: "ar",
-  generalAiInstructions: "اكتب تقريراً احترافياً ومشجعاً لولي الأمر، ابدأ بنقطة إيجابية، ثم وضح ما يحتاج الطالب إلى تحسينه، وأنهِ التقرير بتوصية قصيرة.",
+  generalAiInstructions: "",
   subjectDefaults: [],
   notificationMinutesBefore: 15,
   notificationsEnabled: true

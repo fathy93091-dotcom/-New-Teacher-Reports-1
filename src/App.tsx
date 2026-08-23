@@ -634,7 +634,15 @@ export function App() {
     } catch (e) {
       console.error("API error during report generation:", e);
     }
-    return `عزيزي ولي أمر الطالب/الطالبة ${payload.studentName}،\n\nتحية طيبة وبعد،،\nيسرنا أن نضع بين أيديكم تقرير المتابعة الخاص بحصة مادة (${payload.subject}):\n\n📝 تفاصيل ما تم في الحصة:\n${payload.teacherNotes || "تم شرح الدرس ومتابعة التطبيق العملي بانتظام وتفاعل الطالب بتركيز."}\n\n💡 التوجيه والتوصية:\nمتابعة المراجعة الدورية للمفاهيم المشروحة وتثبيت الخطوات أولاً بأول للحفاظ على هذا المستوى المتألق.\n\nشاكرين لكم حسن تعاونكم ودعمكم المستمر.\nمع أطيب التحيات،\nنظام GoStars لإدارة المعلم`;
+    
+    // Clean fallback based directly on teacher notes
+    let fallbackText = `تقرير متابعة: ${payload.studentName}\nالمادة: ${payload.subject}\n\n`;
+    if (payload.teacherNotes && payload.teacherNotes.trim()) {
+      fallbackText += `ملاحظات الحصة:\n${payload.teacherNotes.trim()}`;
+    } else {
+      fallbackText += `تم إنجاز الحصة بنجاح ومتابعة التطبيق العملي.`;
+    }
+    return fallbackText.trim();
   };
 
   // Backup & Restore

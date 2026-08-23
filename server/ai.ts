@@ -20,7 +20,7 @@ export interface GroupReportStudentItem {
   attendance: string; // e.g. "حاضر" | "غائب"
   homework: string; // e.g. "منجز" | "غير منجز" | "أنجز بعضه"
   score?: string; // e.g. "8" or "8 / 10"
-  notes?: string; // e.g. "شوية تركيز"
+  notes?: string; // e.g. "ملاحظة المعلم"
   gender?: "male" | "female";
 }
 
@@ -45,53 +45,28 @@ export async function generateGoStarsGroupReportAI(req: GroupReportGenerationReq
 
   const hasCustomGroupInst = !!(aiInstructions && aiInstructions.trim());
 
-  const systemInstruction = `أنت المسؤول عن توليد "تقرير متابعة الحصة الجماعية" داخل نظام إدارة الطلاب GoStars.
+  // Strict System Instruction
+  let systemInstruction = "";
 
-${hasCustomGroupInst ? `🚨 [الأولوية المطلقة لتعليمات وقالب المعلم]:
-قام المعلم بوضع تعليمات خاصة أو قالب محدد للتقرير الجماعي:
+  if (hasCustomGroupInst) {
+    systemInstruction = `أنت أداة متخصصة لصياغة تقارير الحصص الجماعية بناءً على تعليمات المعلم فقط.
+قام المعلم بوضع تعليمات وقالب وشروط إلزامية للتقرير كالتالي:
 """
 ${aiInstructions.trim()}
 """
-يجب الالتزام بتعليمات وقالب المعلم بدقة متناهية 100%. إذا طلب المعلم قالباً أو ترتيباً أو أسلوباً معيناً، فطبقه بالكامل واملأه ببيانات الطلاب والحصة.
-` : `📌 [الهيكل المعتمد للتقرير الجماعي]:`}
 
-عند إنشاء تقرير جماعي لمجموعة من الطلاب، التزم بالهيكل التالي (إلا إذا حدد المعلم قالباً خاصاً في تعليماته أعلاه):
-
-أولًا: رأس التقرير
-📚 تقرير متابعة (${subject})
-━━━━━━━━━━━━━━━━━━
-📅 تاريخ الحصة: ${date}
-👨‍🏫 اسم المعلم: ${teacherName}
-━━━━━━━━━━━━━━━━━━
-
-ثانيًا: بيانات كل طالب
-[رمز الطالب 👨‍🎓 أو 👩‍🎓] [اسم الطالب]
-
-🟢 الحضور: [حالة الحضور: حاضر / غائب]
-📝 الواجب: [حالة الواجب: منجز / غير منجز / أنجز بعضه]
-⭐ التقييم: [الدرجة] / 10
-
-📌 ملاحظة المعلم:
-[ملاحظة المعلم بعد تحسين صياغتها إن وجدت]
-
-━━━━━━━━━━━━━━━━━━
-
-ثالثًا: قواعد البيانات
-- لا تكتب "الطالب 1" أو "الطالب 2" بجانب الاسم. استخدم اسم الطالب مباشرة.
-- حافظ على ترتيب الطلاب الموجود في بيانات الحصة تمامًا.
-- لا تحذف أي طالب من التقرير، ولا تضف طالبًا غير موجود في البيانات.
-- لا تغير درجات الطلاب أو حالة الحضور أو الواجب.
-- لا تخترع ملاحظات للطلاب من عندك.
-- استثناء هام للواجب: إذا كانت حالة الواجب "لم يكن هناك واجب" (no_homework أو لا يوجد واجب)، فلا تذكر سطر الواجب.
-- إذا كانت هناك ملاحظة عامة للحصة، أضفها قبل الخاتمة.
-
-رابعًا: خاتمة التقرير
-━━━━━━━━━━━━━━━━━━
-🤲 نسأل الله لهم مزيدًا من التوفيق والتميز. 🤍
-
-خامسًا: قواعد الإخراج
-- لا تذكر أسماء حقول التوجيهات أو الذكاء الاصطناعي، بل طبق التعليمات مباشرة.
-- أخرج نص التقرير النهائي فقط بدون أي مقدمات وبدون \`\`\` blocks.`;
+⚠️ [الأولوية والقواعد المطلقة]:
+1. [الالتزام التام 100%]: التزم بتعليمات وقالب وأسلوب المعلم الموضح أعلاه بنسبة 100%. لا تفرض أي هيكل افتراضي، ولا تضع أي عبارات أو مقدمات أو خواتم أو رموز إلا إذا كانت مطلوبة في تعليمات المعلم.
+2. [بيانات الطلاب]: طبق تعليمات وقالب المعلم على جميع الطلاب المذكورين في الحصة بدقة وبنفس الترتيب.
+3. [المعلومات الواقعية]: التزم ببيانات الحصة الحقيقية وملاحظات المعلم لكل طالب دون اختلاق معلومات غير موجودة.
+4. [ممنوع الإضافات الافتراضية]: يُمنع منعاً باتاً إضافة أي نصوص افتراضية أو تصنيفات أو قوالب سابقة لم يطلبها المعلم.
+5. [المخرج النهائي]: أخرج نص التقرير النهائي الصافي فقط الجاهز للإرسال دون أي مقدمات ("إليك التقرير...") ودون كتل كود markdown (no \`\`\` blocks).`;
+  } else {
+    systemInstruction = `أنت المساعد الذكي لصياغة تقرير متابعة الحصة الجماعية.
+قم بإنشاء تقرير جماعي واضح وموجز ومرتب لجميع الطلاب بناءً على بيانات الحصة (المادة: ${subject}، التاريخ: ${date}، اسم المعلم: ${teacherName}).
+اعرض حالة الحضور والواجب والدرجة وملاحظة المعلم لكل طالب بشكل مباشر ومرتب ومناسب للمحادثات.
+أخرج نص التقرير النهائي فقط بدون أي مقدمات أو كتل كود.`;
+  }
 
   const studentsDetailsText = students.map((st, idx) => {
     return `الطالب ${idx + 1}:
@@ -99,64 +74,55 @@ ${aiInstructions.trim()}
 الجنس: ${st.gender || "غير محدد"}
 الحضور: ${st.attendance}
 الواجب: ${st.homework}
-الدرجة: ${st.score || "غير محددة"}
+الدرجة/التقييم: ${st.score || "غير محددة"}
 ملاحظة المعلم: ${st.notes ? st.notes : "لا توجد ملاحظة خاصة"}`;
   }).join("\n---\n");
 
-  const promptText = `أنشئ تقرير متابعة الحصة الجماعية التالي:
-المادة: ${subject}
-التاريخ: ${date}
-اسم المعلم: ${teacherName}
-ملاحظة عامة للحصة: ${generalNotes ? generalNotes : "لا توجد"}
+  const promptText = `بيانات الحصة الجماعية:
+- المادة: ${subject}
+- التاريخ: ${date}
+- اسم المعلم: ${teacherName}
+- ملاحظة عامة للحصة: ${generalNotes ? generalNotes : "لا توجد"}
 
 بيانات الطلاب:
 ${studentsDetailsText}
 
-${hasCustomGroupInst ? `⭐ تعليمات وقالب المعلم المطلوب تطبيقها بدقة تامة (إلزامية 100%):
+${hasCustomGroupInst ? `⭐ التعليمات والقالب المطلوب تطبيقه حصرياً (إلزامي 100%):
 """
 ${aiInstructions.trim()}
-"""` : ""}`;
+"""` : "أنشئ تقرير متابعة الحصة الجماعية بناءً على هذه البيانات."}`;
 
   const client = getGeminiClient();
   if (client) {
-    try {
-      let response;
+    const candidateModels = ["gemini-2.5-flash", "gemini-3.7-flash", "gemini-1.5-flash", "gemini-flash-latest"];
+    for (const modelName of candidateModels) {
       try {
-        response = await client.models.generateContent({
-          model: "gemini-3.7-flash",
+        const response = await client.models.generateContent({
+          model: modelName,
           contents: promptText,
           config: {
             systemInstruction,
-            temperature: 0.3
+            temperature: 0.2
           }
         });
-      } catch (errFirst) {
-        console.warn("Retrying group report with gemini-flash-latest:", errFirst);
-        response = await client.models.generateContent({
-          model: "gemini-flash-latest",
-          contents: promptText,
-          config: {
-            systemInstruction,
-            temperature: 0.3
-          }
-        });
-      }
 
-      if (response && response.text) {
-        let cleanText = response.text.trim();
-        // Remove any markdown code fence if wrapped
-        if (cleanText.startsWith("```")) {
-          cleanText = cleanText.replace(/^```[a-zA-Z]*\n?/, "").replace(/\n?```$/, "").trim();
+        if (response && response.text) {
+          let cleanText = response.text.trim();
+          if (cleanText.startsWith("```")) {
+            cleanText = cleanText.replace(/^```[a-zA-Z]*\n?/, "").replace(/\n?```$/, "").trim();
+          }
+          if (cleanText) {
+            return cleanText;
+          }
         }
-        return cleanText;
+      } catch (err) {
+        console.warn(`Model ${modelName} call failed, trying next:`, err);
       }
-    } catch (e) {
-      console.error("Gemini API group report call failed, using deterministic builder:", e);
     }
   }
 
-  // Fallback deterministic builder that 100% strictly matches the required format
-  return buildStandardGroupReportText(subject, date, teacherName, students, generalNotes);
+  // Fallback builder
+  return buildStandardGroupReportText(subject, date, teacherName, students, generalNotes, aiInstructions);
 }
 
 export function buildStandardGroupReportText(
@@ -164,19 +130,22 @@ export function buildStandardGroupReportText(
   date: string,
   teacherName: string,
   students: GroupReportStudentItem[],
-  generalNotes?: string
+  generalNotes?: string,
+  _aiInstructions?: string
 ): string {
   let out = `📚 تقرير متابعة (${subject})\n\n`;
   out += `━━━━━━━━━━━━━━━━━━\n`;
-  out += `📅 تاريخ الحصة: ${date}\n`;
-  out += `👨‍🏫 اسم المعلم: ${teacherName || "المعلم"}\n`;
+  out += `📅 التاريخ: ${date}\n`;
+  if (teacherName && teacherName.trim()) {
+    out += `👨‍🏫 المعلم: ${teacherName.trim()}\n`;
+  }
   out += `━━━━━━━━━━━━━━━━━━\n\n`;
 
   students.forEach((st) => {
     const isFemale = st.gender === "female" || isLikelyFemaleName(st.name);
     const icon = isFemale ? "👩‍🎓" : "👨‍🎓";
     
-    out += `${icon} ${st.name}\n\n`;
+    out += `${icon} ${st.name}\n`;
 
     const attText = st.attendance === "absent" || st.attendance === "غائب" ? "🔴 الحضور: غائب" : "🟢 الحضور: حاضر";
     out += `${attText}\n`;
@@ -198,26 +167,21 @@ export function buildStandardGroupReportText(
       out += `${hwText}\n`;
     }
 
-    let scoreDisplay = "10";
     if (st.score && st.score.trim() !== "") {
       const clean = st.score.replace(/\/10|\/ 10/, "").trim();
-      scoreDisplay = clean;
+      out += `⭐ التقييم: ${clean} / 10\n`;
     }
-    out += `⭐ التقييم: ${scoreDisplay} / 10\n\n`;
 
     if (st.notes && st.notes.trim() !== "") {
-      out += `📌 ملاحظة المعلم:\n${st.notes.trim()}\n\n`;
+      out += `📌 ملاحظة المعلم: ${st.notes.trim()}\n`;
     }
 
-    out += `━━━━━━━━━━━━━━━━━━\n\n`;
+    out += `\n━━━━━━━━━━━━━━━━━━\n\n`;
   });
 
   if (generalNotes && generalNotes.trim() !== "") {
-    out += `🌟 ملاحظة عامة\n${generalNotes.trim()}\n\n`;
-    out += `━━━━━━━━━━━━━━━━━━\n\n`;
+    out += `🌟 ملاحظة عامة:\n${generalNotes.trim()}\n\n`;
   }
-
-  out += `🤲 نسأل الله لهم مزيدًا من التوفيق والتميز. 🤍`;
 
   return out.trim();
 }
@@ -274,45 +238,43 @@ export async function generateGoStarsReportAI(req: ReportGenerationRequest): Pro
 
   const hasCustomInstructions = !!(aiInstructions && aiInstructions.trim());
 
-  const systemInstruction = `أنت المساعد الذكي لنظام GoStars لإدارة المعلم، متخصص في صياغة تقارير المتابعة الدراسية للطلاب وإرسالها لأولياء الأمور.
+  // Purely instruction-driven System Directive
+  let systemInstruction = "";
 
-${hasCustomInstructions ? `🚨 [الأولوية القصوى والمطلقة - تعليمات وقالب المعلم]:
-قام المعلم بوضع تعليمات خاصة أو قالب محدد للتقرير كالتالي:
+  if (hasCustomInstructions) {
+    systemInstruction = `أنت أداة صياغة تقارير الطلاب الملتزمة بتعليمات المعلم.
+قام المعلم بوضع تعليمات وقواعد أو قالب إلزامي محدد 100% لصياغة هذا التقرير:
 """
 ${aiInstructions.trim()}
 """
 
-قواعد الالتزام بتعليمات المعلم:
-1. تعليمات المعلم وقوالبه هي المرجع الأول والأساسي والأعلى سلطة ويجب تنفيذها والالتزام بها بنسبة 100% دون أي تحريف أو تجاهل.
-2. إذا حدد المعلم قالباً (Template) أو هيكلاً أو عناوين معينة، فاملأ هذا القالب ببيانات الطالب والحصة ولا تغير ترتيب العناوين أو تلغِ أي قسم طلبه.
-3. إذا طلب المعلم أسلوباً محدداً (مثل: نقاط فقط، اختصار شديد، عدم وضع مقدمة، صيغة معينة، تركيز على جانب محدد)، التزم بذلك تماماً.
-4. لا تتصرف من تلقاء نفسك ولا تضف أشكالاً أو أقساماً تخالف ما حدده المعلم.
-` : `📌 [التوجيه الافتراضي للتقرير]:
-اكتب تقريراً تربوياً راقياً، محفزاً، وموجزاً ومناسباً لرسائل الواتساب مع ولي الأمر.`}
+⚠️ [الأولوية والقواعد المطلقة]:
+1. [الالتزام التام 100%]: التزم بنسبة 100% بتعليمات وقالب وأسلوب وهيكل المعلم الموضح أعلاه. لا تفرض أي هيكل افتراضي، ولا تضع أي عبارات أو مقدمات أو خواتم أو أقسام أو بنود لم يطلبها المعلم.
+2. [تعبئة البيانات]: قم بتعبئة بيانات الطالب والحصة (الاسم، المادة، التاريخ، الحضور، الواجب، ملاحظات المعلم، الدرجات) داخل قالب المعلم وتوجيهاته بدقة.
+3. [ممنوع التأليف أو الافتراض]: لا تختلق أي تقييمات أو معلومات غير واردة في بيانات الحصة وملاحظات المعلم.
+4. [المخرج الصافي]: أخرج نص التقرير النهائي فقط الجاهز للإرسال بدون أي مقدمات ("إليك التقرير...") وبدون كتل كود markdown (no \`\`\` blocks).`;
+  } else {
+    systemInstruction = `أنت المساعد الذكي لصياغة تقرير متابعة الحصة.
+اكتب تقريراً بسيطاً ومباشراً وموجزاً باللغة ${preferredLanguage === "ar" ? "العربية" : "الإنجليزية"}، معتمداً على البيانات وملاحظات المعلم فقط دون مقدمات طويلة أو عبارات متكلفة.
+${isNoHw ? "- حالة الواجب: لا يوجد واجب، لذا لا تذكر بند الواجب في التقرير." : ""}
+أخرج نص التقرير النهائي الصافي فقط بدون كتل كود.`;
+  }
 
-📋 القواعد العامة:
-1. استخدم لغة ${preferredLanguage === "ar" ? "عربية فصيحة وسلسة" : "إنجليزية احترافية ومشجعة"}.
-2. التزم ببيانات الحصة الحقيقية وملاحظات المعلم ومحتوى الملف/الصورة المرفقة إن وجدت، ولا تختلق معلومات غير مذكورة.
-${isNoHw ? "3. حالة الواجب: لم يكن هناك واجب، لذا لا تذكر أي سطر أو بند عن الواجب المنزلي نهائياً." : ""}
-4. لا تذكر أي عبارات تتعلق بالخصومات المالية أو الرسوم أو شروط الاشتراكات.
-5. لا تكتب عبارات وصفية مثل "بناءً على تعليمات المعلم" أو "تعليمات الذكاء الاصطناعي"، بل طبق التعليمات مباشرة داخل التقرير.
-6. أخرج نص التقرير النهائي الجاهز للإرسال فقط بدون أي مقدمات ("إليك التقرير...") وبدون كتل كود markdown (no \`\`\` blocks).`;
-
-  const userPromptText = `أنشئ تقرير متابعة الحصة التالي:
+  const userPromptText = `بيانات الحصة:
 - اسم الطالب/الطالبة: ${studentName}
 - المادة: ${subject}
 - التاريخ: ${date}
 - حالة الحضور: ${attendanceStatus}
-${!isNoHw ? `- حالة الواجب: ${homeworkStatus}` : "- حالة الواجب: لم يكن هناك واجب (تجاهل بند الواجب)"}
+${!isNoHw ? `- حالة الواجب: ${homeworkStatus}` : "- حالة الواجب: لم يكن هناك واجب"}
 ${examScores && examScores !== "لا يوجد" && examScores !== "غير محدد" ? `- درجة التقييم/الاختبار: ${examScores}` : ""}
 
 📝 ملاحظات المعلم حول الحصة ومستوى الطالب:
-${teacherNotes || "تم شرح الدرس ومتابعة التطبيق العملي بانتظام وتفاعل الطالب بتركيز."}
+${teacherNotes ? teacherNotes.trim() : "تم شرح الدرس ومتابعة التطبيق العملي."}
 
-${hasCustomInstructions ? `⭐ تعليمات وقالب المعلم المطلوب تطبيقها بدقة تامة (إلزامية 100%):
+${hasCustomInstructions ? `⭐ تعليمات وقالب المعلم المطلوب تطبيقها بدقة تامة وحصرية (إلزامية 100%):
 """
 ${aiInstructions.trim()}
-"""` : ""}`;
+"""` : "اكتب تقرير المتابعة بناءً على هذه البيانات."}`;
 
   const parts: any[] = [];
 
@@ -329,7 +291,7 @@ ${aiInstructions.trim()}
     });
 
     parts.push({
-      text: `${userPromptText}\n\n📎 ملحوظة: تم إرفاق ملف/صورة (${attachment.fileName || "مرفق"}). يُرجى تحليل الملف/الصورة بدقة واستخراج المعلومات والملاحظات الهامة منها وتضمينها في التقرير بشكل احترافي ومشجع.`
+      text: `${userPromptText}\n\n📎 ملحوظة: تم إرفاق ملف/صورة (${attachment.fileName || "مرفق"}). يُرجى تحليل الملف/الصورة بدقة واستخراج المعلومات والملاحظات الهامة منها وتضمينها في التقرير وفق توجيهات المعلم.`
     });
   } else {
     parts.push({ text: userPromptText });
@@ -337,52 +299,45 @@ ${aiInstructions.trim()}
 
   const client = getGeminiClient();
   if (client) {
-    try {
-      let response;
+    const candidateModels = ["gemini-2.5-flash", "gemini-3.7-flash", "gemini-1.5-flash", "gemini-flash-latest"];
+    for (const modelName of candidateModels) {
       try {
-        response = await client.models.generateContent({
-          model: "gemini-3.7-flash",
+        const response = await client.models.generateContent({
+          model: modelName,
           contents: { parts },
           config: {
             systemInstruction,
-            temperature: 0.5
+            temperature: 0.2
           }
         });
-      } catch (errFirst) {
-        console.warn("Retrying report with gemini-flash-latest:", errFirst);
-        response = await client.models.generateContent({
-          model: "gemini-flash-latest",
-          contents: { parts },
-          config: {
-            systemInstruction,
-            temperature: 0.5
-          }
-        });
-      }
 
-      if (response && response.text) {
-        let cleanText = response.text.trim();
-        if (cleanText.startsWith("```")) {
-          cleanText = cleanText.replace(/^```[a-zA-Z]*\n?/, "").replace(/\n?```$/, "").trim();
+        if (response && response.text) {
+          let cleanText = response.text.trim();
+          if (cleanText.startsWith("```")) {
+            cleanText = cleanText.replace(/^```[a-zA-Z]*\n?/, "").replace(/\n?```$/, "").trim();
+          }
+          if (cleanText) {
+            return cleanText;
+          }
         }
-        return cleanText;
+      } catch (err) {
+        console.warn(`Model ${modelName} call failed, trying next:`, err);
       }
-    } catch (e) {
-      console.error("Gemini API call failed, generating rule-based report fallback:", e);
     }
   }
 
-  // Fallback if API key is missing or errored
-  return buildFallbackReportText(studentName, subject, attendanceStatus, homeworkStatus, teacherNotes, aiInstructions, preferredLanguage);
+  // Fallback if API key is missing or all models failed
+  return buildFallbackReportText(studentName, subject, date, attendanceStatus, homeworkStatus, teacherNotes, aiInstructions, preferredLanguage);
 }
 
 function buildFallbackReportText(
   studentName: string,
   subject: string,
+  date: string,
   attendance: string,
   homework: string,
   notes: string,
-  _instructions: string,
+  aiInstructions: string,
   lang: "ar" | "en"
 ): string {
   const isNoHw =
@@ -392,44 +347,38 @@ function buildFallbackReportText(
     homework.includes("لم يكن هناك واجب") ||
     homework.includes("لا يوجد واجب");
 
+  // If user provided a specific template/instructions, use a clean structured output
+  if (aiInstructions && aiInstructions.trim()) {
+    let out = `تقرير متابعة: ${studentName}\nالمادة: ${subject}\nالتاريخ: ${date}\n\n`;
+    out += `• الحضور: ${attendance}\n`;
+    if (!isNoHw) {
+      out += `• الواجب: ${homework}\n`;
+    }
+    if (notes && notes.trim()) {
+      out += `• ملاحظات الحصة: ${notes.trim()}\n`;
+    }
+    return out.trim();
+  }
+
   if (lang === "en") {
-    return `Dear Parent of ${studentName},
+    return `Student Report: ${studentName}
+Subject: ${subject}
+Date: ${date}
+Attendance: ${attendance}${!isNoHw ? `\nHomework: ${homework}` : ""}
 
-We are pleased to share the student's lesson update for ${subject}:
-• Attendance: ${attendance}${!isNoHw ? `\n• Homework: ${homework}` : ""}
-
-Lesson Overview:
-${notes || "The lesson was completed smoothly with good comprehension and active practice."}
-
-Teacher's Recommendation:
-Keep up the regular daily review and practice to maintain this outstanding progress.
-
-Thank you for your ongoing support and cooperation!
-Best regards,
-GoStars Academic System`;
+Lesson Notes:
+${notes || "Lesson completed successfully with active student participation."}`;
   }
 
-  let autoRecommendation = "نوصي بمتابعة المراجعة الدورية للمفاهيم المشروحة للحفاظ على هذا المستوى المتميز.";
-  if (notes.includes("واجب") || notes.includes("تمرين") || notes.includes("حل")) {
-    autoRecommendation = "الحرص على مراجعة التدريبات وتثبيت الخطوات العملية أولاً بأول.";
-  } else if (notes.includes("تركيز") || notes.includes("انتباه")) {
-    autoRecommendation = "تشجيع الطالب على مواصلة التركيز والتفاعل الإيجابي في الحصص القادمة.";
+  let out = `📋 تقرير متابعة: ${studentName}\n`;
+  out += `📚 المادة: ${subject}\n`;
+  out += `📅 التاريخ: ${date}\n`;
+  out += `🟢 الحضور: ${attendance}\n`;
+  if (!isNoHw) {
+    out += `📝 الواجب: ${homework}\n`;
   }
-
-  return `عزيزي ولي أمر الطالب/الطالبة ${studentName}،
-
-تحية طيبة وبعد،،
-يسرنا أن نضع بين أيديكم تقرير المتابعة الخاص بحصة مادة (${subject}):
-
-📌 حالة الحضور: ${attendance}${!isNoHw ? `\n📌 حالة الواجب المنزلي: ${homework}` : ""}
-
-📝 تفاصيل ما تم في الحصة:
-${notes || "تم الشرح والتطبيق العملي بشكل ممتاز وتفاعل الطالب بتركيز."}
-
-💡 التوجيه والتوصية:
-${autoRecommendation}
-
-شاكرين لكم حسن تعاونكم ودعمكم المستمر.
-مع أطيب التحيات،
-نظام GoStars لإدارة المعلم`;
+  if (notes && notes.trim()) {
+    out += `\n📝 ملاحظات الحصة:\n${notes.trim()}`;
+  }
+  return out.trim();
 }

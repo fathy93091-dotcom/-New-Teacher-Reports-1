@@ -114,6 +114,10 @@ export function cleanSettings(s: AppSettings, defaultFallbackName?: string): App
     copy.defaultSubject = "";
   }
 
+  if (copy.generalAiInstructions === "اكتب تقريراً احترافياً ومشجعاً لولي الأمر، ابدأ بنقطة إيجابية، ثم وضح ما يحتاج الطالب إلى تحسينه، وأنهِ التقرير بتوصية قصيرة.") {
+    copy.generalAiInstructions = "";
+  }
+
   if (!copy.subjectDefaults) {
     copy.subjectDefaults = [];
   }
