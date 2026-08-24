@@ -131,42 +131,50 @@ ${instructionsText}` : ""}
 
 تذكر: التزم بالبيانات المسجلة أعلاه فقط وبشروط المعلم، ولا تخترع أي معلومات من عندك. أخرج نص التقرير النهائي فقط.`;
 
+  console.log(`[GoStars AI Server] Starting group report generation. Subject: "${subject}", Students count: ${students.length}`);
   const client = getGeminiClient();
-  if (client) {
-    const candidateModels = [
-      "gemini-3.6-flash",
-      "gemini-3.5-flash-lite",
-      "gemini-3.7-flash",
-      "gemini-2.5-flash"
-    ];
-    for (const modelName of candidateModels) {
-      try {
-        const response = await client.models.generateContent({
-          model: modelName,
-          contents: promptText,
-          config: {
-            systemInstruction,
-            temperature: 0.1
-          }
-        });
+  if (!client) {
+    console.error("[GoStars AI Server] GEMINI_API_KEY is missing or empty in environment variables.");
+    throw new Error("مفتاح الذكاء الاصطناعي (GEMINI_API_KEY) غير محدد في متغيرات بيئة Vercel (Project Settings > Environment Variables). يرجى إضافته هناك ثم إعادة النشر.");
+  }
 
-        if (response && response.text) {
-          let cleanText = response.text.trim();
-          if (cleanText.startsWith("```")) {
-            cleanText = cleanText.replace(/^```[a-zA-Z]*\n?/, "").replace(/\n?```$/, "").trim();
-          }
-          if (cleanText) {
-            return cleanText;
-          }
+  const candidateModels = [
+    "gemini-3.6-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.7-flash"
+  ];
+
+  let lastErrorMsg = "";
+  for (const modelName of candidateModels) {
+    try {
+      console.log(`[GoStars AI Server] Calling Gemini model: ${modelName} for group report...`);
+      const response = await client.models.generateContent({
+        model: modelName,
+        contents: promptText,
+        config: {
+          systemInstruction,
+          temperature: 0.1
         }
-      } catch (err: any) {
-        console.warn(`Model ${modelName} call failed, trying next model:`, err?.message || String(err));
+      });
+
+      if (response && response.text) {
+        let cleanText = response.text.trim();
+        if (cleanText.startsWith("```")) {
+          cleanText = cleanText.replace(/^```[a-zA-Z]*\n?/, "").replace(/\n?```$/, "").trim();
+        }
+        if (cleanText) {
+          console.log(`[GoStars AI Server] Gemini model ${modelName} generated group report successfully. Characters: ${cleanText.length}`);
+          return cleanText;
+        }
       }
+    } catch (err: any) {
+      lastErrorMsg = err?.message || String(err);
+      console.warn(`[GoStars AI Server] Model ${modelName} call failed, trying next:`, lastErrorMsg);
     }
   }
 
-  // Fallback builder
-  return buildStandardGroupReportText(subject, date, teacherName, students, generalNotes, aiInstructions);
+  console.error("[GoStars AI Server] All Gemini candidate models failed for group report:", lastErrorMsg);
+  throw new Error(`فشل استدعاء نماذج الذكاء الاصطناعي Gemini (${candidateModels.join(", ")}): ${lastErrorMsg}`);
 }
 
 export function buildStandardGroupReportText(
@@ -378,42 +386,50 @@ ${instructionsText}` : ""}
     parts.push({ text: userPromptText });
   }
 
+  console.log(`[GoStars AI Server] Starting single report generation. Student: "${studentName}", Subject: "${subject}"`);
   const client = getGeminiClient();
-  if (client) {
-    const candidateModels = [
-      "gemini-3.6-flash",
-      "gemini-3.5-flash-lite",
-      "gemini-3.7-flash",
-      "gemini-2.5-flash"
-    ];
-    for (const modelName of candidateModels) {
-      try {
-        const response = await client.models.generateContent({
-          model: modelName,
-          contents: parts.length === 1 && typeof parts[0]?.text === "string" ? parts[0].text : parts,
-          config: {
-            systemInstruction,
-            temperature: 0.1
-          }
-        });
+  if (!client) {
+    console.error("[GoStars AI Server] GEMINI_API_KEY is missing or empty in environment variables.");
+    throw new Error("مفتاح الذكاء الاصطناعي (GEMINI_API_KEY) غير محدد في متغيرات بيئة Vercel (Project Settings > Environment Variables). يرجى إضافته هناك ثم إعادة النشر.");
+  }
 
-        if (response && response.text) {
-          let cleanText = response.text.trim();
-          if (cleanText.startsWith("```")) {
-            cleanText = cleanText.replace(/^```[a-zA-Z]*\n?/, "").replace(/\n?```$/, "").trim();
-          }
-          if (cleanText) {
-            return cleanText;
-          }
+  const candidateModels = [
+    "gemini-3.6-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.7-flash"
+  ];
+
+  let lastErrorMsg = "";
+  for (const modelName of candidateModels) {
+    try {
+      console.log(`[GoStars AI Server] Calling Gemini model: ${modelName} for student: ${studentName}...`);
+      const response = await client.models.generateContent({
+        model: modelName,
+        contents: parts.length === 1 && typeof parts[0]?.text === "string" ? parts[0].text : parts,
+        config: {
+          systemInstruction,
+          temperature: 0.1
         }
-      } catch (err: any) {
-        console.warn(`Model ${modelName} call failed, trying next model:`, err?.message || String(err));
+      });
+
+      if (response && response.text) {
+        let cleanText = response.text.trim();
+        if (cleanText.startsWith("```")) {
+          cleanText = cleanText.replace(/^```[a-zA-Z]*\n?/, "").replace(/\n?```$/, "").trim();
+        }
+        if (cleanText) {
+          console.log(`[GoStars AI Server] Gemini model ${modelName} generated student report successfully. Characters: ${cleanText.length}`);
+          return cleanText;
+        }
       }
+    } catch (err: any) {
+      lastErrorMsg = err?.message || String(err);
+      console.warn(`[GoStars AI Server] Model ${modelName} call failed, trying next:`, lastErrorMsg);
     }
   }
 
-  // Fallback if API key is missing or all models failed
-  return buildFallbackReportText(studentName, subject, date, attendanceStatus, homeworkStatus, teacherNotes, aiInstructions || subjectAiInstructions || generalAiInstructions, preferredLanguage);
+  console.error("[GoStars AI Server] All Gemini candidate models failed for student report:", lastErrorMsg);
+  throw new Error(`فشل استدعاء نماذج الذكاء الاصطناعي Gemini (${candidateModels.join(", ")}): ${lastErrorMsg}`);
 }
 
 function buildFallbackReportText(

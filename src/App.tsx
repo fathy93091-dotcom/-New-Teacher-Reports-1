@@ -620,31 +620,37 @@ export function App() {
     subjectAiInstructions?: string;
     attachment?: ReportAttachment;
   }): Promise<string> => {
+    console.log("[GoStars Client] Sending POST /api/ai/generate-report for student:", payload.studentName, "Subject:", payload.subject);
+    const res = await fetch("/api/ai/generate-report", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    console.log("[GoStars Client] Response HTTP status:", res.status, res.statusText);
+
+    let data: any = null;
     try {
-      const res = await fetch("/api/ai/generate-report", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      if (data && data.success && data.reportText) {
-        return data.reportText;
-      }
-      if (data && data.reportText) {
-        return data.reportText;
-      }
-    } catch (e) {
-      console.error("API error during report generation:", e);
+      data = await res.json();
+    } catch (parseErr) {
+      console.error("[GoStars Client] Failed to parse JSON response:", parseErr);
+      throw new Error(`استجابة غير صالحة من الخادم (رمز الحالة: ${res.status})`);
     }
-    
-    // Clean fallback based directly on teacher notes
-    let fallbackText = `تقرير متابعة: ${payload.studentName}\nالمادة: ${payload.subject}\n\n`;
-    if (payload.teacherNotes && payload.teacherNotes.trim()) {
-      fallbackText += `ملاحظات الحصة:\n${payload.teacherNotes.trim()}`;
-    } else {
-      fallbackText += `تم إنجاز الحصة بنجاح ومتابعة التطبيق العملي.`;
+
+    console.log("[GoStars Client] Response body:", {
+      success: data?.success,
+      hasReportText: !!data?.reportText,
+      error: data?.error,
+      details: data?.details
+    });
+
+    if (!res.ok || !data || !data.success || !data.reportText) {
+      const errorMsg = data?.details || data?.error || `فشل إنشاء التقرير (رمز الحالة: ${res.status})`;
+      console.error("[GoStars Client] AI Report generation failed:", errorMsg);
+      throw new Error(errorMsg);
     }
-    return fallbackText.trim();
+
+    return data.reportText;
   };
 
   // Backup & Restore

@@ -136,6 +136,7 @@ export const GroupReportView: React.FC<GroupReportViewProps> = ({
   // Generated / Live Final Output
   const [finalReportText, setFinalReportText] = useState<string>("");
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
+  const [generationError, setGenerationError] = useState<string>("");
   const [copiedSuccess, setCopiedSuccess] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [whatsappNotice, setWhatsappNotice] = useState("");
@@ -281,6 +282,9 @@ export const GroupReportView: React.FC<GroupReportViewProps> = ({
       };
     });
 
+    setGenerationError("");
+    console.log("[GoStars Group UI] Generate AI Report clicked. Subject:", subjectName, "Students:", payloadStudents.length);
+
     try {
       const subjSpecificInst = settings ? getSubjectSpecificAiInstruction(settings.subjectDefaults, subjectName) : "";
       const generalInst = settings?.generalAiInstructions || "";
@@ -301,17 +305,31 @@ export const GroupReportView: React.FC<GroupReportViewProps> = ({
         })
       });
 
-      const data = await res.json();
-      if (data && data.reportText) {
-        setFinalReportText(data.reportText);
-        setActiveViewTab("preview");
-      } else {
-        setFinalReportText(buildExactReportText());
+      console.log("[GoStars Group UI] Response status:", res.status, res.statusText);
+
+      let data: any = null;
+      try {
+        data = await res.json();
+      } catch (parseErr) {
+        console.error("[GoStars Group UI] Failed to parse response JSON:", parseErr);
+        throw new Error(`استجابة غير صالحة من الخادم (رمز الحالة: ${res.status})`);
       }
-    } catch (err) {
-      console.error("AI Report generation error:", err);
-      // Fallback deterministic text
-      setFinalReportText(buildExactReportText());
+
+      if (!res.ok || !data || !data.success || !data.reportText) {
+        const errorMsg = data?.details || data?.error || `فشل إنشاء التقرير الجماعي (رمز الحالة: ${res.status})`;
+        console.error("[GoStars Group UI] Group AI Report generation failed:", errorMsg);
+        setGenerationError(errorMsg);
+        return;
+      }
+
+      console.log("[GoStars Group UI] AI Group report generated successfully. Switching to preview.");
+      setFinalReportText(data.reportText);
+      setGenerationError("");
+      setActiveViewTab("preview");
+    } catch (err: any) {
+      const errorMsg = err?.message || String(err);
+      console.error("[GoStars Group UI] AI Report generation error:", errorMsg);
+      setGenerationError(errorMsg);
     } finally {
       setIsGeneratingAi(false);
     }
@@ -805,6 +823,19 @@ export const GroupReportView: React.FC<GroupReportViewProps> = ({
                 <span>✓✓ {isArabic ? "تم التنسيق" : "Formatted"}</span>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Error Banner if AI fails */}
+      {generationError && (
+        <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs sm:text-sm leading-relaxed flex items-start gap-2.5">
+          <span className="text-base flex-shrink-0">⚠️</span>
+          <div className="flex-1">
+            <div className="font-black text-rose-900 mb-0.5">
+              {isArabic ? "تعذر توليد التقرير الجماعي بالذكاء الاصطناعي:" : "Group AI Report Generation Failed:"}
+            </div>
+            <div className="text-rose-700 text-xs font-mono break-words">{generationError}</div>
           </div>
         </div>
       )}

@@ -61,14 +61,23 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
+    console.log("[GoStars Serverless] /api/ai/generate-report request received. Method:", req.method);
     const body = await getRequestBody(req);
+    console.log("[GoStars Serverless] Parsed body for single report:", {
+      studentName: body?.studentName,
+      subject: body?.subject,
+      hasTeacherNotes: !!body?.teacherNotes,
+      hasAttachment: !!body?.attachment
+    });
     const reportText = await generateGoStarsReportAI(body);
+    console.log("[GoStars Serverless] Report generated successfully. Returning 200 OK. Text length:", reportText.length);
     sendResponse(res, 200, { success: true, reportText });
   } catch (err: any) {
-    console.error("Error in Vercel AI report handler:", err);
+    const errorDetails = err?.message || String(err);
+    console.error("[GoStars Serverless] Error in single AI report handler:", errorDetails);
     sendResponse(res, 500, {
-      error: "Failed to generate report",
-      details: err?.message || String(err)
+      error: "فشل إنشاء التقرير بواسطة الذكاء الاصطناعي",
+      details: errorDetails
     });
   }
 }

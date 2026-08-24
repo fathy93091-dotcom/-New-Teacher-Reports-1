@@ -198,6 +198,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
   const [generatedReportText, setGeneratedReportText] = useState("");
   const [lessonAttachment, setLessonAttachment] = useState<ReportAttachment | null>(null);
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
+  const [generationError, setGenerationError] = useState("");
   const [copied, setCopied] = useState(false);
 
   const activeStudentsList = students.filter(s => s.status === "active");
@@ -481,6 +482,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
   const handleGenerateAi = async () => {
     if (!activeLesson) return;
     setIsGeneratingAi(true);
+    setGenerationError("");
 
     try {
       const currentSubject = activeLesson.subject || "عام";
@@ -503,6 +505,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
           };
         });
 
+        console.log("[GoStars Group Modal] Calling /api/ai/generate-group-report");
         const res = await fetch("/api/ai/generate-group-report", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -518,14 +521,21 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
           })
         });
 
-        if (res.ok) {
-          const data = await res.json();
-          if (data && data.reportText) {
-            setGeneratedReportText(data.reportText);
-            setIsGeneratingAi(false);
-            return;
-          }
+        let data: any = null;
+        try {
+          data = await res.json();
+        } catch (err) {
+          throw new Error(`استجابة غير صالحة من الخادم (رمز الحالة: ${res.status})`);
         }
+
+        if (!res.ok || !data || !data.success || !data.reportText) {
+          const errorMsg = data?.details || data?.error || `فشل إنشاء تقرير المجموعة (رمز: ${res.status})`;
+          throw new Error(errorMsg);
+        }
+
+        setGeneratedReportText(data.reportText);
+        setGenerationError("");
+        return;
       }
 
       const targetStudentName =
@@ -533,6 +543,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
           ? activeLesson.studentName || "الطالب"
           : activeLesson.groupName || "طلاب المجموعة";
 
+      console.log("[GoStars Group Modal] Calling onGenerateReportAi for:", targetStudentName);
       const result = await onGenerateReportAi({
         studentName: targetStudentName,
         subject: currentSubject,
@@ -543,8 +554,11 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
         attachment: lessonAttachment || undefined
       });
       setGeneratedReportText(result);
-    } catch (e) {
-      console.error(e);
+      setGenerationError("");
+    } catch (e: any) {
+      const errorMsg = e?.message || String(e);
+      console.error("[GoStars Group Modal] Failed to generate AI report:", errorMsg);
+      setGenerationError(errorMsg);
     } finally {
       setIsGeneratingAi(false);
     }
@@ -2145,6 +2159,17 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
                     : (isArabic ? "✨ إنشاء التقرير بالذكاء الاصطناعي" : "✨ Generate AI Report")}
                 </span>
               </button>
+
+              {/* Error Banner */}
+              {generationError && (
+                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-start gap-2">
+                  <span className="text-sm">⚠️</span>
+                  <div className="flex-1">
+                    <span className="font-bold block mb-0.5">{isArabic ? "تعذر إنشاء التقرير:" : "Generation Failed:"}</span>
+                    <span className="font-mono text-[11px] text-rose-700">{generationError}</span>
+                  </div>
+                </div>
+              )}
 
               {generatedReportText && (
                 <div className="p-4 rounded-2xl bg-slate-900 text-slate-100 text-xs space-y-3">

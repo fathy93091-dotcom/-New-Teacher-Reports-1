@@ -61,14 +61,24 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
+    console.log("[GoStars Serverless] /api/ai/generate-group-report request received. Method:", req.method);
     const body = await getRequestBody(req);
+    console.log("[GoStars Serverless] Parsed body for group report:", {
+      subject: body?.subject,
+      date: body?.date,
+      teacherName: body?.teacherName,
+      studentsCount: body?.students?.length,
+      hasGeneralNotes: !!body?.generalNotes
+    });
     const reportText = await generateGoStarsGroupReportAI(body);
+    console.log("[GoStars Serverless] Group report generated successfully. Returning 200 OK. Text length:", reportText.length);
     sendResponse(res, 200, { success: true, reportText });
   } catch (err: any) {
-    console.error("Error in Vercel AI group report handler:", err);
+    const errorDetails = err?.message || String(err);
+    console.error("[GoStars Serverless] Error in group AI report handler:", errorDetails);
     sendResponse(res, 500, {
-      error: "Failed to generate group report",
-      details: err?.message || String(err)
+      error: "فشل إنشاء التقرير الجماعي بواسطة الذكاء الاصطناعي",
+      details: errorDetails
     });
   }
 }

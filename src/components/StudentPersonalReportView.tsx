@@ -126,6 +126,7 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
   const [newGeneratedReportText, setNewGeneratedReportText] = useState<string>("");
   const [reportAttachment, setReportAttachment] = useState<ReportAttachment | null>(null);
   const [isGeneratingReport, setIsGeneratingReport] = useState<boolean>(false);
+  const [generationError, setGenerationError] = useState<string>("");
 
   // UI state
   const [copiedReportId, setCopiedReportId] = useState<string | null>(null);
@@ -1012,7 +1013,9 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
               disabled={isGeneratingReport}
               onClick={async () => {
                 setIsGeneratingReport(true);
+                setGenerationError("");
                 try {
+                  console.log("[GoStars UI] AI Report generation button clicked for student:", student.fullName, "Subject:", reportSubject);
                   const notesToUse = newTeacherNotes.trim() || (isArabic ? "تم شرح الدرس ومتابعة التطبيق العملي للدرس بانتظام وتفاعل الطالب بتركيز." : "Lesson covered thoroughly with practice.");
                   const subjSpecificInst = getSubjectSpecificAiInstruction(settings.subjectDefaults, reportSubject);
                   const generalInst = settings.generalAiInstructions || "";
@@ -1036,10 +1039,14 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
                     attachment: reportAttachment || undefined
                   });
                   if (res) {
+                    console.log("[GoStars UI] AI Report received successfully. Updating editor.");
                     setNewGeneratedReportText(res);
+                    setGenerationError("");
                   }
-                } catch (err) {
-                  console.error("Failed to generate AI report:", err);
+                } catch (err: any) {
+                  const errorMsg = err?.message || String(err);
+                  console.error("[GoStars UI] Failed to generate AI report:", errorMsg);
+                  setGenerationError(errorMsg);
                 } finally {
                   setIsGeneratingReport(false);
                 }
@@ -1053,6 +1060,19 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
                   : (isArabic ? "✨ صياغة وتحسين التقرير بالذكاء الاصطناعي" : "✨ Format & Refine with AI")}
               </span>
             </button>
+
+            {/* Error Notification if AI fails */}
+            {generationError && (
+              <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs sm:text-sm leading-relaxed flex items-start gap-2.5">
+                <span className="text-base flex-shrink-0">⚠️</span>
+                <div className="flex-1">
+                  <div className="font-black text-rose-900 mb-0.5">
+                    {isArabic ? "تعذر توليد التقرير بالذكاء الاصطناعي:" : "AI Report Generation Failed:"}
+                  </div>
+                  <div className="text-rose-700 text-xs font-mono break-words">{generationError}</div>
+                </div>
+              </div>
+            )}
 
             {/* AI Report Editor & Actions */}
             {newGeneratedReportText ? (
