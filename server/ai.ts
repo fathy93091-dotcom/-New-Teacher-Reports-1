@@ -1,17 +1,23 @@
 import { GoogleGenAI } from "@google/genai";
 
 function getGeminiClient(): GoogleGenAI | null {
-  const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
-  if (!key || key === "MY_GEMINI_API_KEY") {
+  const rawKey =
+    process.env.GEMINI_API_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    process.env.GOOGLE_GENAI_API_KEY ||
+    process.env.VITE_GEMINI_API_KEY ||
+    process.env.VITE_GOOGLE_API_KEY ||
+    process.env.API_KEY;
+
+  if (!rawKey) {
+    return null;
+  }
+  const key = rawKey.trim().replace(/^["']|["']$/g, "");
+  if (!key || key === "MY_GEMINI_API_KEY" || key.length < 5) {
     return null;
   }
   return new GoogleGenAI({
-    apiKey: key,
-    httpOptions: {
-      headers: {
-        "User-Agent": "aistudio-build"
-      }
-    }
+    apiKey: key
   });
 }
 
@@ -127,7 +133,12 @@ ${instructionsText}` : ""}
 
   const client = getGeminiClient();
   if (client) {
-    const candidateModels = ["gemini-2.5-flash", "gemini-3.7-flash", "gemini-1.5-flash", "gemini-flash-latest"];
+    const candidateModels = [
+      "gemini-3.6-flash",
+      "gemini-3.5-flash-lite",
+      "gemini-3.7-flash",
+      "gemini-2.5-flash"
+    ];
     for (const modelName of candidateModels) {
       try {
         const response = await client.models.generateContent({
@@ -148,8 +159,8 @@ ${instructionsText}` : ""}
             return cleanText;
           }
         }
-      } catch (err) {
-        console.warn(`Model ${modelName} call failed, trying next:`, err);
+      } catch (err: any) {
+        console.warn(`Model ${modelName} call failed, trying next model:`, err?.message || String(err));
       }
     }
   }
@@ -369,12 +380,17 @@ ${instructionsText}` : ""}
 
   const client = getGeminiClient();
   if (client) {
-    const candidateModels = ["gemini-2.5-flash", "gemini-3.7-flash", "gemini-1.5-flash", "gemini-flash-latest"];
+    const candidateModels = [
+      "gemini-3.6-flash",
+      "gemini-3.5-flash-lite",
+      "gemini-3.7-flash",
+      "gemini-2.5-flash"
+    ];
     for (const modelName of candidateModels) {
       try {
         const response = await client.models.generateContent({
           model: modelName,
-          contents: { parts },
+          contents: parts.length === 1 && typeof parts[0]?.text === "string" ? parts[0].text : parts,
           config: {
             systemInstruction,
             temperature: 0.1
@@ -390,8 +406,8 @@ ${instructionsText}` : ""}
             return cleanText;
           }
         }
-      } catch (err) {
-        console.warn(`Model ${modelName} call failed, trying next:`, err);
+      } catch (err: any) {
+        console.warn(`Model ${modelName} call failed, trying next model:`, err?.message || String(err));
       }
     }
   }
