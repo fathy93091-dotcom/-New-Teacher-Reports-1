@@ -33,7 +33,8 @@ import {
   AttendanceStatus,
   HomeworkStatus,
   ReportAttachment,
-  findSubjectAiInstruction
+  findSubjectAiInstruction,
+  getSubjectSpecificAiInstruction
 } from "../types";
 
 interface StudentPersonalReportViewProps {
@@ -50,7 +51,9 @@ interface StudentPersonalReportViewProps {
     studentName: string;
     subject: string;
     teacherNotes: string;
-    aiInstructions: string;
+    aiInstructions?: string;
+    generalAiInstructions?: string;
+    subjectAiInstructions?: string;
     attachment?: ReportAttachment;
   }) => Promise<string>;
 }
@@ -1011,7 +1014,10 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
                 setIsGeneratingReport(true);
                 try {
                   const notesToUse = newTeacherNotes.trim() || (isArabic ? "تم شرح الدرس ومتابعة التطبيق العملي للدرس بانتظام وتفاعل الطالب بتركيز." : "Lesson covered thoroughly with practice.");
-                  const effectiveAiInst = (newAiInstructions || "").trim() || findSubjectAiInstruction(settings.subjectDefaults, reportSubject, settings.generalAiInstructions);
+                  const subjSpecificInst = getSubjectSpecificAiInstruction(settings.subjectDefaults, reportSubject);
+                  const generalInst = settings.generalAiInstructions || "";
+                  const effectiveAiInst = (newAiInstructions || "").trim();
+
                   const res = await onGenerateReportAi({
                     studentName: student.fullName,
                     subject: reportSubject,
@@ -1025,6 +1031,8 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
                         : "حل الواجب بتأخير أو جزئياً"
                     }`,
                     aiInstructions: effectiveAiInst,
+                    generalAiInstructions: generalInst,
+                    subjectAiInstructions: subjSpecificInst,
                     attachment: reportAttachment || undefined
                   });
                   if (res) {

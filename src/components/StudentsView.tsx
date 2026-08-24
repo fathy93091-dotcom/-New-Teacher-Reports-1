@@ -56,7 +56,8 @@ import {
   PaymentStatus,
   AppSettings,
   ReportAttachment,
-  findSubjectAiInstruction
+  findSubjectAiInstruction,
+  getSubjectSpecificAiInstruction
 } from "../types";
 import { calculateStudentFinancials } from "../lib/financeUtils";
 import { StudentPersonalReportView } from "./StudentPersonalReportView";
@@ -125,7 +126,9 @@ interface StudentsViewProps {
     studentName: string;
     subject: string;
     teacherNotes: string;
-    aiInstructions: string;
+    aiInstructions?: string;
+    generalAiInstructions?: string;
+    subjectAiInstructions?: string;
     attachment?: ReportAttachment;
   }) => Promise<string>;
 }
@@ -2527,7 +2530,10 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                             setIsGeneratingReport(true);
                             try {
                               const notesToUse = newTeacherNotes.trim() || (isArabic ? "تم شرح الدرس ومتابعة التطبيق العملي للدرس بانتظام وتفاعل الطالب بتركيز." : "Lesson covered thoroughly with practice.");
-                              const effectiveAiInst = (newAiInstructions || "").trim() || findSubjectAiInstruction(settings.subjectDefaults, reportSubject, settings.generalAiInstructions);
+                              const subjSpecificInst = getSubjectSpecificAiInstruction(settings.subjectDefaults, reportSubject);
+                              const generalInst = settings.generalAiInstructions || "";
+                              const effectiveAiInst = (newAiInstructions || "").trim();
+
                               const res = await onGenerateReportAi({
                                 studentName: selectedStudent.fullName,
                                 subject: reportSubject,
@@ -2541,6 +2547,8 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                                     : "تم حل الواجب بتأخير أو جزئياً"
                                 }`,
                                 aiInstructions: effectiveAiInst,
+                                generalAiInstructions: generalInst,
+                                subjectAiInstructions: subjSpecificInst,
                                 attachment: reportAttachment || undefined
                               });
                               if (res) {

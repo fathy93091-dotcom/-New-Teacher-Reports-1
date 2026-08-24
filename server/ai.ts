@@ -31,6 +31,8 @@ export interface GroupReportGenerationRequest {
   students: GroupReportStudentItem[];
   generalNotes?: string;
   aiInstructions?: string;
+  generalAiInstructions?: string;
+  subjectAiInstructions?: string;
 }
 
 export async function generateGoStarsGroupReportAI(req: GroupReportGenerationRequest): Promise<string> {
@@ -40,33 +42,64 @@ export async function generateGoStarsGroupReportAI(req: GroupReportGenerationReq
     teacherName = "المعلم",
     students = [],
     generalNotes = "",
-    aiInstructions = ""
+    aiInstructions = "",
+    generalAiInstructions = "",
+    subjectAiInstructions = ""
   } = req;
 
-  const hasCustomGroupInst = !!(aiInstructions && aiInstructions.trim());
+  const cleanGeneral = (generalAiInstructions || "").trim();
+  const cleanSubject = (subjectAiInstructions || "").trim();
+  const cleanCustom = (aiInstructions || "").trim();
 
-  // Strict System Instruction
-  let systemInstruction = "";
+  const hasAnyInstructions = !!(cleanGeneral || cleanSubject || cleanCustom);
 
-  if (hasCustomGroupInst) {
-    systemInstruction = `أنت أداة متخصصة لصياغة تقارير الحصص الجماعية بناءً على تعليمات المعلم فقط.
-قام المعلم بوضع تعليمات وقالب وشروط إلزامية للتقرير كالتالي:
-"""
-${aiInstructions.trim()}
-"""
-
-⚠️ [الأولوية والقواعد المطلقة]:
-1. [الالتزام التام 100%]: التزم بتعليمات وقالب وأسلوب المعلم الموضح أعلاه بنسبة 100%. لا تفرض أي هيكل افتراضي، ولا تضع أي عبارات أو مقدمات أو خواتم أو رموز إلا إذا كانت مطلوبة في تعليمات المعلم.
-2. [بيانات الطلاب]: طبق تعليمات وقالب المعلم على جميع الطلاب المذكورين في الحصة بدقة وبنفس الترتيب.
-3. [المعلومات الواقعية]: التزم ببيانات الحصة الحقيقية وملاحظات المعلم لكل طالب دون اختلاق معلومات غير موجودة.
-4. [ممنوع الإضافات الافتراضية]: يُمنع منعاً باتاً إضافة أي نصوص افتراضية أو تصنيفات أو قوالب سابقة لم يطلبها المعلم.
-5. [المخرج النهائي]: أخرج نص التقرير النهائي الصافي فقط الجاهز للإرسال دون أي مقدمات ("إليك التقرير...") ودون كتل كود markdown (no \`\`\` blocks).`;
-  } else {
-    systemInstruction = `أنت المساعد الذكي لصياغة تقرير متابعة الحصة الجماعية.
-قم بإنشاء تقرير جماعي واضح وموجز ومرتب لجميع الطلاب بناءً على بيانات الحصة (المادة: ${subject}، التاريخ: ${date}، اسم المعلم: ${teacherName}).
-اعرض حالة الحضور والواجب والدرجة وملاحظة المعلم لكل طالب بشكل مباشر ومرتب ومناسب للمحادثات.
-أخرج نص التقرير النهائي فقط بدون أي مقدمات أو كتل كود.`;
+  // Assemble instruction layers
+  const instructionLayers: { title: string; content: string }[] = [];
+  if (cleanGeneral) {
+    instructionLayers.push({
+      title: "1️⃣ التعليمات والضوابط العامة (المعتمدة لجميع المواد):",
+      content: cleanGeneral
+    });
   }
+  if (cleanSubject && cleanSubject !== cleanGeneral) {
+    instructionLayers.push({
+      title: `2️⃣ التعليمات الخاصة بمادة (${subject}):`,
+      content: cleanSubject
+    });
+  }
+  if (cleanCustom && cleanCustom !== cleanGeneral && cleanCustom !== cleanSubject) {
+    instructionLayers.push({
+      title: "3️⃣ تعليمات وقالب إضافي مخصص لهذه الحصة:",
+      content: cleanCustom
+    });
+  }
+
+  const instructionsText = instructionLayers
+    .map(l => `${l.title}\n"""\n${l.content}\n"""`)
+    .join("\n\n");
+
+  const systemInstruction = `أنت محرك صياغة التقارير المدرسية المخصص لنظام إدارة الطلاب GoStars.
+
+📌 [ترتيب الأولوية الإلزامي والحاسم في صياغة التقرير]:
+1. الأولوية الأولى (المصدر الحصري للحقائق والمعلومات الواقعية):
+   - بيانات الحصة الفعلية المسجلة لكل طالب وملاحظات المعلم فقط.
+   - لا يجوز لأي تعليمات أو قوالب أن تخترع حقائق غير مسجلة.
+2. الأولوية الثانية (التعليمات المخصصة للمادة والشروط الإلزامية):
+   - التعليمات الخاصة بمادة (${subject}) وأي شروط وقوالب حددها المعلم.
+   - هذه التعليمات قواعد إلزامية واجبة التطبيق 100% وليست مجرد اقتراحات.
+3. الأولوية الثالثة (التعليمات العامة للنظام):
+   - التعليمات العامة المعتمدة من المعلم.
+
+⛔ [قواعد صارمة جداً لمنع الاختلاق وحظر التلفيق (Strict Grounding Rules)]:
+1. [منع الاختلاق التام]: يُمنع منعاً باتاً اختراع أو افتراض أو استنتاج أي معلومات لم يذكرها المعلم صراحة (مثل: اختراع واجب لم يُسجل، أو إضافة مهارة، أو نشاط، أو تقييم، أو مستوى، أو درجات غير مسجلة).
+2. [الأمثلة التوضيحية في التعليمات والقوالب ليست حقائق]: إذا كانت تعليمات المادة أو القالب تحتوي على نصوص أو أمثلة توضيحية (مثل أرقام صفحات، أسماء دروس، واجبات مقترحة، درجات افتراضية)، يجب معاملتها كأمثلة على الهيكل والأسلوب فقط، ويُحظر تماماً نقل هذه الأمثلة أو استخدامها كمعلومات فعلية إلا إذا وردت صراحة في بيانات وملاحظات الحصة.
+3. [حذف الأقسام الفارغة]: إذا نصت التعليمات أو القالب على أن قسماً أو بنداً معيناً يظهر فقط عند توفر معلومات عنه (أو إذا لم تكن هناك بيانات متوفرة لهذا البند كعدم وجود واجب أو درجات)، فيجب حذف القسم بالكامل من التقرير بدلاً من تركه فارغاً أو اختراع محتوى له.
+4. [حفظ الروابط والأرقام والأسماء]: يجب الحفاظ بدقة تامة على أسماء الطلاب، والتواريخ، والأرقام، والروابط، وأي بيانات أدخلها المعلم دون تغيير أو تبديل أو تحريف.
+5. [لا حشو إنشائي]: تجنب إضافة عبارات عامة مكررة أو نصوص تعليمية مصطنعة لمجرد ملء التقرير.
+
+${hasAnyInstructions ? `🚨 [تعليمات وقواعد المعلم الإلزامية للتقرير]:\n${instructionsText}\n\nتنبيه: طبق هذه التعليمات بدقة في هيكل وأسلوب ومضمون التقرير دون كتابة عبارات وصفية مثل "بناء على تعليمات المعلم".` : "اكتب تقريراً جماعياً واضحاً وموجزاً ومرتباً يعكس بيانات وملاحظات الحصة الحالية فقط."}
+
+- المخرج المطلوب: نص التقرير النهائي الصافي فقط الجاهز للإرسال، بدون أي مقدمات خارج التقرير ("إليك التقرير...") وبدون كتل كود markdown (no \`\`\` blocks).`;
 
   const studentsDetailsText = students.map((st, idx) => {
     return `الطالب ${idx + 1}:
@@ -78,19 +111,19 @@ ${aiInstructions.trim()}
 ملاحظة المعلم: ${st.notes ? st.notes : "لا توجد ملاحظة خاصة"}`;
   }).join("\n---\n");
 
-  const promptText = `بيانات الحصة الجماعية:
+  const promptText = `بيانات الحصة الجماعية الفعلية المسجلة:
 - المادة: ${subject}
 - التاريخ: ${date}
 - اسم المعلم: ${teacherName}
 - ملاحظة عامة للحصة: ${generalNotes ? generalNotes : "لا توجد"}
 
-بيانات الطلاب:
+بيانات الطلاب المسجلة:
 ${studentsDetailsText}
 
-${hasCustomGroupInst ? `⭐ التعليمات والقالب المطلوب تطبيقه حصرياً (إلزامي 100%):
-"""
-${aiInstructions.trim()}
-"""` : "أنشئ تقرير متابعة الحصة الجماعية بناءً على هذه البيانات."}`;
+${hasAnyInstructions ? `⭐ تعليمات وقالب المعلم المطلوب تطبيقها بدقة تامة (إلزامية 100%):
+${instructionsText}` : ""}
+
+تذكر: التزم بالبيانات المسجلة أعلاه فقط وبشروط المعلم، ولا تخترع أي معلومات من عندك. أخرج نص التقرير النهائي فقط.`;
 
   const client = getGeminiClient();
   if (client) {
@@ -102,7 +135,7 @@ ${aiInstructions.trim()}
           contents: promptText,
           config: {
             systemInstruction,
-            temperature: 0.2
+            temperature: 0.1
           }
         });
 
@@ -206,7 +239,9 @@ export interface ReportGenerationRequest {
   homeworkStatus?: string; // تم, لم يتم, متأخر
   examScores?: string; // e.g. "48/50"
   teacherNotes: string; // ماذا حدث في الحصة؟
-  aiInstructions: string; // تعليمات للذكاء الاصطناعي
+  aiInstructions?: string; // تعليمات خاصة بالتقرير أو مدخلة يدوياً
+  generalAiInstructions?: string; // التعليمات العامة لجميع المواد
+  subjectAiInstructions?: string; // التعليمات المخصصة للمادة
   preferredLanguage?: "ar" | "en";
   attachment?: {
     fileName?: string;
@@ -218,13 +253,15 @@ export interface ReportGenerationRequest {
 export async function generateGoStarsReportAI(req: ReportGenerationRequest): Promise<string> {
   const {
     studentName,
-    subject,
+    subject = "عام",
     date = new Date().toISOString().split("T")[0],
     attendanceStatus = "حاضر",
     homeworkStatus = "تم إنجازه",
     examScores = "لا يوجد",
     teacherNotes,
     aiInstructions = "",
+    generalAiInstructions = "",
+    subjectAiInstructions = "",
     preferredLanguage = "ar",
     attachment
   } = req;
@@ -236,34 +273,61 @@ export async function generateGoStarsReportAI(req: ReportGenerationRequest): Pro
     homeworkStatus.includes("لم يكن هناك واجب") ||
     homeworkStatus.includes("لا يوجد واجب");
 
-  const hasCustomInstructions = !!(aiInstructions && aiInstructions.trim());
+  const cleanGeneral = (generalAiInstructions || "").trim();
+  const cleanSubject = (subjectAiInstructions || "").trim();
+  const cleanCustom = (aiInstructions || "").trim();
+
+  const hasAnyInstructions = !!(cleanGeneral || cleanSubject || cleanCustom);
+
+  // Assemble instruction layers
+  const instructionLayers: { title: string; content: string }[] = [];
+  if (cleanGeneral) {
+    instructionLayers.push({
+      title: "1️⃣ التعليمات والضوابط العامة (المعتمدة لجميع المواد):",
+      content: cleanGeneral
+    });
+  }
+  if (cleanSubject && cleanSubject !== cleanGeneral) {
+    instructionLayers.push({
+      title: `2️⃣ التعليمات الخاصة بمادة (${subject}):`,
+      content: cleanSubject
+    });
+  }
+  if (cleanCustom && cleanCustom !== cleanGeneral && cleanCustom !== cleanSubject) {
+    instructionLayers.push({
+      title: "3️⃣ تعليمات وقالب إضافي مخصص لهذه الحصة:",
+      content: cleanCustom
+    });
+  }
+
+  const instructionsText = instructionLayers
+    .map(l => `${l.title}\n"""\n${l.content}\n"""`)
+    .join("\n\n");
 
   // 1. Strict System Instruction with explicit priority hierarchy and Anti-Hallucination rules
   const systemInstruction = `أنت محرك صياغة التقارير المدرسية المخصص لنظام إدارة الطلاب GoStars.
 
-📌 [ترتيب الأولوية الإلزامي في صياغة التقرير]:
-1. الأولوية الأولى (المصدر الحصري للحقائق): بيانات الطالب الفعلية والمسجلة بالحصة وملاحظات المعلم فقط.
-2. الأولوية الثانية (قواعد الصياغة والأسلوب): تعليمات وقالب المعلم الخاصة بالتقرير.
-3. الأولوية الثالثة: الأسلوب العام للنظام ولغة الإخراج.
+📌 [ترتيب الأولوية الإلزامي والحاسم في صياغة التقرير]:
+1. الأولوية الأولى (المصدر الحصري للحقائق والمعلومات الواقعية):
+   - بيانات الحصة الفعلية المسجلة للطالب وملاحظات المعلم فقط.
+   - لا يجوز لأي تعليمات أو قوالب أن تخترع حقائق غير مسجلة.
+2. الأولوية الثانية (التعليمات المخصصة للمادة والشروط الإلزامية):
+   - التعليمات الخاصة بمادة (${subject}) وأي شروط وقوالب حددها المعلم.
+   - هذه التعليمات قواعد إلزامية واجبة التطبيق 100% وليست مجرد اقتراحات.
+3. الأولوية الثالثة (التعليمات العامة للنظام):
+   - التعليمات العامة المعتمدة من المعلم.
 
-⛔ [قواعد صارمة جداً لمنع التأليف أو الاختلاق (Strict Grounding Rules)]:
-- التقرير يجب أن يعتمد حصرياً وفقط على البيانات الفعلية المسجلة.
-- يُمنع منعاً باتاً اختراع أو افتراض أو استنتاج أي معلومات غير مسجلة صراحة (مثل: حضور/غياب، درجات، مستويات، سلوك، إنجاز، نقاط قوة أو ضعف لم يذكرها المعلم).
-- إذا كانت هناك معلومة أو تفصيلة غير مذكورة في البيانات أو الملاحظات، لا تختلقها ولا تفترضها كحقيقة على الإطلاق.
-- لا تضف عبارات عامة أو حشواً إنشائياً أو معلومات تعليمية مصطنعة لمجرد ملء التقرير.
+⛔ [قواعد صارمة جداً لمنع الاختلاق وحظر التلفيق (Strict Grounding Rules)]:
+1. [منع الاختلاق التام]: يُمنع منعاً باتاً اختراع أو افتراض أو استنتاج أي معلومات لم يذكرها المعلم صراحة (مثل: اختراع واجب لم يُسجل، أو إضافة مهارة، أو نشاط، أو تقييم، أو مستوى، أو درجات، أو نقاط قوة/ضعف، أو سلوك لم يذكره المعلم).
+2. [الأمثلة التوضيحية في التعليمات والقوالب ليست حقائق]: إذا كانت تعليمات المادة أو القالب تحتوي على نصوص أو أمثلة توضيحية (مثل أرقام صفحات، أسماء دروس، واجبات مقترحة، درجات افتراضية)، يجب معاملتها كأمثلة على الهيكل والأسلوب فقط، ويُحظر تماماً نقل هذه الأمثلة أو استخدامها كمعلومات فعلية إلا إذا وردت صراحة في بيانات وملاحظات الحصة.
+3. [حذف الأقسام الفارغة]: إذا نصت التعليمات أو القالب على أن قسماً أو بنداً معيناً يظهر فقط عند توفر معلومات عنه (أو إذا لم تكن هناك بيانات متوفرة لهذا البند كعدم وجود واجب أو درجات)، فيجب حذف القسم بالكامل من التقرير بدلاً من تركه فارغاً أو اختراع محتوى له.
+4. [حفظ الروابط والأرقام والأسماء]: يجب الحفاظ بدقة تامة على أسماء الطلاب، والتواريخ، والأرقام، والروابط، وأي بيانات أدخلها المعلم دون تغيير أو تبديل أو تحريف.
+5. [لا حشو إنشائي]: تجنب إضافة عبارات عامة مكررة أو نصوص تعليمية مصطنعة لمجرد ملء التقرير.
 
-${hasCustomInstructions ? `🚨 [تعليمات وقالب المعلم - ملزمة وواجبة التطبيق 100%]:
-قام المعلم بوضع التعليمات والشروط التالية لصياغة التقرير:
-"""
-${aiInstructions.trim()}
-"""
-قواعد تطبيق تعليمات المعلم:
-- تعليمات المعلم ملزمة تماماً ويحظر تجاهلها.
-- إذا طلب المعلم صياغة معينة (مثل: "ركز على الواجب"، "اذكر نقاط الضعف فقط"، "اكتب التقرير بأسلوب مختصر"، "بدون مقدمات"، أو وضع قالباً معيناً)، فيجب تطبيق ذلك فعلياً في صياغة وهيكل ومضمون التقرير.
-- لا تكتب عبارات وصفية مثل "بناءً على تعليمات المعلم"، بل طبق التعليمات مباشرة داخل نص التقرير.` : `📌 [توجيه عام]:
+${hasAnyInstructions ? `🚨 [تعليمات وقواعد المعلم الإلزامية للتقرير]:\n${instructionsText}\n\nتنبيه: طبق هذه التعليمات بدقة في هيكل وأسلوب ومضمون التقرير دون كتابة عبارات وصفية مثل "بناء على تعليمات المعلم".` : `📌 [توجيه عام]:
 اكتب تقريراً واضحاً، دقيقاً، وموجزاً باللغة ${preferredLanguage === "ar" ? "العربية" : "الإنجليزية"} يعكس بيانات الحصة وملاحظات المعلم فقط دون أية مبالغات أو حشو.`}
 
-${isNoHw ? "🚫 حالة الواجب: لم يكن هناك واجب مسجل، لذا لا تذكر أي بند أو إشارة عن الواجب في التقرير نهائياً." : ""}
+${isNoHw ? "🚫 [تنبيه خاص بالواجب]: حالة الواجب في هذه الحصة هي (لا يوجد واجب / لم يكن هناك واجب)، لذلك يُمنع منعاً باتاً ذكر أي بند أو سطر أو إشارة عن الواجب في التقرير نهائياً." : ""}
 - المخرج المطلوب: نص التقرير الصافي فقط الجاهز للإرسال لولي الأمر، بدون أي مقدمات خارج التقرير ("إليك التقرير...") وبدون كتل كود markdown (no \`\`\` blocks).`;
 
   const userPromptText = `بيانات الحصة المسجلة فعلياً:
@@ -277,10 +341,8 @@ ${examScores && examScores !== "لا يوجد" && examScores !== "غير محد�
 📝 ملاحظات المعلم الفعلية حول ما تم في الحصة وأداء الطالب:
 ${teacherNotes && teacherNotes.trim() ? teacherNotes.trim() : "تم شرح الدرس ومتابعة التطبيق العملي."}
 
-${hasCustomInstructions ? `⭐ تعليمات المعلم الملزمة لصياغة هذا التقرير (طبقها بدقة وتجنب أي اختلاق):
-"""
-${aiInstructions.trim()}
-"""` : ""}
+${hasAnyInstructions ? `⭐ تعليمات وقواعد المعلم الإلزامية لصياغة هذا التقرير (طبقها بدقة وتجنب أي اختلاق):
+${instructionsText}` : ""}
 
 تذكر: التزم بالبيانات المسجلة أعلاه فقط وبشروط المعلم، ولا تخترع أي معلومات من عندك. أخرج نص التقرير النهائي فقط.`;
 
@@ -335,7 +397,7 @@ ${aiInstructions.trim()}
   }
 
   // Fallback if API key is missing or all models failed
-  return buildFallbackReportText(studentName, subject, date, attendanceStatus, homeworkStatus, teacherNotes, aiInstructions, preferredLanguage);
+  return buildFallbackReportText(studentName, subject, date, attendanceStatus, homeworkStatus, teacherNotes, aiInstructions || subjectAiInstructions || generalAiInstructions, preferredLanguage);
 }
 
 function buildFallbackReportText(

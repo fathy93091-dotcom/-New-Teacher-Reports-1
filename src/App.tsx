@@ -615,7 +615,9 @@ export function App() {
     studentName: string;
     subject: string;
     teacherNotes: string;
-    aiInstructions: string;
+    aiInstructions?: string;
+    generalAiInstructions?: string;
+    subjectAiInstructions?: string;
     attachment?: ReportAttachment;
   }): Promise<string> => {
     try {

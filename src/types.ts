@@ -202,16 +202,15 @@ export interface SubjectAiInstruction {
   instruction: string;
 }
 
-export function findSubjectAiInstruction(
+export function getSubjectSpecificAiInstruction(
   subjectDefaults: SubjectAiInstruction[] | undefined,
-  subject: string,
-  generalFallback: string = ""
+  subject: string
 ): string {
   if (!subjectDefaults || subjectDefaults.length === 0) {
-    return generalFallback || "";
+    return "";
   }
   const clean = (subject || "").trim().toLowerCase();
-  if (!clean) return generalFallback || "";
+  if (!clean) return "";
 
   // 1. Exact match (case-insensitive, trimmed)
   const exact = subjectDefaults.find(
@@ -221,22 +220,55 @@ export function findSubjectAiInstruction(
     return exact.instruction.trim();
   }
 
-  // 2. Match without Arabic definite article "ال" or common prefixes
-  const stripAl = (str: string) => str.replace(/^(ال|al-?|el-?)/i, "").trim();
-  const strippedClean = stripAl(clean);
+  // 2. Normalize Arabic letters and prefixes for fuzzy robust matching
+  const normalizeArabic = (text: string) => {
+    return text
+      .replace(/[\u064B-\u065F\u0670]/g, "") // remove tashkeel
+      .replace(/[أإآٱ]/g, "ا")
+      .replace(/ة/g, "ه")
+      .replace(/ى/g, "ي")
+      .replace(/^(ال|al-?|el-?)/i, "")
+      .replace(/[\s\-_]+/g, " ")
+      .trim()
+      .toLowerCase();
+  };
 
-  const matchedStripped = subjectDefaults.find(s => {
-    const sClean = stripAl((s.subject || "").trim().toLowerCase());
-    return (
-      (sClean && strippedClean && sClean === strippedClean) ||
-      (sClean && strippedClean && (sClean.includes(strippedClean) || strippedClean.includes(sClean)))
-    );
+  const normClean = normalizeArabic(clean);
+
+  // Match normalized exact
+  const matchedNorm = subjectDefaults.find(s => {
+    const sNorm = normalizeArabic((s.subject || "").trim());
+    return sNorm && normClean && sNorm === normClean;
   });
-
-  if (matchedStripped && matchedStripped.instruction && matchedStripped.instruction.trim()) {
-    return matchedStripped.instruction.trim();
+  if (matchedNorm && matchedNorm.instruction && matchedNorm.instruction.trim()) {
+    return matchedNorm.instruction.trim();
   }
 
+  // Match substring/inclusion
+  const matchedSub = subjectDefaults.find(s => {
+    const sNorm = normalizeArabic((s.subject || "").trim());
+    return (
+      sNorm &&
+      normClean &&
+      (sNorm.includes(normClean) || normClean.includes(sNorm))
+    );
+  });
+  if (matchedSub && matchedSub.instruction && matchedSub.instruction.trim()) {
+    return matchedSub.instruction.trim();
+  }
+
+  return "";
+}
+
+export function findSubjectAiInstruction(
+  subjectDefaults: SubjectAiInstruction[] | undefined,
+  subject: string,
+  generalFallback: string = ""
+): string {
+  const subjInst = getSubjectSpecificAiInstruction(subjectDefaults, subject);
+  if (subjInst) {
+    return subjInst;
+  }
   return generalFallback || "";
 }
 

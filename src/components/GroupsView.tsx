@@ -41,7 +41,8 @@ import {
   PaymentTransaction,
   GeneratedReport,
   StudentStatus,
-  findSubjectAiInstruction
+  findSubjectAiInstruction,
+  getSubjectSpecificAiInstruction
 } from "../types";
 import { MixedScheduleEditor, formatTime12h } from "./MixedScheduleEditor";
 import { GroupDetailsModal } from "./groups/GroupDetailsModal";
@@ -82,7 +83,9 @@ interface GroupsViewProps {
     studentName: string;
     subject: string;
     teacherNotes: string;
-    aiInstructions: string;
+    aiInstructions?: string;
+    generalAiInstructions?: string;
+    subjectAiInstructions?: string;
     attachment?: ReportAttachment;
   }) => Promise<string>;
 }
@@ -470,11 +473,8 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
     setLessonAttachment(null);
 
     const subjName = newLesson.subject || "";
-    const effectiveInst = findSubjectAiInstruction(
-      settings.subjectDefaults,
-      subjName,
-      settings.generalAiInstructions
-    );
+    const subjSpecificInst = getSubjectSpecificAiInstruction(settings.subjectDefaults, subjName);
+    const effectiveInst = subjSpecificInst || settings.generalAiInstructions || "";
     setAiInstructions(effectiveInst);
   };
 
@@ -483,6 +483,10 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
     setIsGeneratingAi(true);
 
     try {
+      const currentSubject = activeLesson.subject || "عام";
+      const subjSpecificInst = getSubjectSpecificAiInstruction(settings.subjectDefaults, currentSubject);
+      const generalInst = settings.generalAiInstructions || "";
+
       if (activeLesson.studyType === "group" && activeLesson.groupId) {
         const targetGroup = groups.find(g => g.id === activeLesson.groupId);
         const groupStudentObjs = students.filter(s => targetGroup?.studentIds?.includes(s.id));
@@ -503,12 +507,14 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            subject: activeLesson.subject || "عام",
+            subject: currentSubject,
             date: activeLesson.date || new Date().toISOString().split("T")[0],
             teacherName: settings.teacherName || (isArabic ? "المعلم" : "Teacher"),
             students: payloadStudents,
             generalNotes: teacherNotes,
-            aiInstructions: aiInstructions
+            aiInstructions: aiInstructions,
+            generalAiInstructions: generalInst,
+            subjectAiInstructions: subjSpecificInst
           })
         });
 
@@ -529,9 +535,11 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
 
       const result = await onGenerateReportAi({
         studentName: targetStudentName,
-        subject: activeLesson.subject,
+        subject: currentSubject,
         teacherNotes,
         aiInstructions,
+        generalAiInstructions: generalInst,
+        subjectAiInstructions: subjSpecificInst,
         attachment: lessonAttachment || undefined
       });
       setGeneratedReportText(result);

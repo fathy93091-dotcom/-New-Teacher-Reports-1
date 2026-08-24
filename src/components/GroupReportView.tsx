@@ -17,7 +17,7 @@ import {
   XCircle,
   Clock
 } from "lucide-react";
-import { Group, Student, AppSettings, findSubjectAiInstruction } from "../types";
+import { Group, Student, AppSettings, findSubjectAiInstruction, getSubjectSpecificAiInstruction } from "../types";
 
 export interface StudentReportItem {
   attendance: "present" | "absent";
@@ -128,9 +128,9 @@ export const GroupReportView: React.FC<GroupReportViewProps> = ({
   });
 
   const [aiInstructions, setAiInstructions] = useState<string>(() => {
-    return settings
-      ? findSubjectAiInstruction(settings.subjectDefaults, group.subject || "عام", settings.generalAiInstructions)
-      : "";
+    if (!settings) return "";
+    const specific = getSubjectSpecificAiInstruction(settings.subjectDefaults, group.subject || "عام");
+    return specific || settings.generalAiInstructions || "";
   });
 
   // Generated / Live Final Output
@@ -282,9 +282,9 @@ export const GroupReportView: React.FC<GroupReportViewProps> = ({
     });
 
     try {
-      const subjAiInst = (aiInstructions || "").trim() || (settings
-        ? findSubjectAiInstruction(settings.subjectDefaults, subjectName, settings.generalAiInstructions)
-        : "");
+      const subjSpecificInst = settings ? getSubjectSpecificAiInstruction(settings.subjectDefaults, subjectName) : "";
+      const generalInst = settings?.generalAiInstructions || "";
+      const customInst = (aiInstructions || "").trim();
 
       const res = await fetch("/api/ai/generate-group-report", {
         method: "POST",
@@ -295,7 +295,9 @@ export const GroupReportView: React.FC<GroupReportViewProps> = ({
           teacherName,
           students: payloadStudents,
           generalNotes: generalNotes.trim(),
-          aiInstructions: subjAiInst
+          aiInstructions: customInst,
+          generalAiInstructions: generalInst,
+          subjectAiInstructions: subjSpecificInst
         })
       });
 
