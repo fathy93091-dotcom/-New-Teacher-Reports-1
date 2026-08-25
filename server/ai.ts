@@ -1,24 +1,39 @@
 import { GoogleGenAI } from "@google/genai";
 
-function getGeminiClient(): GoogleGenAI | null {
-  const rawKey =
-    process.env.GEMINI_API_KEY ||
-    process.env.GOOGLE_API_KEY ||
-    process.env.GOOGLE_GENAI_API_KEY ||
-    process.env.VITE_GEMINI_API_KEY ||
-    process.env.VITE_GOOGLE_API_KEY ||
-    process.env.API_KEY;
+function getGeminiClient(): { client: GoogleGenAI; keySource: string } | null {
+  const possibleKeys: [string, string | undefined][] = [
+    ["GEMINI_API_KEY", process.env.GEMINI_API_KEY],
+    ["GOOGLE_API_KEY", process.env.GOOGLE_API_KEY],
+    ["GOOGLE_GENAI_API_KEY", process.env.GOOGLE_GENAI_API_KEY],
+    ["GEMINI_KEY", process.env.GEMINI_KEY],
+    ["GOOGLE_KEY", process.env.GOOGLE_KEY],
+    ["GEMINI_TOKEN", process.env.GEMINI_TOKEN],
+    ["VITE_GEMINI_API_KEY", process.env.VITE_GEMINI_API_KEY],
+    ["VITE_GOOGLE_API_KEY", process.env.VITE_GOOGLE_API_KEY],
+    ["API_KEY", process.env.API_KEY]
+  ];
 
-  if (!rawKey) {
+  for (const [name, rawValue] of possibleKeys) {
+    if (rawValue && typeof rawValue === "string") {
+      const key = rawValue.trim().replace(/^["']|["']$/g, "");
+      if (key && key !== "MY_GEMINI_API_KEY" && key.length >= 8) {
+        try {
+          const client = new GoogleGenAI({ apiKey: key });
+          return { client, keySource: name };
+        } catch (initErr: any) {
+          console.error(`[GoStars AI] Error initializing GoogleGenAI with ${name}:`, initErr?.message || initErr);
+        }
+      }
+    }
+  }
+
+  // Also try fallback to default GoogleGenAI({}) in case environment has auto-detected credentials
+  try {
+    const defaultClient = new GoogleGenAI({});
+    return { client: defaultClient, keySource: "auto-detect" };
+  } catch {
     return null;
   }
-  const key = rawKey.trim().replace(/^["']|["']$/g, "");
-  if (!key || key === "MY_GEMINI_API_KEY" || key.length < 5) {
-    return null;
-  }
-  return new GoogleGenAI({
-    apiKey: key
-  });
 }
 
 export interface GroupReportStudentItem {
@@ -132,16 +147,21 @@ ${instructionsText}` : ""}
 تذكر: التزم بالبيانات المسجلة أعلاه فقط وبشروط المعلم، ولا تخترع أي معلومات من عندك. أخرج نص التقرير النهائي فقط.`;
 
   console.log(`[GoStars AI Server] Starting group report generation. Subject: "${subject}", Students count: ${students.length}`);
-  const client = getGeminiClient();
-  if (!client) {
+  const clientObj = getGeminiClient();
+  if (!clientObj) {
     console.error("[GoStars AI Server] GEMINI_API_KEY is missing or empty in environment variables.");
     throw new Error("مفتاح الذكاء الاصطناعي (GEMINI_API_KEY) غير محدد في متغيرات بيئة Vercel (Project Settings > Environment Variables). يرجى إضافته هناك ثم إعادة النشر.");
   }
 
+  const { client, keySource } = clientObj;
+  console.log(`[GoStars AI Server] GoogleGenAI initialized using key source: "${keySource}"`);
+
   const candidateModels = [
     "gemini-3.6-flash",
     "gemini-3.5-flash-lite",
-    "gemini-3.7-flash"
+    "gemini-3.7-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-flash-latest"
   ];
 
   let lastErrorMsg = "";
@@ -387,16 +407,21 @@ ${instructionsText}` : ""}
   }
 
   console.log(`[GoStars AI Server] Starting single report generation. Student: "${studentName}", Subject: "${subject}"`);
-  const client = getGeminiClient();
-  if (!client) {
+  const clientObj = getGeminiClient();
+  if (!clientObj) {
     console.error("[GoStars AI Server] GEMINI_API_KEY is missing or empty in environment variables.");
     throw new Error("مفتاح الذكاء الاصطناعي (GEMINI_API_KEY) غير محدد في متغيرات بيئة Vercel (Project Settings > Environment Variables). يرجى إضافته هناك ثم إعادة النشر.");
   }
 
+  const { client, keySource } = clientObj;
+  console.log(`[GoStars AI Server] GoogleGenAI initialized using key source: "${keySource}"`);
+
   const candidateModels = [
     "gemini-3.6-flash",
     "gemini-3.5-flash-lite",
-    "gemini-3.7-flash"
+    "gemini-3.7-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-flash-latest"
   ];
 
   let lastErrorMsg = "";

@@ -2,7 +2,17 @@ import "dotenv/config";
 import { generateGoStarsGroupReportAI } from "../../server/ai";
 
 async function getRequestBody(req: any): Promise<any> {
-  if (req.body) {
+  if (req.body !== undefined && req.body !== null) {
+    if (typeof req.body === "object") {
+      if (Buffer.isBuffer(req.body)) {
+        try {
+          return JSON.parse(req.body.toString("utf-8"));
+        } catch {
+          return {};
+        }
+      }
+      return req.body;
+    }
     if (typeof req.body === "string") {
       try {
         return JSON.parse(req.body);
@@ -10,24 +20,39 @@ async function getRequestBody(req: any): Promise<any> {
         return {};
       }
     }
-    if (typeof req.body === "object") {
-      return req.body;
-    }
+  }
+
+  // If request is already completed/ended and no body
+  if (req.readableEnded || req.complete) {
+    return {};
   }
 
   return new Promise((resolve) => {
     let data = "";
+    const timer = setTimeout(() => {
+      try {
+        resolve(data ? JSON.parse(data) : {});
+      } catch {
+        resolve({});
+      }
+    }, 2500);
+
     req.on("data", (chunk: any) => {
       data += chunk;
     });
     req.on("end", () => {
+      clearTimeout(timer);
       try {
         resolve(data ? JSON.parse(data) : {});
       } catch {
         resolve({});
       }
     });
-    req.on("error", () => resolve({}));
+    req.on("error", (e: any) => {
+      clearTimeout(timer);
+      console.warn("[GoStars Serverless] Error reading group request stream:", e?.message);
+      resolve({});
+    });
   });
 }
 
@@ -46,7 +71,7 @@ export default async function handler(req: any, res: any) {
   res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,PATCH,DELETE,POST,PUT");
   res.setHeader(
     "Access-Control-Allow-Headers",
-    "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization"
+    "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization, X-Gemini-Key, X-Api-Key"
   );
 
   if (req.method === "OPTIONS") {
@@ -63,6 +88,13 @@ export default async function handler(req: any, res: any) {
   try {
     console.log("[GoStars Serverless] /api/ai/generate-group-report request received. Method:", req.method);
     const body = await getRequestBody(req);
+
+    // Support optional key from request header if present
+    const headerKey = req.headers?.["x-gemini-key"] || req.headers?.["x-api-key"];
+    if (headerKey && typeof headerKey === "string" && !process.env.GEMINI_API_KEY) {
+      process.env.GEMINI_API_KEY = headerKey.trim();
+    }
+
     console.log("[GoStars Serverless] Parsed body for group report:", {
       subject: body?.subject,
       date: body?.date,
@@ -70,6 +102,7 @@ export default async function handler(req: any, res: any) {
       studentsCount: body?.students?.length,
       hasGeneralNotes: !!body?.generalNotes
     });
+
     const reportText = await generateGoStarsGroupReportAI(body);
     console.log("[GoStars Serverless] Group report generated successfully. Returning 200 OK. Text length:", reportText.length);
     sendResponse(res, 200, { success: true, reportText });
