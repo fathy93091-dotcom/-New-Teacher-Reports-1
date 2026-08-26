@@ -39,9 +39,9 @@ interface FinanceViewProps {
 
 export const FinanceView: React.FC<FinanceViewProps> = ({
   settings,
-  students,
+  students = [],
   attendanceRecords = [],
-  paymentTransactions,
+  paymentTransactions = [],
   onRecordPayment
 }) => {
   const isArabic = settings.preferredLanguage === "ar";

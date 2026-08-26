@@ -1,5 +1,6 @@
 import {
   Student,
+  CombinedStudentGroup,
   Group,
   PrivateLesson,
   Lesson,
@@ -30,7 +31,15 @@ function getScopedKey(baseKey: string, userId?: string): string {
 function getItem<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(key);
-    if (raw) return JSON.parse(raw);
+    if (raw !== null && raw !== undefined) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(fallback)) {
+        return (Array.isArray(parsed) ? parsed : fallback) as unknown as T;
+      }
+      if (parsed !== null && parsed !== undefined) {
+        return parsed;
+      }
+    }
   } catch (e) {
     console.error(`Error reading ${key} from localStorage:`, e);
   }
@@ -153,6 +162,16 @@ export const StorageEngine = {
     setItem(key, students);
   },
 
+  // Combined Student Groups / Files
+  getCombinedStudentGroups(userId?: string): CombinedStudentGroup[] {
+    const key = getScopedKey("combined_student_groups", userId);
+    return getItem<CombinedStudentGroup[]>(key, []);
+  },
+  saveCombinedStudentGroups(groups: CombinedStudentGroup[], userId?: string): void {
+    const key = getScopedKey("combined_student_groups", userId);
+    setItem(key, groups);
+  },
+
   // Groups
   getGroups(userId?: string): Group[] {
     const key = getScopedKey("groups", userId);
@@ -230,6 +249,7 @@ export const StorageEngine = {
       exportedAt: new Date().toISOString(),
       settings: this.getSettings(userId),
       students: this.getStudents(userId),
+      combinedStudentGroups: this.getCombinedStudentGroups(userId),
       groups: this.getGroups(userId),
       privateLessons: this.getPrivateLessons(userId),
       lessons: this.getLessons(userId),
@@ -245,6 +265,7 @@ export const StorageEngine = {
     if (!data || typeof data !== "object") return;
     if (data.settings) this.saveSettings(data.settings, userId);
     if (Array.isArray(data.students)) this.saveStudents(data.students, userId);
+    if (Array.isArray(data.combinedStudentGroups)) this.saveCombinedStudentGroups(data.combinedStudentGroups, userId);
     if (Array.isArray(data.groups)) this.saveGroups(data.groups, userId);
     if (Array.isArray(data.privateLessons)) this.savePrivateLessons(data.privateLessons, userId);
     if (Array.isArray(data.lessons)) this.saveLessons(data.lessons, userId);
@@ -268,7 +289,17 @@ export const StorageEngine = {
 
   // Wipe User Data / Reset this user to Clean Empty Slate
   purgeUserData(userId?: string): void {
-    const keys = ["students", "groups", "private_lessons", "lessons", "attendance", "exams", "payments", "reports"];
+    const keys = [
+      "students",
+      "combined_student_groups",
+      "groups",
+      "private_lessons",
+      "lessons",
+      "attendance",
+      "exams",
+      "payments",
+      "reports"
+    ];
     keys.forEach(k => {
       setItem(getScopedKey(k, userId), []);
     });

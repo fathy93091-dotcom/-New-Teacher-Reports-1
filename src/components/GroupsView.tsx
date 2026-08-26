@@ -92,10 +92,10 @@ interface GroupsViewProps {
 
 export const GroupsView: React.FC<GroupsViewProps> = ({
   settings,
-  groups,
-  privateLessons,
-  students,
-  lessons,
+  groups = [],
+  privateLessons = [],
+  students = [],
+  lessons = [],
   attendanceRecords = [],
   examRecords = [],
   paymentTransactions = [],

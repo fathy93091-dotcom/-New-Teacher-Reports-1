@@ -323,3 +323,57 @@ export function calculateStudentFinancials(
     detailsExplanationEn: explanationEn
   };
 }
+
+export interface CombinedGroupFinancialSummary {
+  totalAttendedLessons: number;
+  totalAccruedCost: number;
+  totalPaidAmount: number;
+  netBalance: number;
+  amountDue: number;
+  creditRemaining: number;
+  isFullyPaid: boolean;
+  studentBreakdowns: {
+    student: Student;
+    financials: StudentFinancialSummary;
+  }[];
+}
+
+export function calculateCombinedGroupFinancials(
+  groupStudents: Student[] = [],
+  attendanceRecords?: AttendanceRecord[]
+): CombinedGroupFinancialSummary {
+  const safeGroupStudents = Array.isArray(groupStudents) ? groupStudents.filter(Boolean) : [];
+  const studentBreakdowns = safeGroupStudents.map(st => ({
+    student: st,
+    financials: calculateStudentFinancials(st, attendanceRecords)
+  }));
+
+  const totalAttendedLessons = studentBreakdowns.reduce(
+    (sum, b) => sum + b.financials.totalAttendedLessons,
+    0
+  );
+  const totalAccruedCost = studentBreakdowns.reduce(
+    (sum, b) => sum + b.financials.totalAccruedCost,
+    0
+  );
+  const totalPaidAmount = studentBreakdowns.reduce(
+    (sum, b) => sum + b.financials.totalPaidAmount,
+    0
+  );
+  const netBalance = totalPaidAmount - totalAccruedCost;
+  const amountDue = netBalance < 0 ? Math.abs(netBalance) : 0;
+  const creditRemaining = netBalance > 0 ? netBalance : 0;
+  const isFullyPaid = amountDue === 0;
+
+  return {
+    totalAttendedLessons,
+    totalAccruedCost,
+    totalPaidAmount,
+    netBalance,
+    amountDue,
+    creditRemaining,
+    isFullyPaid,
+    studentBreakdowns
+  };
+}
+

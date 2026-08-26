@@ -10,6 +10,7 @@ import { SettingsAndBackupModal } from "./components/SettingsAndBackupModal";
 
 import {
   Student,
+  CombinedStudentGroup,
   Group,
   PrivateLesson,
   Lesson,
@@ -43,6 +44,9 @@ export function App() {
   // App State initialized from LocalStorage (per user)
   const [settings, setSettings] = useState<AppSettings>(() => StorageEngine.getSettings());
   const [students, setStudents] = useState<Student[]>(() => StorageEngine.getStudents());
+  const [combinedStudentGroups, setCombinedStudentGroups] = useState<CombinedStudentGroup[]>(() =>
+    StorageEngine.getCombinedStudentGroups()
+  );
   const [groups, setGroups] = useState<Group[]>(() => StorageEngine.getGroups());
   const [privateLessons, setPrivateLessons] = useState<PrivateLesson[]>(() => StorageEngine.getPrivateLessons());
   const [lessons, setLessons] = useState<Lesson[]>(() => StorageEngine.getLessons());
@@ -104,6 +108,7 @@ export function App() {
         // Load this specific user's scoped local data immediately
         const userSettings = StorageEngine.getSettings(user.uid);
         const userStudents = StorageEngine.getStudents(user.uid);
+        const userCombined = StorageEngine.getCombinedStudentGroups(user.uid);
         const userGroups = StorageEngine.getGroups(user.uid);
         const userPrivateLessons = StorageEngine.getPrivateLessons(user.uid);
         const userLessons = StorageEngine.getLessons(user.uid);
@@ -114,6 +119,7 @@ export function App() {
 
         setSettings(userSettings);
         setStudents(userStudents);
+        setCombinedStudentGroups(userCombined);
         setGroups(userGroups);
         setPrivateLessons(userPrivateLessons);
         setLessons(userLessons);
@@ -126,6 +132,7 @@ export function App() {
         // Clear in-memory state on logout so no information is shared between user sessions
         setSettings(StorageEngine.cleanSettings(StorageEngine.getSettings()));
         setStudents([]);
+        setCombinedStudentGroups([]);
         setGroups([]);
         setPrivateLessons([]);
         setLessons([]);
@@ -162,6 +169,10 @@ export function App() {
           setStudents(remoteData.students);
           StorageEngine.saveStudents(remoteData.students, uid);
         }
+        if (Array.isArray(remoteData.combinedStudentGroups)) {
+          setCombinedStudentGroups(remoteData.combinedStudentGroups);
+          StorageEngine.saveCombinedStudentGroups(remoteData.combinedStudentGroups, uid);
+        }
         if (Array.isArray(remoteData.groups)) {
           setGroups(remoteData.groups);
           StorageEngine.saveGroups(remoteData.groups, uid);
@@ -197,28 +208,30 @@ export function App() {
       } else {
         // First login for this email or no remote document yet: preserve any local data and save to Firestore
         const cleanInitial = StorageEngine.cleanSettings(settings, currentUser.displayName || "");
-        const localStudents = StorageEngine.getStudents(uid);
-        const localGroups = StorageEngine.getGroups(uid);
-        const localPrivateLessons = StorageEngine.getPrivateLessons(uid);
-        const localLessons = StorageEngine.getLessons(uid);
-        const localAttendance = StorageEngine.getAttendanceRecords(uid);
-        const localExams = StorageEngine.getExams(uid);
-        const localPayments = StorageEngine.getPayments(uid);
-        const localReports = StorageEngine.getReports(uid);
+        const localStudents = StorageEngine.getStudents(uid) || [];
+        const localCombined = StorageEngine.getCombinedStudentGroups(uid) || [];
+        const localGroups = StorageEngine.getGroups(uid) || [];
+        const localPrivateLessons = StorageEngine.getPrivateLessons(uid) || [];
+        const localLessons = StorageEngine.getLessons(uid) || [];
+        const localAttendance = StorageEngine.getAttendanceRecords(uid) || [];
+        const localExams = StorageEngine.getExams(uid) || [];
+        const localPayments = StorageEngine.getPayments(uid) || [];
+        const localReports = StorageEngine.getReports(uid) || [];
 
         setSettings(cleanInitial);
         const initialWorkspace: GoStarsBackupData = {
           version: "1.0",
           exportedAt: new Date().toISOString(),
           settings: cleanInitial,
-          students: localStudents.length > 0 ? localStudents : students,
-          groups: localGroups.length > 0 ? localGroups : groups,
-          privateLessons: localPrivateLessons.length > 0 ? localPrivateLessons : privateLessons,
-          lessons: localLessons.length > 0 ? localLessons : lessons,
-          attendanceRecords: localAttendance.length > 0 ? localAttendance : attendanceRecords,
-          examRecords: localExams.length > 0 ? localExams : examRecords,
-          paymentTransactions: localPayments.length > 0 ? localPayments : paymentTransactions,
-          reports: localReports.length > 0 ? localReports : reports
+          students: (Array.isArray(localStudents) && localStudents.length > 0) ? localStudents : (Array.isArray(students) ? students : []),
+          combinedStudentGroups: (Array.isArray(localCombined) && localCombined.length > 0) ? localCombined : (Array.isArray(combinedStudentGroups) ? combinedStudentGroups : []),
+          groups: (Array.isArray(localGroups) && localGroups.length > 0) ? localGroups : (Array.isArray(groups) ? groups : []),
+          privateLessons: (Array.isArray(localPrivateLessons) && localPrivateLessons.length > 0) ? localPrivateLessons : (Array.isArray(privateLessons) ? privateLessons : []),
+          lessons: (Array.isArray(localLessons) && localLessons.length > 0) ? localLessons : (Array.isArray(lessons) ? lessons : []),
+          attendanceRecords: (Array.isArray(localAttendance) && localAttendance.length > 0) ? localAttendance : (Array.isArray(attendanceRecords) ? attendanceRecords : []),
+          examRecords: (Array.isArray(localExams) && localExams.length > 0) ? localExams : (Array.isArray(examRecords) ? examRecords : []),
+          paymentTransactions: (Array.isArray(localPayments) && localPayments.length > 0) ? localPayments : (Array.isArray(paymentTransactions) ? paymentTransactions : []),
+          reports: (Array.isArray(localReports) && localReports.length > 0) ? localReports : (Array.isArray(reports) ? reports : [])
         };
 
         StorageEngine.saveUserWorkspace(uid, initialWorkspace);
@@ -242,6 +255,7 @@ export function App() {
 
     StorageEngine.saveSettings(settings, uid);
     StorageEngine.saveStudents(students, uid);
+    StorageEngine.saveCombinedStudentGroups(combinedStudentGroups, uid);
     StorageEngine.saveGroups(groups, uid);
     StorageEngine.savePrivateLessons(privateLessons, uid);
     StorageEngine.saveLessons(lessons, uid);
@@ -257,6 +271,7 @@ export function App() {
         exportedAt: new Date().toISOString(),
         settings,
         students,
+        combinedStudentGroups,
         groups,
         privateLessons,
         lessons,
@@ -266,7 +281,19 @@ export function App() {
         reports
       });
     }
-  }, [settings, students, groups, privateLessons, lessons, attendanceRecords, examRecords, paymentTransactions, reports, currentUser]);
+  }, [
+    settings,
+    students,
+    combinedStudentGroups,
+    groups,
+    privateLessons,
+    lessons,
+    attendanceRecords,
+    examRecords,
+    paymentTransactions,
+    reports,
+    currentUser
+  ]);
 
 
   // Handlers
@@ -377,10 +404,112 @@ export function App() {
         studentIds: (g.studentIds || []).filter(id => id !== studentId)
       }))
     );
+    setCombinedStudentGroups(prev =>
+      (prev || [])
+        .map(cg => ({
+          ...cg,
+          studentIds: (cg.studentIds || []).filter(id => id !== studentId)
+        }))
+        .filter(cg => (cg.studentIds || []).length > 0)
+    );
     setAttendanceRecords(prev => prev.filter(a => a.studentId !== studentId));
     setExamRecords(prev => prev.filter(e => e.studentId !== studentId));
     setPaymentTransactions(prev => prev.filter(p => p.studentId !== studentId));
     setReports(prev => prev.filter(r => r.studentId !== studentId));
+  };
+
+  // Combined Student Group Handlers
+  const handleAddCombinedGroup = (
+    name: string,
+    studentIds: string[],
+    notes?: string,
+    sharedParentContact?: string,
+    sharedGroupLink?: string
+  ) => {
+    const safeStudentIds = Array.isArray(studentIds) ? studentIds.filter(Boolean) : [];
+    if (safeStudentIds.length === 0) return;
+
+    const newGroup: CombinedStudentGroup = {
+      id: `cgrp_${Date.now()}`,
+      name: name.trim() || `ملف مجمع (${safeStudentIds.length} طلاب)`,
+      studentIds: safeStudentIds,
+      notes: notes?.trim() || undefined,
+      sharedParentContact: sharedParentContact?.trim() || undefined,
+      sharedGroupLink: sharedGroupLink?.trim() || undefined,
+      createdAt: new Date().toISOString()
+    };
+
+    setCombinedStudentGroups(prev => {
+      const existing = (prev || [])
+        .map(cg => ({
+          ...cg,
+          studentIds: (cg.studentIds || []).filter(id => !safeStudentIds.includes(id))
+        }))
+        .filter(cg => (cg.studentIds || []).length > 0);
+      return [newGroup, ...existing];
+    });
+
+    // Update students with combinedGroupId
+    setStudents(prev =>
+      (prev || []).map(s => (safeStudentIds.includes(s.id) ? { ...s, combinedGroupId: newGroup.id } : s))
+    );
+  };
+
+  const handleUpdateCombinedGroup = (id: string, partial: Partial<CombinedStudentGroup>) => {
+    setCombinedStudentGroups(prev =>
+      (prev || []).map(cg => (cg.id === id ? { ...cg, ...partial } : cg))
+    );
+  };
+
+  const handleDeleteCombinedGroup = (id: string) => {
+    const targetGroup = (combinedStudentGroups || []).find(cg => cg.id === id);
+    setCombinedStudentGroups(prev => (prev || []).filter(cg => cg.id !== id));
+
+    // Release students back to standalone
+    if (targetGroup && Array.isArray(targetGroup.studentIds)) {
+      setStudents(prev =>
+        (prev || []).map(s =>
+          targetGroup.studentIds.includes(s.id) ? { ...s, combinedGroupId: undefined } : s
+        )
+      );
+    }
+  };
+
+  const handleAddStudentToCombinedGroup = (groupId: string, studentId: string) => {
+    setCombinedStudentGroups(prev =>
+      (prev || []).map(cg =>
+        cg.id === groupId
+          ? {
+              ...cg,
+              studentIds: Array.from(new Set([...(cg.studentIds || []), studentId]))
+            }
+          : cg
+      )
+    );
+
+    setStudents(prev =>
+      (prev || []).map(s => (s.id === studentId ? { ...s, combinedGroupId: groupId } : s))
+    );
+  };
+
+  const handleRemoveStudentFromCombinedGroup = (groupId: string, studentId: string) => {
+    setCombinedStudentGroups(prev =>
+      (prev || [])
+        .map(cg => {
+          if (cg.id === groupId) {
+            return {
+              ...cg,
+              studentIds: (cg.studentIds || []).filter(id => id !== studentId)
+            };
+          }
+          return cg;
+        })
+        .filter(cg => (cg.studentIds || []).length > 0)
+    );
+
+    setStudents(prev =>
+      (prev || []).map(s => (s.id === studentId ? { ...s, combinedGroupId: undefined } : s))
+    );
   };
 
   const handleUpdateStudentStatus = (studentId: string, status: StudentStatus) => {
@@ -614,7 +743,9 @@ export function App() {
   const handleGenerateReportAi = async (payload: {
     studentName: string;
     subject: string;
-    teacherNotes: string;
+    teacherNotes?: string;
+    classEvents?: string;
+    homeworkNotes?: string;
     aiInstructions?: string;
     generalAiInstructions?: string;
     subjectAiInstructions?: string;
@@ -776,6 +907,7 @@ export function App() {
           <StudentsView
             settings={settings}
             students={students}
+            combinedStudentGroups={combinedStudentGroups}
             privateLessons={privateLessons}
             attendanceRecords={attendanceRecords}
             examRecords={examRecords}
@@ -794,6 +926,11 @@ export function App() {
             onAddPrivateLesson={handleAddPrivateLesson}
             onUpdatePrivateLesson={handleUpdatePrivateLesson}
             onDeletePrivateLesson={handleDeletePrivateLesson}
+            onAddCombinedGroup={handleAddCombinedGroup}
+            onUpdateCombinedGroup={handleUpdateCombinedGroup}
+            onDeleteCombinedGroup={handleDeleteCombinedGroup}
+            onAddStudentToCombinedGroup={handleAddStudentToCombinedGroup}
+            onRemoveStudentFromCombinedGroup={handleRemoveStudentFromCombinedGroup}
           />
         )}
 

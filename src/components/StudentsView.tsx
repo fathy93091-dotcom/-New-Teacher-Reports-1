@@ -41,10 +41,15 @@ import {
   History,
   LayoutGrid,
   List,
-  RefreshCw
+  RefreshCw,
+  Users,
+  Link2,
+  FolderPlus
 } from "lucide-react";
 import {
   Student,
+  CombinedStudentGroup,
+  PrivateLesson,
   StudentSubjectPlan,
   AttendanceRecord,
   AttendanceStatus,
@@ -59,8 +64,10 @@ import {
   findSubjectAiInstruction,
   getSubjectSpecificAiInstruction
 } from "../types";
-import { calculateStudentFinancials } from "../lib/financeUtils";
+import { calculateStudentFinancials, calculateCombinedGroupFinancials } from "../lib/financeUtils";
 import { StudentPersonalReportView } from "./StudentPersonalReportView";
+import { CreateCombinedGroupModal } from "./CreateCombinedGroupModal";
+import { CombinedStudentFileModal } from "./CombinedStudentFileModal";
 
 const COMMON_SUBJECT_SUGGESTIONS = [
   "الرياضيات",
@@ -109,6 +116,8 @@ export const COMMON_GRADES = [
 interface StudentsViewProps {
   settings: AppSettings;
   students: Student[];
+  combinedStudentGroups?: CombinedStudentGroup[];
+  privateLessons?: PrivateLesson[];
   attendanceRecords: AttendanceRecord[];
   examRecords: ExamRecord[];
   paymentTransactions: PaymentTransaction[];
@@ -125,21 +134,33 @@ interface StudentsViewProps {
   onGenerateReportAi: (payload: {
     studentName: string;
     subject: string;
-    teacherNotes: string;
+    teacherNotes?: string;
+    classEvents?: string;
+    homeworkNotes?: string;
     aiInstructions?: string;
     generalAiInstructions?: string;
     subjectAiInstructions?: string;
     attachment?: ReportAttachment;
   }) => Promise<string>;
+  onAddPrivateLesson?: (privateLesson: Omit<PrivateLesson, "id" | "createdAt">) => void;
+  onUpdatePrivateLesson?: (id: string, partial: Partial<PrivateLesson>) => void;
+  onDeletePrivateLesson?: (id: string) => void;
+  onAddCombinedGroup?: (name: string, studentIds: string[], notes?: string, sharedParentContact?: string, sharedGroupLink?: string) => void;
+  onUpdateCombinedGroup?: (id: string, partial: Partial<CombinedStudentGroup>) => void;
+  onDeleteCombinedGroup?: (id: string) => void;
+  onAddStudentToCombinedGroup?: (groupId: string, studentId: string) => void;
+  onRemoveStudentFromCombinedGroup?: (groupId: string, studentId: string) => void;
 }
 
 export const StudentsView: React.FC<StudentsViewProps> = ({
   settings,
-  students,
-  attendanceRecords,
-  examRecords,
-  paymentTransactions,
-  reports,
+  students = [],
+  combinedStudentGroups = [],
+  privateLessons = [],
+  attendanceRecords = [],
+  examRecords = [],
+  paymentTransactions = [],
+  reports = [],
   onAddStudent,
   onEditStudent,
   onDeleteStudent,
@@ -149,7 +170,15 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   onAddReport,
   onDeleteReport,
   onToggleArchiveReport,
-  onGenerateReportAi
+  onGenerateReportAi,
+  onAddPrivateLesson,
+  onUpdatePrivateLesson,
+  onDeletePrivateLesson,
+  onAddCombinedGroup,
+  onUpdateCombinedGroup,
+  onDeleteCombinedGroup,
+  onAddStudentToCombinedGroup,
+  onRemoveStudentFromCombinedGroup
 }) => {
   const isArabic = settings.preferredLanguage === "ar";
   const [filterStatus, setFilterStatus] = useState<"all" | "active" | "stopped">("all");
@@ -179,7 +208,8 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   const [reportDeductCost, setReportDeductCost] = useState<boolean>(true);
   const [reportHomeworkStatus, setReportHomeworkStatus] = useState<HomeworkStatus>("done");
   const [absentNotes, setAbsentNotes] = useState("");
-  const [newTeacherNotes, setNewTeacherNotes] = useState("");
+  const [classEvents, setClassEvents] = useState("");
+  const [homeworkNotes, setHomeworkNotes] = useState("");
   const [newAiInstructions, setNewAiInstructions] = useState("");
   const [newGeneratedReportText, setNewGeneratedReportText] = useState("");
   const [reportAttachment, setReportAttachment] = useState<ReportAttachment | null>(null);
@@ -192,6 +222,11 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   const [showWhatsAppChooserModal, setShowWhatsAppChooserModal] = useState(false);
   const [pendingWhatsAppText, setPendingWhatsAppText] = useState("");
   const [pendingWhatsAppTargetStudent, setPendingWhatsAppTargetStudent] = useState<Student | null>(null);
+
+  // Combined Student Group State
+  const [selectedCombinedGroup, setSelectedCombinedGroup] = useState<CombinedStudentGroup | null>(null);
+  const [showCreateCombinedGroupModal, setShowCreateCombinedGroupModal] = useState(false);
+  const [initialMergeStudentIds, setInitialMergeStudentIds] = useState<string[]>([]);
 
   // Function to open WhatsApp chooser modal
   const handleOpenWhatsAppChooser = (text: string, st: Student | null = selectedStudent) => {
@@ -293,24 +328,27 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     if (!st) return 1;
     const normSubj = (subj || "").trim().toLowerCase();
 
+    const safeReports = Array.isArray(reports) ? reports : [];
+    const safeAttendance = Array.isArray(attendanceRecords) ? attendanceRecords : [];
+
     // 1. Check existing reports for this student and subject
-    const studentReports = reports.filter(
-      r => (r.studentId === st.id || r.studentName === st.fullName) &&
+    const studentReports = safeReports.filter(
+      r => r && (r.studentId === st.id || r.studentName === st.fullName) &&
            ((r.subject || "").trim().toLowerCase() === normSubj)
     );
 
-    const maxInReports = studentReports.reduce((max, r) => Math.max(max, r.lessonNumber || 0), 0);
+    const maxInReports = studentReports.reduce((max, r) => Math.max(max, r?.lessonNumber || 0), 0);
     if (maxInReports > 0) {
       return maxInReports + 1;
     }
 
     // 2. Check attendance records for this student and subject
-    const studentAttendance = attendanceRecords.filter(
-      ar => ar.studentId === st.id &&
+    const studentAttendance = safeAttendance.filter(
+      ar => ar && ar.studentId === st.id &&
            (!ar.subject || (ar.subject || "").trim().toLowerCase() === normSubj)
     );
 
-    const maxInAtt = studentAttendance.reduce((max, ar) => Math.max(max, ar.lessonNumber || 0), 0);
+    const maxInAtt = studentAttendance.reduce((max, ar) => Math.max(max, ar?.lessonNumber || 0), 0);
     if (maxInAtt > 0) {
       return maxInAtt + 1;
     }
@@ -343,7 +381,8 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     setReportDeductCost(true);
     setReportHomeworkStatus("done");
     setAbsentNotes("");
-    setNewTeacherNotes("");
+    setClassEvents("");
+    setHomeworkNotes("");
     setNewGeneratedReportText("");
     setReportAttachment(null);
 
@@ -552,8 +591,44 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     setStudentToDelete(st);
   };
 
-  // Filter Logic
+  // Set of student IDs that belong to any combined group
+  const bundledStudentIdSet = new Set<string>();
+  (combinedStudentGroups || []).forEach(cg => {
+    (cg?.studentIds || []).forEach(id => bundledStudentIdSet.add(id));
+  });
+
+  // Filter combined groups according to search & filters
+  const filteredCombinedGroups = (combinedStudentGroups || []).filter(cg => {
+    const groupStudents = (students || []).filter(s => s && (cg?.studentIds || []).includes(s.id));
+    if (groupStudents.length === 0) return false;
+
+    if (filterStatus === "active" && !groupStudents.some(s => s.status === "active")) return false;
+    if (filterStatus === "stopped" && !groupStudents.some(s => s.status === "stopped")) return false;
+    if (filterCurriculum !== "all" && !groupStudents.some(s => s.curriculum === filterCurriculum)) return false;
+    if (filterGrade !== "all" && !groupStudents.some(s => s.academicYear === filterGrade)) return false;
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      const matchName = cg.name.toLowerCase().includes(q);
+      const matchNotes = cg.notes ? cg.notes.toLowerCase().includes(q) : false;
+      const matchContact = cg.sharedParentContact ? cg.sharedParentContact.includes(q) : false;
+      const matchStudent = groupStudents.some(
+        s =>
+          s.fullName.toLowerCase().includes(q) ||
+          s.subject.toLowerCase().includes(q) ||
+          (s.academicYear && s.academicYear.toLowerCase().includes(q)) ||
+          (s.curriculum && s.curriculum.toLowerCase().includes(q)) ||
+          (s.studentPhone && s.studentPhone.includes(q)) ||
+          (s.parentContact && s.parentContact.includes(q))
+      );
+      return matchName || matchNotes || matchContact || matchStudent;
+    }
+    return true;
+  });
+
+  // Filter standalone unbundled students (students that are NOT in a combined group)
   const filteredStudents = students.filter(s => {
+    if (bundledStudentIdSet.has(s.id)) return false; // Hidden from standalone list as requested!
     if (filterStatus === "active" && s.status !== "active") return false;
     if (filterStatus === "stopped" && s.status !== "stopped") return false;
     if (filterCurriculum !== "all" && s.curriculum !== filterCurriculum) return false;
@@ -736,6 +811,24 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
           </div>
 
           <button
+            type="button"
+            onClick={() => {
+              setInitialMergeStudentIds([]);
+              setShowCreateCombinedGroupModal(true);
+            }}
+            className="px-3 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs shadow-md shadow-purple-600/25 transition flex items-center gap-1.5"
+            title={isArabic ? "دمج أكثر من ملف طالب في ملف مجمع موحد وشامل" : "Combine Student Files"}
+          >
+            <Users className="w-4 h-4" />
+            <span>{isArabic ? "دمج ملفات طلاب" : "Combine Files"}</span>
+            {combinedStudentGroups.length > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full bg-purple-800 text-[10px]">
+                {combinedStudentGroups.length}
+              </span>
+            )}
+          </button>
+
+          <button
             onClick={() => setShowAddStudentModal(true)}
             className="px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md shadow-blue-600/25 transition flex items-center gap-1.5"
           >
@@ -823,16 +916,110 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       </div>
 
       {/* View Rendering: Grid vs Table */}
-      {filteredStudents.length === 0 ? (
+      {filteredStudents.length === 0 && filteredCombinedGroups.length === 0 ? (
         <div className="text-center py-10 bg-white border border-slate-200/80 rounded-2xl">
           <GraduationCap className="w-8 h-8 mx-auto text-slate-300 mb-1.5" />
           <p className="text-xs font-bold text-slate-600">
-            {isArabic ? "لا يوجد طلاب يطابقون خيارات البحث." : "No students found."}
+            {isArabic ? "لا يوجد طلاب أو ملفات مجمعة تطابق خيارات البحث." : "No students or combined files found."}
           </p>
         </div>
       ) : viewLayout === "grid" ? (
         /* Student Cards Grid - High Density Multi-Col Responsive Bento */
         <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2 sm:gap-2.5">
+          {/* 1. Combined Student Groups */}
+          {filteredCombinedGroups.map(cg => {
+            const groupStudents = students.filter(s => (cg.studentIds || []).includes(s.id));
+            const groupFinancials = calculateCombinedGroupFinancials(groupStudents, attendanceRecords);
+
+            return (
+              <div
+                key={cg.id}
+                onClick={() => setSelectedCombinedGroup(cg)}
+                className="bg-gradient-to-b from-purple-50/60 via-white to-white border-2 border-purple-200/90 hover:border-purple-400 rounded-2xl p-2.5 sm:p-3 shadow-2xs hover:shadow-lg transition-all flex flex-col justify-between cursor-pointer group relative overflow-hidden"
+              >
+                <div className="absolute top-0 right-0 left-0 h-1 bg-gradient-to-r from-purple-500 via-indigo-500 to-blue-500" />
+                <div>
+                  <div className="flex items-center justify-between gap-1 mb-1.5 mt-0.5">
+                    <span className="px-1.5 py-0.5 rounded-md text-[8.5px] font-black bg-purple-100 text-purple-800 border border-purple-200 flex items-center gap-1">
+                      <Users className="w-2.5 h-2.5" />
+                      <span>{isArabic ? "ملف مجمع" : "Combined"}</span>
+                      <span className="bg-purple-200 text-purple-900 px-1 rounded-full text-[7.5px] font-mono">{groupStudents.length}</span>
+                    </span>
+
+                    <span
+                      className={`px-1.5 py-0.5 rounded-md text-[8.5px] font-black shrink-0 ${
+                        groupFinancials.netBalance >= 0
+                          ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                          : "bg-rose-50 text-rose-700 border border-rose-200"
+                      }`}
+                    >
+                      {groupFinancials.netBalance >= 0
+                        ? (isArabic ? "خالص / فائض" : "Paid")
+                        : (isArabic ? `متبقي ${Math.abs(groupFinancials.netBalance)} ج.م` : `Due ${Math.abs(groupFinancials.netBalance)}`)}
+                    </span>
+                  </div>
+
+                  <h3 className="font-black text-slate-900 text-xs sm:text-sm group-hover:text-purple-700 transition line-clamp-1 flex items-center gap-1">
+                    <span>📁</span>
+                    <span>{cg.name}</span>
+                  </h3>
+
+                  <div className="mt-1.5 flex flex-wrap gap-1">
+                    {groupStudents.map(st => (
+                      <span
+                        key={st.id}
+                        className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-purple-50/90 border border-purple-100 text-purple-900 text-[8.5px] font-bold"
+                      >
+                        <span>👤</span>
+                        <span className="truncate max-w-[80px]">{st.fullName.split(" ")[0]}</span>
+                      </span>
+                    ))}
+                  </div>
+
+                  <div className="mt-2 pt-1.5 border-t border-purple-100/70 grid grid-cols-2 gap-1 text-[9.5px]">
+                    <div className="bg-slate-50 p-1 rounded-lg">
+                      <div className="text-[8px] text-slate-400 font-bold">{isArabic ? "إجمالي الحصص" : "Lessons"}</div>
+                      <div className="font-black text-slate-800 font-mono">{groupFinancials.totalAttendedLessons} {isArabic ? "حصة" : "lss"}</div>
+                    </div>
+                    <div className="bg-slate-50 p-1 rounded-lg">
+                      <div className="text-[8px] text-slate-400 font-bold">{isArabic ? "المدفوع الكلي" : "Total Paid"}</div>
+                      <div className="font-black text-emerald-700 font-mono">{groupFinancials.totalPaidAmount} ج.م</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between gap-1">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedCombinedGroup(cg);
+                    }}
+                    className="flex-1 py-1.5 px-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-black text-[10px] transition shadow-xs flex items-center justify-center gap-1"
+                  >
+                    <FolderPlus className="w-3 h-3" />
+                    <span>{isArabic ? "عرض الملف المجمع" : "Open File"}</span>
+                  </button>
+
+                  {cg.sharedParentContact && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openWhatsApp(cg.sharedParentContact!);
+                      }}
+                      title={isArabic ? "مراسلة ولي الأمر بالواتساب" : "WhatsApp Parent"}
+                      className="p-1.5 rounded-xl bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border border-emerald-200 transition"
+                    >
+                      <MessageSquare className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+
+          {/* 2. Standalone Students */}
           {filteredStudents.map(student => {
             const isStopped = student.status === "stopped";
             const finSummary = calculateStudentFinancials(student, attendanceRecords);
@@ -963,6 +1150,18 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 
                   <button
                     type="button"
+                    onClick={() => {
+                      setInitialMergeStudentIds([student.id]);
+                      setShowCreateCombinedGroupModal(true);
+                    }}
+                    title={isArabic ? "دمج هذا الطالب في ملف مجمع مع طلاب آخرين" : "Merge Student"}
+                    className="p-1 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition shrink-0"
+                  >
+                    <Layers className="w-3.5 h-3.5" />
+                  </button>
+
+                  <button
+                    type="button"
                     onClick={() => setStudentForPersonalReport(student)}
                     title={isArabic ? "فتح صفحة التقرير الشخصي المستقلة" : "Personal Report"}
                     className="py-1 px-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-white font-bold text-[10px] transition shadow-2xs text-center flex items-center gap-1 shrink-0"
@@ -1014,6 +1213,108 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
+                {/* 1. Combined Student Groups Rows */}
+                {filteredCombinedGroups.map((cg) => {
+                  const groupStudents = students.filter(s => (cg.studentIds || []).includes(s.id));
+                  const groupFinancials = calculateCombinedGroupFinancials(groupStudents, attendanceRecords);
+
+                  return (
+                    <tr
+                      key={cg.id}
+                      onClick={() => setSelectedCombinedGroup(cg)}
+                      className="bg-purple-50/40 hover:bg-purple-100/60 border-y-2 border-purple-100 cursor-pointer transition"
+                    >
+                      <td className="py-2.5 px-3 text-center font-mono text-[11px] text-purple-600 font-black">
+                        📁
+                      </td>
+
+                      <td className="py-2.5 px-3">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-black text-purple-950 text-xs">{cg.name}</span>
+                          <span className="px-1.5 py-0.5 rounded-full bg-purple-200/80 text-purple-900 font-bold text-[9px]">
+                            {isArabic ? `${groupStudents.length} طلاب` : `${groupStudents.length} students`}
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-purple-700 flex flex-wrap gap-1 mt-0.5">
+                          {groupStudents.map(s => s.fullName).join(" • ")}
+                        </div>
+                      </td>
+
+                      <td className="py-2.5 px-3">
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-purple-100/80 text-purple-900 text-[10px] font-bold">
+                          <span>👥</span>
+                          <span>{isArabic ? "ملف طلاب مجمع" : "Combined File"}</span>
+                        </span>
+                      </td>
+
+                      <td className="py-2.5 px-3">
+                        <div className="flex flex-wrap gap-1">
+                          {groupStudents.map(s => (
+                            <span key={s.id} className="px-1.5 py-0.5 rounded bg-white text-slate-700 text-[9.5px] border border-purple-200">
+                              {s.subject}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+
+                      <td className="py-2.5 px-3 font-mono text-[11px]">
+                        {cg.sharedParentContact ? (
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] text-slate-400 font-sans">{isArabic ? "ولي الأمر:" : "Parent:"}</span>
+                            <span className="font-bold text-slate-800 dir-ltr">{cg.sharedParentContact}</span>
+                          </div>
+                        ) : (
+                          <span className="text-[10px] text-slate-400">-</span>
+                        )}
+                      </td>
+
+                      <td className="py-2.5 px-3 text-center font-bold text-purple-900">
+                        {groupFinancials.totalAttendedLessons} {isArabic ? "حصة" : "lss"}
+                      </td>
+
+                      <td className="py-2.5 px-3 text-center">
+                        <span className={`inline-block px-2 py-0.5 rounded-md font-bold text-[10px] ${
+                          groupFinancials.netBalance >= 0 ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"
+                        }`}>
+                          {groupFinancials.netBalance >= 0
+                            ? (isArabic ? "خالص / فائض" : "Paid")
+                            : (isArabic ? `متبقي ${Math.abs(groupFinancials.netBalance)} ج.م` : `Due ${Math.abs(groupFinancials.netBalance)}`)}
+                        </span>
+                      </td>
+
+                      <td className="py-2.5 px-3 text-center">
+                        <span className="px-2 py-0.5 rounded-full bg-purple-600 text-white font-bold text-[9.5px]">
+                          {isArabic ? "مجمع" : "Combined"}
+                        </span>
+                      </td>
+
+                      <td className="py-2.5 px-3 text-center" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedCombinedGroup(cg)}
+                            className="px-2.5 py-1 rounded-lg bg-purple-600 hover:bg-purple-700 text-white font-bold text-[10.5px] transition shadow-2xs flex items-center gap-1"
+                          >
+                            <FolderPlus className="w-3 h-3" />
+                            <span>{isArabic ? "الملف المجمع" : "Open Group"}</span>
+                          </button>
+
+                          {cg.sharedParentContact && (
+                            <button
+                              onClick={() => openWhatsApp(cg.sharedParentContact!)}
+                              title={isArabic ? "واتساب" : "WhatsApp"}
+                              className="p-1 rounded-lg bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition"
+                            >
+                              <MessageSquare className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+
+                {/* 2. Standalone Students Rows */}
                 {filteredStudents.map((student, idx) => {
                   const isStopped = student.status === "stopped";
                   const finSummary = calculateStudentFinancials(student, attendanceRecords);
@@ -1141,6 +1442,17 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                             className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-bold text-[10.5px] transition shadow-2xs"
                           >
                             {isArabic ? "الملف" : "Profile"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setInitialMergeStudentIds([student.id]);
+                              setShowCreateCombinedGroupModal(true);
+                            }}
+                            title={isArabic ? "دمج هذا الطالب في ملف مجمع" : "Merge Student"}
+                            className="p-1 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition"
+                          >
+                            <Layers className="w-3.5 h-3.5" />
                           </button>
                           <button
                             type="button"
@@ -1690,6 +2002,21 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
               </div>
 
               <div className="flex items-center gap-2 flex-wrap">
+                {/* Merge Student into Combined File */}
+                <button
+                  onClick={() => {
+                    const stId = selectedStudent.id;
+                    setSelectedStudent(null);
+                    setInitialMergeStudentIds([stId]);
+                    setShowCreateCombinedGroupModal(true);
+                  }}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 transition flex items-center gap-1.5"
+                  title={isArabic ? "دمج هذا الطالب مع طلاب آخرين في ملف مجمع موحد" : "Merge into Combined File"}
+                >
+                  <Layers className="w-3.5 h-3.5" />
+                  <span>{isArabic ? "دمج في ملف مجمع" : "Merge into Group"}</span>
+                </button>
+
                 {/* Personal Report Standalone Button */}
                 <button
                   onClick={() => {
@@ -2410,22 +2737,41 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                           </select>
                         </div>
 
-                        {/* Teacher Notes */}
-                        <div>
-                          <label className="block font-bold text-slate-700 mb-1 text-xs">
-                            {isArabic ? "ملاحظات المعلم (ما كتبته عن الطالب بالحصة والواجب):" : "Teacher Notes:"}
-                          </label>
-                          <textarea
-                            rows={3}
-                            value={newTeacherNotes}
-                            onChange={e => setNewTeacherNotes(e.target.value)}
-                            placeholder={
-                              isArabic
-                                ? "مثال: أتقن شرح الدرس، وأجاب على التمارين بامتياز، الواجب صفحة 35 المسائل من 1 إلى 5..."
-                                : "Write lesson notes here..."
-                            }
-                            className="w-full bg-white border border-purple-200 rounded-xl p-3 text-slate-800 text-xs focus:outline-none focus:border-purple-500 leading-relaxed"
-                          />
+                        {/* Split Teacher Inputs: What happened in class & Homework */}
+                        <div className="space-y-3">
+                          <div>
+                            <label className="block font-bold text-slate-700 mb-1 text-xs">
+                              {isArabic ? "ما حدث داخل الحصة (الشرح والتفاعل والملاحظات):" : "What happened in class:"}
+                            </label>
+                            <textarea
+                              rows={3}
+                              value={classEvents}
+                              onChange={e => setClassEvents(e.target.value)}
+                              placeholder={
+                                isArabic
+                                  ? "مثال: تم شرح درس التفاعلات الكيميائية، وتجاوب الطالب بشكل رائع وأتقن حل المسائل..."
+                                  : "Describe what happened in class, understanding, and practice..."
+                              }
+                              className="w-full bg-white border border-purple-200 rounded-xl p-3 text-slate-800 text-xs focus:outline-none focus:border-purple-500 leading-relaxed"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block font-bold text-slate-700 mb-1 text-xs">
+                              {isArabic ? "الواجب المنزلي والتكليفات القادمة:" : "Homework & Assignments:"}
+                            </label>
+                            <textarea
+                              rows={2}
+                              value={homeworkNotes}
+                              onChange={e => setHomeworkNotes(e.target.value)}
+                              placeholder={
+                                isArabic
+                                  ? "مثال: حل التمارين من ص 45 إلى 48، وتجهيز أسئلة المراجعة للاختبار القادم..."
+                                  : "Write homework details and assignments..."
+                              }
+                              className="w-full bg-white border border-purple-200 rounded-xl p-3 text-slate-800 text-xs focus:outline-none focus:border-purple-500 leading-relaxed"
+                            />
+                          </div>
                         </div>
 
                         {/* Subject AI Instructions */}
@@ -2529,7 +2875,6 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                           onClick={async () => {
                             setIsGeneratingReport(true);
                             try {
-                              const notesToUse = newTeacherNotes.trim() || (isArabic ? "تم شرح الدرس ومتابعة التطبيق العملي للدرس بانتظام وتفاعل الطالب بتركيز." : "Lesson covered thoroughly with practice.");
                               const subjSpecificInst = getSubjectSpecificAiInstruction(settings.subjectDefaults, reportSubject);
                               const generalInst = settings.generalAiInstructions || "";
                               const effectiveAiInst = (newAiInstructions || "").trim();
@@ -2537,7 +2882,9 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                               const res = await onGenerateReportAi({
                                 studentName: selectedStudent.fullName,
                                 subject: reportSubject,
-                                teacherNotes: `الحصة #${reportLessonNumber} (${reportDate}):\n${notesToUse}\nحالة الواجب: ${
+                                classEvents: classEvents.trim() || undefined,
+                                homeworkNotes: homeworkNotes.trim() || undefined,
+                                teacherNotes: `الحصة #${reportLessonNumber} (${reportDate})\nحالة الواجب: ${
                                   reportHomeworkStatus === "no_homework"
                                     ? "لم يكن هناك واجب (لا تذكر أي بند أو سطر أو إشارة عن الواجب في التقرير نهائياً)"
                                     : reportHomeworkStatus === "done"
@@ -2587,7 +2934,11 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                               <button
                                 type="button"
                                 onClick={() => {
-                                  const finalReport = newGeneratedReportText || newTeacherNotes;
+                                  const combinedNotes = [
+                                    classEvents ? `ما حدث بالحصة: ${classEvents}` : "",
+                                    homeworkNotes ? `الواجب: ${homeworkNotes}` : ""
+                                  ].filter(Boolean).join("\n");
+                                  const finalReport = newGeneratedReportText || combinedNotes;
                                   if (!finalReport.trim()) return;
 
                                   onAddReport({
@@ -2599,7 +2950,9 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                                     attendance: "present",
                                     deductCost: true,
                                     homeworkStatus: reportHomeworkStatus,
-                                    teacherNotes: newTeacherNotes,
+                                    classEvents: classEvents,
+                                    homeworkNotes: homeworkNotes,
+                                    teacherNotes: combinedNotes,
                                     aiInstructions: newAiInstructions,
                                     reportText: finalReport,
                                     generatedText: finalReport
@@ -2618,7 +2971,11 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                               <button
                                 type="button"
                                 onClick={() => {
-                                  const text = newGeneratedReportText || newTeacherNotes;
+                                  const combinedNotes = [
+                                    classEvents ? `ما حدث بالحصة: ${classEvents}` : "",
+                                    homeworkNotes ? `الواجب: ${homeworkNotes}` : ""
+                                  ].filter(Boolean).join("\n");
+                                  const text = newGeneratedReportText || combinedNotes;
                                   handleOpenWhatsAppChooser(text, selectedStudent);
                                 }}
                                 className="py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition flex items-center justify-center gap-1.5 shrink-0 shadow-sm"
@@ -2630,11 +2987,15 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                           </div>
                         ) : (
                           <div className="pt-2 flex justify-end gap-2">
-                            {newTeacherNotes.trim() && (
+                            {(classEvents.trim() || homeworkNotes.trim()) && (
                               <button
                                 type="button"
                                 onClick={() => {
-                                  const manualText = `تقرير الحصة #${reportLessonNumber} - مادة: ${reportSubject}\nالتاريخ: ${reportDate}\nملاحظات الحصة:\n${newTeacherNotes}`;
+                                  const combinedNotes = [
+                                    classEvents ? `ما حدث بالحصة:\n${classEvents}` : "",
+                                    homeworkNotes ? `الواجب:\n${homeworkNotes}` : ""
+                                  ].filter(Boolean).join("\n\n");
+                                  const manualText = `تقرير الحصة #${reportLessonNumber} - مادة: ${reportSubject}\nالتاريخ: ${reportDate}\n${combinedNotes}`;
                                   handleOpenWhatsAppChooser(manualText, selectedStudent);
                                 }}
                                 className="py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition flex items-center justify-center gap-1.5 shadow-sm"
@@ -2645,10 +3006,14 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                             )}
                             <button
                               type="button"
-                              disabled={!newTeacherNotes.trim()}
+                              disabled={!classEvents.trim() && !homeworkNotes.trim()}
                               onClick={() => {
-                                if (!newTeacherNotes.trim()) return;
-                                const manualText = `تقرير الحصة #${reportLessonNumber} - مادة: ${reportSubject}\nالتاريخ: ${reportDate}\nملاحظات الحصة:\n${newTeacherNotes}`;
+                                if (!classEvents.trim() && !homeworkNotes.trim()) return;
+                                const combinedNotes = [
+                                  classEvents ? `ما حدث بالحصة:\n${classEvents}` : "",
+                                  homeworkNotes ? `الواجب:\n${homeworkNotes}` : ""
+                                ].filter(Boolean).join("\n\n");
+                                const manualText = `تقرير الحصة #${reportLessonNumber} - مادة: ${reportSubject}\nالتاريخ: ${reportDate}\n${combinedNotes}`;
 
                                 onAddReport({
                                   studentId: selectedStudent.id,
@@ -2659,7 +3024,9 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                                   attendance: "present",
                                   deductCost: true,
                                   homeworkStatus: reportHomeworkStatus,
-                                  teacherNotes: newTeacherNotes,
+                                  classEvents: classEvents,
+                                  homeworkNotes: homeworkNotes,
+                                  teacherNotes: combinedNotes,
                                   aiInstructions: newAiInstructions,
                                   reportText: manualText,
                                   generatedText: manualText
@@ -3987,6 +4354,87 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+      {/* Modal: Create Combined Student Group */}
+      {showCreateCombinedGroupModal && (
+        <CreateCombinedGroupModal
+          settings={settings}
+          students={students}
+          combinedStudentGroups={combinedStudentGroups}
+          initialSelectedStudentIds={initialMergeStudentIds}
+          isArabic={isArabic}
+          onClose={() => {
+            setShowCreateCombinedGroupModal(false);
+            setInitialMergeStudentIds([]);
+          }}
+          onCreateGroup={(name, studentIds, notes, sharedParentContact, sharedGroupLink) => {
+            if (onAddCombinedGroup) {
+              onAddCombinedGroup(name, studentIds, notes, sharedParentContact, sharedGroupLink);
+            }
+            setShowCreateCombinedGroupModal(false);
+            setInitialMergeStudentIds([]);
+          }}
+        />
+      )}
+
+      {/* Modal: Combined Student File Comprehensive View */}
+      {selectedCombinedGroup && (
+        <CombinedStudentFileModal
+          group={selectedCombinedGroup}
+          settings={settings}
+          allStudents={students}
+          attendanceRecords={attendanceRecords}
+          examRecords={examRecords}
+          paymentTransactions={paymentTransactions}
+          reports={reports}
+          isArabic={isArabic}
+          onClose={() => setSelectedCombinedGroup(null)}
+          onUpdateGroup={(id, partial) => {
+            if (onUpdateCombinedGroup) {
+              onUpdateCombinedGroup(id, partial);
+            }
+            setSelectedCombinedGroup(prev => (prev && prev.id === id ? { ...prev, ...partial } : prev));
+          }}
+          onDeleteGroup={(id) => {
+            if (onDeleteCombinedGroup) {
+              onDeleteCombinedGroup(id);
+            }
+            setSelectedCombinedGroup(null);
+          }}
+          onAddStudentToGroup={(groupId, studentId) => {
+            if (onAddStudentToCombinedGroup) {
+              onAddStudentToCombinedGroup(groupId, studentId);
+            }
+            setSelectedCombinedGroup(prev => {
+              if (prev && prev.id === groupId && !prev.studentIds.includes(studentId)) {
+                return { ...prev, studentIds: [...prev.studentIds, studentId] };
+              }
+              return prev;
+            });
+          }}
+          onRemoveStudentFromGroup={(groupId, studentId) => {
+            if (onRemoveStudentFromCombinedGroup) {
+              onRemoveStudentFromCombinedGroup(groupId, studentId);
+            }
+            setSelectedCombinedGroup(prev => {
+              if (prev && prev.id === groupId) {
+                const nextIds = prev.studentIds.filter(id => id !== studentId);
+                return { ...prev, studentIds: nextIds };
+              }
+              return prev;
+            });
+          }}
+          onEditStudent={onEditStudent}
+          onDeleteStudent={onDeleteStudent}
+          onUpdateStudentStatus={onUpdateStudentStatus}
+          onRecordPayment={onRecordPayment}
+          onAddExamRecord={onAddExamRecord}
+          onAddReport={onAddReport}
+          onDeleteReport={onDeleteReport}
+          onToggleArchiveReport={onToggleArchiveReport}
+          onGenerateReportAi={onGenerateReportAi}
+          availableUnbundledStudents={students.filter(s => !bundledStudentIdSet.has(s.id))}
+        />
       )}
     </div>
   );

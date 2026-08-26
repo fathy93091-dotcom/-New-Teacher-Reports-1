@@ -58,7 +58,7 @@ interface GroupDetailsModalProps {
 export const GroupDetailsModal: React.FC<GroupDetailsModalProps> = ({
   group,
   settings,
-  students,
+  students = [],
   attendanceRecords = [],
   examRecords = [],
   paymentTransactions = [],

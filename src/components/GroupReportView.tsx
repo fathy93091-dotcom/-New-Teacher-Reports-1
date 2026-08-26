@@ -58,15 +58,15 @@ function isLikelyFemaleName(name: string): boolean {
 
 export const GroupReportView: React.FC<GroupReportViewProps> = ({
   group,
-  students,
+  students = [],
   settings,
   isArabic = true,
   onBack,
   onSaveReport
 }) => {
   // Filter students who belong to this group in exact order
-  const groupStudents = students.filter(s =>
-    group.studentIds && group.studentIds.includes(s.id)
+  const groupStudents = (students || []).filter(s =>
+    group && Array.isArray(group.studentIds) && group.studentIds.includes(s.id)
   );
 
   const storageKey = `group_report_${group.id}_latest`;

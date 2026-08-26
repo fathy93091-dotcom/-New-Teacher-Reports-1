@@ -35,10 +35,10 @@ interface DashboardViewProps {
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
   settings,
-  students,
+  students = [],
   groups = [],
   privateLessons = [],
-  lessons,
+  lessons = [],
   attendanceRecords = [],
   onOpenLessonDetails,
   onNavigateToTab,

@@ -50,7 +50,9 @@ interface StudentPersonalReportViewProps {
   onGenerateReportAi: (payload: {
     studentName: string;
     subject: string;
-    teacherNotes: string;
+    teacherNotes?: string;
+    classEvents?: string;
+    homeworkNotes?: string;
     aiInstructions?: string;
     generalAiInstructions?: string;
     subjectAiInstructions?: string;
@@ -61,8 +63,8 @@ interface StudentPersonalReportViewProps {
 export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps> = ({
   student,
   settings,
-  reports,
-  attendanceRecords,
+  reports = [],
+  attendanceRecords = [],
   isArabic = true,
   onBack,
   onAddReport,
@@ -73,23 +75,25 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
   // Calculate next lesson number
   const calculateNextLessonNumber = (subj: string): number => {
     const normSubj = (subj || "").trim().toLowerCase();
+    const safeReportsList = Array.isArray(reports) ? reports : [];
+    const safeAttList = Array.isArray(attendanceRecords) ? attendanceRecords : [];
 
     // 1. Existing reports
-    const studentReports = reports.filter(
-      r => (r.studentId === student.id || r.studentName === student.fullName) &&
+    const studentReports = safeReportsList.filter(
+      r => r && (r.studentId === student?.id || r.studentName === student?.fullName) &&
            ((r.subject || "").trim().toLowerCase() === normSubj)
     );
-    const maxInReports = studentReports.reduce((max, r) => Math.max(max, r.lessonNumber || 0), 0);
+    const maxInReports = studentReports.reduce((max, r) => Math.max(max, r?.lessonNumber || 0), 0);
     if (maxInReports > 0) {
       return maxInReports + 1;
     }
 
     // 2. Attendance records
-    const studentAttendance = attendanceRecords.filter(
-      ar => ar.studentId === student.id &&
+    const studentAttendance = safeAttList.filter(
+      ar => ar && ar.studentId === student?.id &&
            (!ar.subject || (ar.subject || "").trim().toLowerCase() === normSubj)
     );
-    const maxInAtt = studentAttendance.reduce((max, ar) => Math.max(max, ar.lessonNumber || 0), 0);
+    const maxInAtt = studentAttendance.reduce((max, ar) => Math.max(max, ar?.lessonNumber || 0), 0);
     if (maxInAtt > 0) {
       return maxInAtt + 1;
     }
@@ -121,7 +125,8 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
   const [reportDeductCost, setReportDeductCost] = useState<boolean>(true);
   const [reportHomeworkStatus, setReportHomeworkStatus] = useState<HomeworkStatus>("done");
   const [absentNotes, setAbsentNotes] = useState<string>("");
-  const [newTeacherNotes, setNewTeacherNotes] = useState<string>("");
+  const [classEvents, setClassEvents] = useState<string>("");
+  const [homeworkNotes, setHomeworkNotes] = useState<string>("");
   const [newAiInstructions, setNewAiInstructions] = useState<string>(initialAiInst);
   const [newGeneratedReportText, setNewGeneratedReportText] = useState<string>("");
   const [reportAttachment, setReportAttachment] = useState<ReportAttachment | null>(null);
@@ -317,7 +322,12 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
 
   // Helper for saving present report
   const handleSavePresentReport = (textToSave?: string) => {
-    const finalText = textToSave || newGeneratedReportText || newTeacherNotes;
+    const combinedNotes = [
+      classEvents.trim() ? `ما حدث داخل الحصة:\n${classEvents.trim()}` : "",
+      homeworkNotes.trim() ? `الواجب والتكليفات:\n${homeworkNotes.trim()}` : ""
+    ].filter(Boolean).join("\n\n");
+
+    const finalText = textToSave || newGeneratedReportText || combinedNotes;
     if (!finalText.trim()) return;
 
     onAddReport({
@@ -329,7 +339,9 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
       attendance: "present",
       deductCost: true,
       homeworkStatus: reportHomeworkStatus,
-      teacherNotes: newTeacherNotes,
+      teacherNotes: combinedNotes,
+      classEvents: classEvents.trim(),
+      homeworkNotes: homeworkNotes.trim(),
       aiInstructions: newAiInstructions,
       reportText: finalText,
       generatedText: finalText
@@ -339,7 +351,8 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
     setTimeout(() => setNotificationNotice(""), 4000);
     // Increment lesson number and clear fields
     setReportLessonNumber(prev => prev + 1);
-    setNewTeacherNotes("");
+    setClassEvents("");
+    setHomeworkNotes("");
     setNewGeneratedReportText("");
     setReportAttachment(null);
   };
@@ -355,21 +368,25 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
   };
 
   // Gather all past reports
-  const studentReports = reports.filter(
-    r => r.studentId === student.id || r.studentName === student.fullName
+  const safeReports = Array.isArray(reports) ? reports : [];
+  const safeAttendanceRecords = Array.isArray(attendanceRecords) ? attendanceRecords : [];
+
+  const studentReports = safeReports.filter(
+    r => r && (r.studentId === student?.id || r.studentName === student?.fullName)
   );
 
-  const studentAttendanceReports = attendanceRecords
+  const studentAttendanceReports = safeAttendanceRecords
     .filter(
       ar =>
-        ar.studentId === student.id &&
+        ar &&
+        ar.studentId === student?.id &&
         (ar.generatedReportText || ar.teacherNotes)
     )
     .map(ar => ({
       id: ar.id,
       studentId: ar.studentId,
-      studentName: student.fullName,
-      subject: ar.subject || student.subject,
+      studentName: student?.fullName || "",
+      subject: ar.subject || student?.subject || "",
       lessonNumber: ar.lessonNumber,
       attendance: ar.attendance,
       deductCost: ar.deducted,
@@ -892,22 +909,55 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
               </select>
             </div>
 
-            {/* Teacher Lesson Notes */}
-            <div>
-              <label className="block font-black text-slate-800 mb-1.5 text-xs">
-                {isArabic ? "ملاحظات المعلم ومحتوى الحصة (ما تم شرحه وأداء الطالب):" : "Teacher Lesson Notes & Student Performance:"}
-              </label>
-              <textarea
-                rows={4}
-                value={newTeacherNotes}
-                onChange={e => setNewTeacherNotes(e.target.value)}
-                placeholder={
-                  isArabic
-                    ? "مثال: تم شرح درس المعادلات التربيعية، استيعاب الطالب ممتاز، شارك وتفاعل بتركيز عالي، الواجب المنزلي صفحة 45 المسائل من 1 إلى 6..."
-                    : "Enter lesson details, student participation, homework assigned..."
-                }
-                className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-4 text-slate-800 text-xs sm:text-sm focus:outline-none focus:border-purple-500 focus:bg-white leading-relaxed transition shadow-2xs font-sans"
-              />
+            {/* Two Distinct Teacher Input Fields */}
+            <div className="space-y-3.5">
+              {/* Field 1: What happened in class */}
+              <div className="bg-slate-50/80 border border-slate-200/90 rounded-2xl p-3.5 sm:p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block font-black text-slate-800 text-xs sm:text-sm flex items-center gap-1.5">
+                    <BookOpen className="w-4 h-4 text-purple-600" />
+                    <span>{isArabic ? "1️⃣ الحقل الأول — ما حدث داخل الحصة (محتوى الدرس والشرح، تفاعل وأداء الطالب):" : "1️⃣ Field 1 — Class Events & Student Performance:"}</span>
+                  </label>
+                  <span className="text-[10px] font-black text-purple-700 bg-purple-100 px-2 py-0.5 rounded-md">
+                    {isArabic ? "محتوى الحصة" : "Lesson Content"}
+                  </span>
+                </div>
+                <textarea
+                  rows={3}
+                  value={classEvents}
+                  onChange={e => setClassEvents(e.target.value)}
+                  placeholder={
+                    isArabic
+                      ? "اكتب تفاصيل ما تم شرحه ونقاط أداء الطالب...\nمثال: تم شرح درس المعادلات التربيعية والتطبيق على حل المسائل، استيعاب الطالب ممتاز وتفاعل بتركيز عالي."
+                      : "Enter lesson topics explained, concepts covered, student understanding and participation..."
+                  }
+                  className="w-full bg-white border border-slate-200 rounded-xl p-3 text-slate-800 text-xs sm:text-sm focus:outline-none focus:border-purple-500 leading-relaxed transition shadow-2xs font-sans placeholder:text-slate-400"
+                />
+              </div>
+
+              {/* Field 2: Homework & Assignments */}
+              <div className="bg-slate-50/80 border border-slate-200/90 rounded-2xl p-3.5 sm:p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block font-black text-slate-800 text-xs sm:text-sm flex items-center gap-1.5">
+                    <FileText className="w-4 h-4 text-indigo-600" />
+                    <span>{isArabic ? "2️⃣ الحقل الثاني — الواجب والتكليفات المطلوبة (للحصة القادمة):" : "2️⃣ Field 2 — Homework & Required Assignments:"}</span>
+                  </label>
+                  <span className="text-[10px] font-black text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded-md">
+                    {isArabic ? "الواجب والتكليفات" : "Homework"}
+                  </span>
+                </div>
+                <textarea
+                  rows={2}
+                  value={homeworkNotes}
+                  onChange={e => setHomeworkNotes(e.target.value)}
+                  placeholder={
+                    isArabic
+                      ? "اكتب التكليفات والواجبات المحددة بدقة...\nمثال: حل تدريبات صفحة 45 المسائل من رقم 1 إلى 6 في كشكول الواجب، وحفظ المفردات صفحة 48."
+                      : "Enter required homework assignments, page numbers, exercises..."
+                  }
+                  className="w-full bg-white border border-slate-200 rounded-xl p-3 text-slate-800 text-xs sm:text-sm focus:outline-none focus:border-indigo-500 leading-relaxed transition shadow-2xs font-sans placeholder:text-slate-400"
+                />
+              </div>
             </div>
 
             {/* Subject AI Instructions */}
@@ -937,10 +987,13 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
                 placeholder={isArabic ? "اكتب أي قالب محدد أو شروط أو أسلوب تريد من الذكاء الاصطناعي الالتزام به بنسبة 100%..." : "Custom template, rules, tone, or specific instructions for AI to follow 100%..."}
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-slate-700 text-xs focus:outline-none focus:border-purple-500 focus:bg-white font-medium shadow-2xs leading-relaxed"
               />
-              <p className="text-[10.5px] text-slate-500 font-medium">
-                {isArabic
-                  ? "💡 يلتزم الذكاء الاصطناعي بهذه التعليمات أو القالب التزاماً حرفياً وتاماً."
-                  : "💡 AI will strictly follow these instructions, rules, or template with highest priority."}
+              <p className="text-[10.5px] text-purple-700 font-bold flex items-center gap-1 bg-purple-50/70 border border-purple-100 rounded-lg p-2">
+                <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                <span>
+                  {isArabic
+                    ? "💡 يلتزم الذكاء الاصطناعي بتطبيق التعليمات والقالب المحدد على كِلا الحقليْن (ما حدث داخل الحصة + الواجب) بدقة تامة ودون أي اختلاق."
+                    : "💡 AI will strictly follow these instructions on both fields (class events + homework) with no hallucinations."}
+                </span>
               </p>
             </div>
 
@@ -1016,7 +1069,6 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
                 setGenerationError("");
                 try {
                   console.log("[GoStars UI] AI Report generation button clicked for student:", student.fullName, "Subject:", reportSubject);
-                  const notesToUse = newTeacherNotes.trim() || (isArabic ? "تم شرح الدرس ومتابعة التطبيق العملي للدرس بانتظام وتفاعل الطالب بتركيز." : "Lesson covered thoroughly with practice.");
                   const subjSpecificInst = getSubjectSpecificAiInstruction(settings.subjectDefaults, reportSubject);
                   const generalInst = settings.generalAiInstructions || "";
                   const effectiveAiInst = (newAiInstructions || "").trim();
@@ -1024,9 +1076,11 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
                   const res = await onGenerateReportAi({
                     studentName: student.fullName,
                     subject: reportSubject,
-                    teacherNotes: `الحصة #${reportLessonNumber} (${reportDate}):\n${notesToUse}\nحالة الواجب: ${
+                    classEvents: classEvents.trim(),
+                    homeworkNotes: homeworkNotes.trim(),
+                    teacherNotes: `الحصة #${reportLessonNumber} (${reportDate}):\nما تم في الحصة: ${classEvents.trim() || "تم شرح الدرس ومتابعة التطبيق العملي."}\nالواجب المطلوب: ${homeworkNotes.trim() || (reportHomeworkStatus === "no_homework" ? "لم يتم تكليف الطالب بواجب." : "حسب المعتاد")}\nحالة الواجب: ${
                       reportHomeworkStatus === "no_homework"
-                        ? "لم يكن هناك واجب (لا تذكر أي بند أو سطر أو إشارة عن الواجب في التقرير نهائياً)"
+                        ? "لم يكن هناك واجب (لا تذكر أي بند أو سطر أو إشارة عن الواجب في التقرير نهائياً ما لم يحدده المعلم)"
                         : reportHomeworkStatus === "done"
                         ? "تم حل الواجب كاملاً ومتقن"
                         : reportHomeworkStatus === "not_done"
@@ -1130,11 +1184,16 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
             ) : (
               /* Direct Save without AI */
               <div className="pt-2 flex flex-wrap items-center justify-end gap-2">
-                {newTeacherNotes.trim() && (
+                {(classEvents.trim() || homeworkNotes.trim()) && (
                   <button
                     type="button"
                     onClick={() => {
-                      const manualText = `تقرير الحصة #${reportLessonNumber} - مادة: ${reportSubject}\nالتاريخ: ${reportDate}\nملاحظات الحصة:\n${newTeacherNotes}`;
+                      const manualText = [
+                        `تقرير الحصة #${reportLessonNumber} - مادة: ${reportSubject}`,
+                        `التاريخ: ${reportDate}`,
+                        classEvents.trim() ? `ما حدث داخل الحصة:\n${classEvents.trim()}` : "",
+                        homeworkNotes.trim() ? `الواجب والتكليفات:\n${homeworkNotes.trim()}` : ""
+                      ].filter(Boolean).join("\n\n");
                       handleOpenWhatsAppChooser(manualText);
                     }}
                     className="py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs transition flex items-center justify-center gap-2 shadow-sm"
@@ -1146,9 +1205,14 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
 
                 <button
                   type="button"
-                  disabled={!newTeacherNotes.trim()}
+                  disabled={!classEvents.trim() && !homeworkNotes.trim()}
                   onClick={() => {
-                    const manualText = `تقرير الحصة #${reportLessonNumber} - مادة: ${reportSubject}\nالتاريخ: ${reportDate}\nملاحظات الحصة:\n${newTeacherNotes}`;
+                    const manualText = [
+                      `تقرير الحصة #${reportLessonNumber} - مادة: ${reportSubject}`,
+                      `التاريخ: ${reportDate}`,
+                      classEvents.trim() ? `ما حدث داخل الحصة:\n${classEvents.trim()}` : "",
+                      homeworkNotes.trim() ? `الواجب والتكليفات:\n${homeworkNotes.trim()}` : ""
+                    ].filter(Boolean).join("\n\n");
                     handleSavePresentReport(manualText);
                   }}
                   className="py-2.5 px-5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-black text-xs transition flex items-center justify-center gap-2 shadow-sm disabled:opacity-50"

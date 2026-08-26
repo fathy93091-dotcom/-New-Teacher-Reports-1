@@ -12,9 +12,9 @@ interface ScheduleViewProps {
 
 export const ScheduleView: React.FC<ScheduleViewProps> = ({
   settings,
-  groups,
-  privateLessons,
-  lessons,
+  groups = [],
+  privateLessons = [],
+  lessons = [],
   onOpenLesson
 }) => {
   const isArabic = settings.preferredLanguage === "ar";

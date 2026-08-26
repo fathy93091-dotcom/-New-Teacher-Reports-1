@@ -74,6 +74,7 @@ export interface Student {
   totalAttendedLessons?: number; // إجمالي الحصص المنفذة
   
   notes?: string;
+  combinedGroupId?: string; // ID of the combined student file this student belongs to
   scheduleSlots?: ScheduleSlot[];
   createdAt: string;
 }
@@ -124,6 +125,8 @@ export interface AttendanceRecord {
   attendance: AttendanceStatus;
   homeworkStatus: HomeworkStatus;
   teacherNotes?: string;
+  classEvents?: string; // ما حدث داخل الحصة
+  homeworkNotes?: string; // الواجب
   aiInstructions?: string;
   generatedReportText?: string;
   deducted: boolean; // whether 1 lesson was deducted upon "present" or billable absent
@@ -144,6 +147,8 @@ export interface Lesson {
   status: LessonStatus;
   whatsappGroupLink?: string; // WhatsApp group link
   teacherNotes?: string; // ماذا حدث في الحصة؟
+  classEvents?: string; // ما حدث داخل الحصة
+  homeworkNotes?: string; // الواجب والتكليفات
   aiInstructions?: string; // تعليمات للذكاء الاصطناعي
   generatedReport?: string;
   createdAt: string;
@@ -189,6 +194,8 @@ export interface GeneratedReport {
   deductCost?: boolean;
   homeworkStatus?: HomeworkStatus;
   teacherNotes: string;
+  classEvents?: string; // الحقل الأول: ما حدث داخل الحصة
+  homeworkNotes?: string; // الحقل الثاني: الواجب والتكليفات
   aiInstructions: string;
   reportText?: string;
   generatedText?: string;
@@ -294,10 +301,21 @@ export interface AppNotification {
   date?: string;
 }
 
+export interface CombinedStudentGroup {
+  id: string;
+  name: string; // e.g., "أبناء عائلة الشريف" or "أحمد وسارة"
+  studentIds: string[]; // List of student IDs bundled in this group
+  notes?: string;
+  sharedParentContact?: string; // Optional custom shared parent WhatsApp / phone
+  sharedGroupLink?: string; // Optional shared WhatsApp/Telegram group link
+  createdAt: string;
+}
+
 export interface GoStarsBackupData {
   version: string;
   exportedAt: string;
   students: Student[];
+  combinedStudentGroups?: CombinedStudentGroup[];
   groups: Group[];
   privateLessons: PrivateLesson[];
   lessons: Lesson[];
