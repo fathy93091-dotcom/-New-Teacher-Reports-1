@@ -1,4 +1,4 @@
-import { Student, AttendanceRecord, StudentSubjectPlan, StudyType, BillingType } from "../types";
+import { Student, AttendanceRecord, StudentSubjectPlan, StudyType, BillingType, RateType } from "../types";
 import { getElapsedMonths } from "./financeEngine";
 
 export interface SubjectFinancialDetail {
@@ -6,6 +6,10 @@ export interface SubjectFinancialDetail {
   subject: string;
   studyType: StudyType;
   billingType?: BillingType;
+  rateType?: RateType;
+  hourlyCost?: number;
+  defaultDurationMinutes?: number;
+  totalTaughtHours?: number;
   lessonCost: number;
   monthlyCost?: number;
   billedMonthsCount?: number;
@@ -27,6 +31,10 @@ export interface SubjectFinancialDetail {
 
 export interface StudentFinancialSummary {
   billingType: BillingType;
+  rateType?: RateType;
+  hourlyCost?: number;
+  defaultDurationMinutes?: number;
+  totalTaughtHours?: number;
   isMonthly: boolean;
   totalAttendedLessons: number;
   lessonCost: number;
@@ -56,35 +64,50 @@ export function calculateSingleSubjectFinance(
   attendanceRecords?: AttendanceRecord[]
 ): SubjectFinancialDetail {
   const billingType: BillingType = subj.billingType || "per_lesson";
+  const rateType = subj.rateType || "per_lesson";
+  const defaultDuration = subj.defaultDurationMinutes || 60;
   const isMonthly = billingType === "monthly" || billingType === "monthly_fixed_lessons";
-  const lessonCost = Math.max(1, subj.lessonCost || 100);
-  const monthlyCost = Math.max(1, subj.monthlyCost || (subj.lessonsPerMonth ? subj.lessonsPerMonth * lessonCost : lessonCost * 4));
+  const lessonCost = Math.max(0, subj.lessonCost !== undefined ? subj.lessonCost : 100);
+  const hourlyCost = subj.hourlyCost || (rateType === "per_hour" ? lessonCost : Number(((lessonCost / defaultDuration) * 60).toFixed(2)));
+  const monthlyCost = Math.max(0, subj.monthlyCost !== undefined ? subj.monthlyCost : (subj.lessonsPerMonth ? subj.lessonsPerMonth * lessonCost : lessonCost * 4));
   const billedMonths = Math.max(1, subj.customBilledMonths || 1);
 
   let totalAttended = subj.totalAttendedLessons || 0;
+  let totalMinutes = 0;
   if (attendanceRecords && attendanceRecords.length > 0) {
     const presentRecords = attendanceRecords.filter(
       r => r.studentId === studentId && (r.subject === subj.subject || (!r.subject)) && (r.attendance === "present" || r.deducted)
     );
     totalAttended = Math.max(totalAttended, presentRecords.length);
+    presentRecords.forEach(r => {
+      totalMinutes += r.durationMinutes || defaultDuration;
+    });
+  } else {
+    totalMinutes = totalAttended * defaultDuration;
   }
+
+  const totalTaughtHours = Number((totalMinutes / 60).toFixed(1));
 
   let totalAccruedCost = 0;
   if (billingType === "monthly") {
     // شهر كامل ثابت
-    totalAccruedCost = billedMonths * monthlyCost;
+    totalAccruedCost = Number((billedMonths * monthlyCost).toFixed(2));
   } else if (billingType === "monthly_fixed_lessons") {
     // باقة شهرية بعدد حصص محددة
     const pkgLessons = subj.lessonsPerMonth || 8;
-    const pkgCost = subj.monthlyCost || (pkgLessons * lessonCost);
-    totalAccruedCost = billedMonths * pkgCost;
+    const pkgCost = subj.monthlyCost !== undefined ? subj.monthlyCost : (pkgLessons * lessonCost);
+    totalAccruedCost = Number((billedMonths * pkgCost).toFixed(2));
   } else {
     // per_lesson or monthly_elapsed_lessons: حسب الحصص المنفذة / المنقضية
-    totalAccruedCost = totalAttended * lessonCost;
+    if (rateType === "per_hour") {
+      totalAccruedCost = Number((totalTaughtHours * hourlyCost).toFixed(2));
+    } else {
+      totalAccruedCost = Number((totalAttended * lessonCost).toFixed(2));
+    }
   }
 
   const totalPaid = subj.totalPaidAmount || 0;
-  const netBalance = totalPaid - totalAccruedCost;
+  const netBalance = Number((totalPaid - totalAccruedCost).toFixed(2));
   const amountDue = netBalance < 0 ? Math.abs(netBalance) : 0;
   const creditRemaining = netBalance > 0 ? netBalance : 0;
   const isFullyPaid = netBalance >= 0;
@@ -116,6 +139,10 @@ export function calculateSingleSubjectFinance(
     subject: subj.subject,
     studyType: subj.studyType,
     billingType: billingType,
+    rateType,
+    hourlyCost,
+    defaultDurationMinutes: defaultDuration,
+    totalTaughtHours,
     lessonCost,
     monthlyCost,
     billedMonthsCount: billedMonths,
@@ -208,8 +235,16 @@ export function calculateStudentFinancials(
           amountDue > 0 ? `Due: ${amountDue} EGP.` : `Credit: ${creditRemaining} EGP.`
         }`;
 
+    const totalTaughtHours = Number(subjectsDetails.reduce((sum, d) => sum + (d.totalTaughtHours || 0), 0).toFixed(1));
+    const primaryRateType = student.rateType || subjectsDetails[0]?.rateType || "per_lesson";
+    const primaryHourlyCost = student.hourlyCost || subjectsDetails[0]?.hourlyCost || avgLessonCost;
+
     return {
       billingType,
+      rateType: primaryRateType,
+      hourlyCost: primaryHourlyCost,
+      defaultDurationMinutes: student.defaultDurationMinutes || subjectsDetails[0]?.defaultDurationMinutes || 60,
+      totalTaughtHours,
       isMonthly,
       totalAttendedLessons,
       lessonCost: avgLessonCost,
@@ -235,20 +270,38 @@ export function calculateStudentFinancials(
   }
 
   // Single Subject
+  const rateType = student.rateType || "per_lesson";
+  const defaultDuration = student.defaultDurationMinutes || 60;
   const lessonCost = Math.max(1, student.lessonCost || 100);
+  const hourlyCost = student.hourlyCost || (rateType === "per_hour" ? lessonCost : Math.round((lessonCost / defaultDuration) * 60));
   const totalPaidAmount = student.totalPaidAmount || 0;
 
   let totalAttended = student.totalAttendedLessons || 0;
+  let totalMinutes = 0;
   if (attendanceRecords && attendanceRecords.length > 0) {
     const presentRecords = attendanceRecords.filter(
       r => r.studentId === student.id && (r.attendance === "present" || r.deducted)
     );
     totalAttended = Math.max(totalAttended, presentRecords.length);
+    presentRecords.forEach(r => {
+      totalMinutes += r.durationMinutes || defaultDuration;
+    });
+  } else {
+    totalMinutes = totalAttended * defaultDuration;
   }
 
-  const totalAccruedCost = isMonthly
-    ? billedMonthsCount * monthlyCost
-    : totalAttended * lessonCost;
+  const totalTaughtHours = Number((totalMinutes / 60).toFixed(1));
+
+  let totalAccruedCost = 0;
+  if (isMonthly) {
+    totalAccruedCost = billedMonthsCount * monthlyCost;
+  } else {
+    if (rateType === "per_hour") {
+      totalAccruedCost = Math.round(totalTaughtHours * hourlyCost);
+    } else {
+      totalAccruedCost = totalAttended * lessonCost;
+    }
+  }
 
   const netBalance = totalPaidAmount - totalAccruedCost;
   const amountDue = netBalance < 0 ? Math.abs(netBalance) : 0;
@@ -301,6 +354,10 @@ export function calculateStudentFinancials(
 
   return {
     billingType,
+    rateType,
+    hourlyCost,
+    defaultDurationMinutes: defaultDuration,
+    totalTaughtHours,
     isMonthly,
     totalAttendedLessons: totalAttended,
     lessonCost,

@@ -1,12 +1,33 @@
 import React, { useState, useMemo } from "react";
-import { Calendar, Clock, Play, Users, User, Table, Printer, Sparkles, Smartphone } from "lucide-react";
-import { Group, PrivateLesson, Lesson, AppSettings } from "../types";
+import {
+  Calendar,
+  Clock,
+  Play,
+  Users,
+  User,
+  Table,
+  Printer,
+  Sparkles,
+  Smartphone,
+  Bell,
+  Send,
+  Copy,
+  Check,
+  MessageSquare,
+  ExternalLink,
+  ChevronDown,
+  ChevronUp
+} from "lucide-react";
+import { Group, PrivateLesson, Lesson, AppSettings, Student } from "../types";
+import { StudentLessonReminderModal, ReminderTargetInfo } from "./StudentLessonReminderModal";
+import { calculateLessonTimeInfo, buildWhatsAppUrl } from "../lib/timeUtils";
 
 interface ScheduleViewProps {
   settings: AppSettings;
   groups: Group[];
   privateLessons: PrivateLesson[];
   lessons: Lesson[];
+  students?: Student[];
   onOpenLesson: (groupObj?: Group, privateObj?: PrivateLesson) => void;
 }
 
@@ -15,9 +36,40 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
   groups = [],
   privateLessons = [],
   lessons = [],
+  students = [],
   onOpenLesson
 }) => {
   const isArabic = settings.preferredLanguage === "ar";
+  const [activeReminderTarget, setActiveReminderTarget] = useState<ReminderTargetInfo | null>(null);
+  const [quickCopiedStudentId, setQuickCopiedStudentId] = useState<string | null>(null);
+  const [expandedGroupStudentCards, setExpandedGroupStudentCards] = useState<Record<string, boolean>>({});
+
+  const toggleGroupExpand = (groupId: string) => {
+    setExpandedGroupStudentCards(prev => ({
+      ...prev,
+      [groupId]: !prev[groupId]
+    }));
+  };
+
+  const handleQuickCopyReminder = (student: Student, sessionTime: string, subject?: string) => {
+    const info = calculateLessonTimeInfo(sessionTime, student.fullName, subject);
+    navigator.clipboard.writeText(info.reminderText);
+    setQuickCopiedStudentId(student.id);
+    setTimeout(() => setQuickCopiedStudentId(null), 2000);
+  };
+
+  const handleQuickSendWhatsApp = (
+    student: Student,
+    sessionTime: string,
+    subject?: string,
+    groupLink?: string
+  ) => {
+    const info = calculateLessonTimeInfo(sessionTime, student.fullName, subject);
+    const targetContact = groupLink || student.whatsappGroupLink || student.parentContact;
+    const { url } = buildWhatsAppUrl(targetContact, info.reminderText);
+    navigator.clipboard.writeText(info.reminderText);
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
 
   // Days list matching Word table order (Saturday to Friday)
   const daysList = isArabic
@@ -259,23 +311,23 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
   };
 
   return (
-    <div className="space-y-6 pb-20 print:p-0 print:m-0">
+    <div className="space-y-3.5 pb-16 print:p-0 print:m-0">
       {/* Header Controls Card (Hidden during print) */}
-      <div className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4 print:hidden">
+      <div className="bg-white border border-slate-200/80 rounded-2xl p-3.5 sm:p-4 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-3 print:hidden">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className="px-3 py-1 rounded-full text-xs font-bold bg-blue-100 text-blue-800 flex items-center gap-1.5">
+            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-50 text-blue-700 border border-blue-100 flex items-center gap-1.5">
               <Table className="w-3.5 h-3.5" />
               {isArabic ? "قسم المواعيد والجدول" : "Timetable View"}
             </span>
-            <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">
+            <span className="text-[11px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full">
               {totalWeeklySessions} {isArabic ? "حصص مسجلة" : "sessions"}
             </span>
           </div>
-          <h1 className="text-2xl font-black text-slate-900 tracking-tight">
+          <h1 className="text-base sm:text-lg font-black text-slate-900 tracking-tight">
             {isArabic ? "جدول الحصص والمجموعات" : "Weekly Schedule Table"}
           </h1>
-          <p className="text-xs text-slate-500 font-medium mt-0.5">
+          <p className="text-[11px] text-slate-500 font-medium mt-0.5">
             {isArabic
               ? "اختر بين عرض جدول حصص اليوم أو عرض جدول الأسبوع كامل بصيغة Word."
               : "Switch between Today's schedule and the full Weekly Word table."}
@@ -285,19 +337,19 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
         {/* Action Buttons */}
         <div className="flex flex-wrap items-center gap-2">
           {/* Filter Pills */}
-          <div className="flex bg-slate-100 p-1 rounded-2xl text-xs font-bold border border-slate-200/60">
+          <div className="flex bg-slate-100 p-0.5 rounded-xl text-xs font-bold border border-slate-200">
             <button
               onClick={() => setFilterType("all")}
-              className={`px-3 py-1.5 rounded-xl transition ${
-                filterType === "all" ? "bg-white text-blue-600 shadow-sm" : "text-slate-600 hover:text-slate-900"
+              className={`px-3 py-1 rounded-lg transition ${
+                filterType === "all" ? "bg-white text-blue-700 shadow-2xs font-black" : "text-slate-600 hover:text-slate-900"
               }`}
             >
               {isArabic ? "الكل" : "All"}
             </button>
             <button
               onClick={() => setFilterType("group")}
-              className={`px-3 py-1.5 rounded-xl transition flex items-center gap-1 ${
-                filterType === "group" ? "bg-white text-blue-600 shadow-sm" : "text-slate-600 hover:text-slate-900"
+              className={`px-3 py-1 rounded-lg transition flex items-center gap-1 ${
+                filterType === "group" ? "bg-white text-blue-700 shadow-2xs font-black" : "text-slate-600 hover:text-slate-900"
               }`}
             >
               <Users className="w-3 h-3" />
@@ -305,8 +357,8 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
             </button>
             <button
               onClick={() => setFilterType("private")}
-              className={`px-3 py-1.5 rounded-xl transition flex items-center gap-1 ${
-                filterType === "private" ? "bg-white text-purple-600 shadow-sm" : "text-slate-600 hover:text-slate-900"
+              className={`px-3 py-1 rounded-lg transition flex items-center gap-1 ${
+                filterType === "private" ? "bg-white text-purple-700 shadow-2xs font-black" : "text-slate-600 hover:text-slate-900"
               }`}
             >
               <User className="w-3 h-3" />
@@ -318,7 +370,7 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
           {activeTab === "weekly" && (
             <button
               onClick={() => setShowFull24Hours(!showFull24Hours)}
-              className={`px-3.5 py-2 rounded-2xl text-xs font-bold transition flex items-center gap-1.5 border ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 border ${
                 showFull24Hours
                   ? "bg-indigo-50 text-indigo-700 border-indigo-200"
                   : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
@@ -336,28 +388,28 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
           {/* Print Schedule */}
           <button
             onClick={handlePrint}
-            className="px-4 py-2 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition shadow-md shadow-blue-600/20 flex items-center gap-1.5"
+            className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition shadow-md shadow-blue-600/20 flex items-center gap-1.5"
           >
-            <Printer className="w-4 h-4" />
+            <Printer className="w-3.5 h-3.5" />
             <span>{isArabic ? "طباعة / حفظ PDF" : "Print Schedule"}</span>
           </button>
         </div>
       </div>
 
       {/* Main Section Navigation Tabs */}
-      <div className="grid grid-cols-2 bg-slate-200/90 p-1.5 rounded-2xl gap-2 print:hidden shadow-inner">
+      <div className="grid grid-cols-2 bg-slate-200/80 p-1 rounded-xl gap-1.5 print:hidden shadow-inner">
         <button
           onClick={() => setActiveTab("today")}
-          className={`py-3 px-4 rounded-xl font-black text-xs sm:text-sm transition flex items-center justify-center gap-2 ${
+          className={`py-2 px-3 rounded-lg font-black text-xs sm:text-sm transition flex items-center justify-center gap-2 ${
             activeTab === "today"
-              ? "bg-blue-600 text-white shadow-md shadow-blue-600/30 ring-2 ring-blue-400/50"
-              : "text-slate-700 hover:bg-slate-300/70"
+              ? "bg-blue-600 text-white shadow-sm shadow-blue-600/30"
+              : "text-slate-700 hover:bg-slate-300/60"
           }`}
         >
           <Calendar className="w-4 h-4" />
           <span>{isArabic ? "حصص اليوم" : "Today's Schedule"}</span>
           <span
-            className={`px-2 py-0.5 rounded-full text-[11px] font-extrabold ${
+            className={`px-2 py-0.2 rounded-full text-[10px] font-extrabold ${
               activeTab === "today" ? "bg-blue-800 text-blue-100" : "bg-slate-300 text-slate-800"
             }`}
           >
@@ -367,16 +419,16 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
 
         <button
           onClick={() => setActiveTab("weekly")}
-          className={`py-3 px-4 rounded-xl font-black text-xs sm:text-sm transition flex items-center justify-center gap-2 ${
+          className={`py-2 px-3 rounded-lg font-black text-xs sm:text-sm transition flex items-center justify-center gap-2 ${
             activeTab === "weekly"
-              ? "bg-blue-600 text-white shadow-md shadow-blue-600/30 ring-2 ring-blue-400/50"
-              : "text-slate-700 hover:bg-slate-300/70"
+              ? "bg-blue-600 text-white shadow-sm shadow-blue-600/30"
+              : "text-slate-700 hover:bg-slate-300/60"
           }`}
         >
           <Table className="w-4 h-4" />
           <span>{isArabic ? "الجدول الأسبوعي" : "Weekly Schedule"}</span>
           <span
-            className={`px-2 py-0.5 rounded-full text-[11px] font-extrabold ${
+            className={`px-2 py-0.2 rounded-full text-[10px] font-extrabold ${
               activeTab === "weekly" ? "bg-blue-800 text-blue-100" : "bg-slate-300 text-slate-800"
             }`}
           >
@@ -387,15 +439,15 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
 
       {/* TAB 1: TODAY'S SESSIONS (الخانة الأولى: حصص اليوم) */}
       {activeTab === "today" && (
-        <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 rounded-3xl p-6 text-white shadow-xl space-y-5 print:hidden border border-blue-500/20">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-white/15 pb-4 gap-3">
-            <div className="flex items-center gap-3">
-              <div className="p-3 bg-blue-500/20 rounded-2xl border border-blue-400/30 text-blue-300 shadow-inner">
-                <Calendar className="w-7 h-7" />
+        <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 rounded-2xl p-4 sm:p-5 text-white shadow-lg space-y-4 print:hidden border border-slate-800">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-white/10 pb-3 gap-2.5">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2.5 bg-blue-500/20 rounded-xl border border-blue-400/30 text-blue-300 shadow-inner">
+                <Calendar className="w-5 h-5" />
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <h2 className="text-xl font-black tracking-tight">
+                  <h2 className="text-base sm:text-lg font-black tracking-tight">
                     {isArabic ? "📅 جدول حصص ومواعيد اليوم" : "Today's Schedule"}
                   </h2>
                   <span className="px-3 py-0.5 rounded-full text-xs font-black bg-blue-500 text-white shadow-sm">
@@ -428,44 +480,329 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2.5 sm:gap-3">
-              {todaySessions.map(sess => (
-                <div
-                  key={sess.id}
-                  className="bg-white/10 backdrop-blur-md border border-white/15 hover:border-blue-400/60 transition-all rounded-2xl p-3 sm:p-3.5 flex flex-col justify-between space-y-3 shadow-lg hover:bg-white/15"
-                >
-                  <div>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <span
-                        className={`px-2 py-0.5 rounded-full text-[9.5px] font-black flex items-center gap-1 ${
-                          sess.type === "group"
-                            ? "bg-blue-400/20 text-blue-200 border border-blue-400/30"
-                            : "bg-purple-400/20 text-purple-200 border border-purple-400/30"
-                        }`}
-                      >
-                        {sess.type === "group" ? <Users className="w-3 h-3" /> : <User className="w-3 h-3" />}
-                        <span>{sess.type === "group" ? (isArabic ? "مجموعة" : "Group") : (isArabic ? "درس خاص" : "Private")}</span>
-                      </span>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {todaySessions.map(sess => {
+                const isGroup = sess.type === "group";
+                const sessTimeInfo = calculateLessonTimeInfo(
+                  sess.time,
+                  sess.title,
+                  sess.subject
+                );
 
-                      <span className="font-mono font-bold text-[11px] bg-black/40 text-amber-300 px-2 py-0.5 rounded-lg border border-white/10 shadow-inner">
-                        {sess.time || "غير محدد"}
-                      </span>
+                // Find enrolled students
+                let enrolledStudents: Student[] = [];
+                let privateStudent: Student | null = null;
+
+                if (isGroup && sess.groupObj) {
+                  const grp = sess.groupObj;
+                  enrolledStudents = students.filter(
+                    st =>
+                      grp.studentIds?.includes(st.id) ||
+                      st.groupId === grp.id ||
+                      (grp.name && st.groupName === grp.name)
+                  );
+                } else if (!isGroup && sess.privateObj) {
+                  const prv = sess.privateObj;
+                  const matched = students.find(
+                    st => st.id === prv.studentId || st.fullName === prv.studentName
+                  );
+                  privateStudent = matched || {
+                    id: prv.id || "priv-" + Math.random().toString(),
+                    fullName: prv.studentName || sess.title,
+                    parentContact: prv.parentContact || "",
+                    studentPhone: prv.studentPhone || "",
+                    whatsappGroupLink: prv.whatsappGroupLink || "",
+                    subject: sess.subject,
+                    studyType: "private",
+                    status: "active",
+                    paymentStatus: "unpaid",
+                    lessonCost: prv.lessonCost || 0
+                  };
+                }
+
+                const isGroupExpanded = expandedGroupStudentCards[sess.id] ?? true;
+
+                return (
+                  <div
+                    key={sess.id}
+                    className="bg-white/10 backdrop-blur-md border border-white/20 hover:border-blue-400/60 transition-all rounded-3xl p-4 sm:p-5 flex flex-col justify-between space-y-4 shadow-xl hover:bg-white/15"
+                  >
+                    {/* Header */}
+                    <div>
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <span
+                          className={`px-2.5 py-0.5 rounded-full text-[10px] font-black flex items-center gap-1.5 ${
+                            isGroup
+                              ? "bg-blue-400/25 text-blue-100 border border-blue-400/40"
+                              : "bg-purple-400/25 text-purple-100 border border-purple-400/40"
+                          }`}
+                        >
+                          {isGroup ? <Users className="w-3.5 h-3.5" /> : <User className="w-3.5 h-3.5" />}
+                          <span>{isGroup ? (isArabic ? "مجموعة" : "Group") : (isArabic ? "درس خاص" : "Private")}</span>
+                        </span>
+
+                        {/* Remaining Time & Scheduled Hour Badges */}
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={`px-2 py-0.5 rounded-lg text-[10px] font-black border flex items-center gap-1 ${
+                              sessTimeInfo.status === "now"
+                                ? "bg-amber-500 text-slate-950 border-amber-300 animate-pulse"
+                                : sessTimeInfo.status === "past"
+                                ? "bg-rose-500/30 text-rose-200 border-rose-400/40"
+                                : "bg-emerald-500/30 text-emerald-200 border-emerald-400/40"
+                            }`}
+                          >
+                            <Clock className="w-3 h-3" />
+                            <span>
+                              {sessTimeInfo.status === "now"
+                                ? (isArabic ? "الآن" : "Now")
+                                : sessTimeInfo.status === "past"
+                                ? (isArabic ? `بدأت منذ ${Math.abs(sessTimeInfo.remainingMinutes)} د` : `${Math.abs(sessTimeInfo.remainingMinutes)}m ago`)
+                                : (isArabic ? `بعد ${sessTimeInfo.remainingMinutes} دقيقة` : `In ${sessTimeInfo.remainingMinutes}m`)}
+                            </span>
+                          </span>
+
+                          <span className="font-mono font-bold text-xs bg-black/50 text-amber-300 px-2.5 py-0.5 rounded-lg border border-white/10 shadow-inner">
+                            {sess.time || (isArabic ? "غير محدد" : "Unset")}
+                          </span>
+                        </div>
+                      </div>
+
+                      <h3 className="font-black text-white text-base leading-snug">{sess.title}</h3>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-xs font-bold text-blue-200 bg-blue-500/20 px-2 py-0.5 rounded-md border border-blue-400/20">
+                          {sess.subject}
+                        </span>
+                        {sess.subtext && (
+                          <span className="text-[11px] text-blue-200/80">{sess.subtext}</span>
+                        )}
+                      </div>
                     </div>
 
-                    <h3 className="font-black text-white text-sm line-clamp-1">{sess.title}</h3>
-                    <p className="text-xs font-bold text-blue-300 mt-0.5">{sess.subject}</p>
-                    <p className="text-[10.5px] text-blue-200/70 mt-0.5">{sess.subtext}</p>
-                  </div>
+                    {/* Students & Reminder Section */}
+                    <div className="bg-black/30 border border-white/10 rounded-2xl p-3 space-y-2.5">
+                      {/* Section Title */}
+                      <div className="flex items-center justify-between text-xs font-black text-blue-100 border-b border-white/10 pb-2">
+                        <div className="flex items-center gap-1.5">
+                          <Bell className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                          <span>
+                            {isArabic ? "تذكير الحصة للطلاب" : "Student Lesson Reminders"}
+                          </span>
+                        </div>
 
-                  <button
-                    onClick={() => onOpenLesson(sess.groupObj, sess.privateObj)}
-                    className="w-full py-2 rounded-xl bg-blue-500 hover:bg-blue-400 text-slate-950 font-black text-xs transition shadow-md flex items-center justify-center gap-1.5"
-                  >
-                    <Play className="w-3 h-3 fill-current" />
-                    <span>{isArabic ? "بدء الحصة" : "Start Session"}</span>
-                  </button>
-                </div>
-              ))}
+                        {isGroup && enrolledStudents.length > 0 && (
+                          <span className="text-[10px] font-bold text-blue-300 bg-white/10 px-2 py-0.5 rounded-full">
+                            {enrolledStudents.length} {isArabic ? "طلاب" : "students"}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* PRIVATE LESSON STUDENT REMINDER */}
+                      {!isGroup && privateStudent && (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <div className="w-7 h-7 rounded-lg bg-purple-500/30 text-purple-200 border border-purple-400/30 flex items-center justify-center font-black text-xs shrink-0">
+                                {privateStudent.fullName.charAt(0)}
+                              </div>
+                              <div>
+                                <h4 className="font-black text-white text-xs">{privateStudent.fullName}</h4>
+                                <p className="text-[10px] text-slate-300 font-mono dir-ltr">
+                                  {privateStudent.parentContact || privateStudent.studentPhone || (isArabic ? "لا يوجد هاتف" : "No phone")}
+                                </p>
+                              </div>
+                            </div>
+
+                            {/* Quick Reminder Actions */}
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                title={isArabic ? "نسخ نص التذكير" : "Copy Reminder Text"}
+                                onClick={() => handleQuickCopyReminder(privateStudent!, sess.time, sess.subject)}
+                                className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-blue-200 hover:text-white transition text-xs flex items-center justify-center"
+                              >
+                                {quickCopiedStudentId === privateStudent.id ? (
+                                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                ) : (
+                                  <Copy className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+
+                              <button
+                                type="button"
+                                title={isArabic ? "إرسال سريع عبر واتساب" : "Quick Send WhatsApp"}
+                                onClick={() =>
+                                  handleQuickSendWhatsApp(
+                                    privateStudent!,
+                                    sess.time,
+                                    sess.subject,
+                                    sess.privateObj?.whatsappGroupLink
+                                  )
+                                }
+                                className="p-1.5 rounded-lg bg-emerald-600/80 hover:bg-emerald-600 text-white transition text-xs flex items-center justify-center"
+                              >
+                                <Send className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Explicit "إرسال تذكير بالحصة" Button */}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setActiveReminderTarget({
+                                student: privateStudent!,
+                                sessionTime: sess.time,
+                                subject: sess.subject,
+                                groupName: sess.title,
+                                type: "private",
+                                whatsappGroupLink: sess.privateObj?.whatsappGroupLink
+                              })
+                            }
+                            className="w-full py-2 px-3 rounded-xl bg-gradient-to-r from-amber-500/20 to-emerald-500/20 hover:from-amber-500/30 hover:to-emerald-500/30 border border-amber-400/40 text-amber-200 hover:text-white font-black text-xs transition flex items-center justify-between gap-2 shadow-xs group"
+                          >
+                            <div className="flex items-center gap-1.5">
+                              <Bell className="w-3.5 h-3.5 text-amber-400 group-hover:scale-110 transition" />
+                              <span>{isArabic ? "إرسال تذكير بالحصة" : "Send Lesson Reminder"}</span>
+                            </div>
+                            <span className="text-[10px] font-bold opacity-80 underline underline-offset-2">
+                              {isArabic ? "فتح الخيارات" : "Options"}
+                            </span>
+                          </button>
+                        </div>
+                      )}
+
+                      {/* GROUP STUDENTS REMINDER LIST */}
+                      {isGroup && (
+                        <div className="space-y-2">
+                          {enrolledStudents.length === 0 ? (
+                            <div className="text-center py-2 text-blue-200/70 text-xs">
+                              {isArabic
+                                ? "لا يوجد طلاب مضافون لهذه المجموعة بعد."
+                                : "No students enrolled in this group yet."}
+                            </div>
+                          ) : (
+                            <div className="space-y-2">
+                              {enrolledStudents.map(st => (
+                                <div
+                                  key={st.id}
+                                  className="p-2 rounded-xl bg-white/5 border border-white/10 hover:border-white/20 transition flex flex-col gap-1.5"
+                                >
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <div className="w-6 h-6 rounded-md bg-blue-500/30 text-blue-200 border border-blue-400/30 flex items-center justify-center font-black text-[11px] shrink-0">
+                                        {st.fullName.charAt(0)}
+                                      </div>
+                                      <div className="min-w-0">
+                                        <h4 className="font-bold text-white text-xs truncate">
+                                          {st.fullName}
+                                        </h4>
+                                        <p className="text-[9.5px] text-slate-300 font-mono dir-ltr truncate">
+                                          {st.parentContact || st.studentPhone || (isArabic ? "بدون هاتف" : "No phone")}
+                                        </p>
+                                      </div>
+                                    </div>
+
+                                    {/* Action Buttons for this Student */}
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      <button
+                                        type="button"
+                                        title={isArabic ? "نسخ نص التذكير" : "Copy Reminder"}
+                                        onClick={() => handleQuickCopyReminder(st, sess.time, sess.subject)}
+                                        className="p-1 rounded bg-white/10 hover:bg-white/20 text-blue-200 hover:text-white transition text-xs"
+                                      >
+                                        {quickCopiedStudentId === st.id ? (
+                                          <Check className="w-3 h-3 text-emerald-400" />
+                                        ) : (
+                                          <Copy className="w-3 h-3" />
+                                        )}
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        title={isArabic ? "إرسال عبر واتساب" : "Send WhatsApp"}
+                                        onClick={() =>
+                                          handleQuickSendWhatsApp(
+                                            st,
+                                            sess.time,
+                                            sess.subject,
+                                            sess.groupObj?.whatsappGroupLink
+                                          )
+                                        }
+                                        className="p-1 rounded bg-emerald-600/80 hover:bg-emerald-600 text-white transition text-xs"
+                                      >
+                                        <Send className="w-3 h-3" />
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                  {/* Explicit "إرسال تذكير بالحصة" Button next to each student */}
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setActiveReminderTarget({
+                                        student: st,
+                                        sessionTime: sess.time,
+                                        subject: sess.subject,
+                                        groupName: sess.title,
+                                        type: "group",
+                                        whatsappGroupLink: sess.groupObj?.whatsappGroupLink
+                                      })
+                                    }
+                                    className="w-full py-1.5 px-2.5 rounded-lg bg-blue-500/20 hover:bg-blue-500/30 border border-blue-400/30 text-blue-100 hover:text-white font-bold text-[10.5px] transition flex items-center justify-between"
+                                  >
+                                    <div className="flex items-center gap-1.5">
+                                      <Bell className="w-3 h-3 text-amber-300 shrink-0" />
+                                      <span>{isArabic ? "إرسال تذكير بالحصة" : "Send Reminder"}</span>
+                                    </div>
+                                    <span className="text-[9.5px] text-amber-300 font-mono font-black">
+                                      {sessTimeInfo.remainingMinutes > 0
+                                        ? `${sessTimeInfo.remainingMinutes} د`
+                                        : (isArabic ? "الآن" : "Now")}
+                                    </span>
+                                  </button>
+                                </div>
+                              ))}
+
+                              {/* Send to Entire WhatsApp Group Button (if group has WhatsApp link) */}
+                              {sess.groupObj?.whatsappGroupLink && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const info = calculateLessonTimeInfo(
+                                      sess.time,
+                                      sess.title,
+                                      sess.subject
+                                    );
+                                    const groupMsg = isArabic
+                                      ? `تنبيه بموعد حصة (${sess.title}) بعد ${sessTimeInfo.remainingMinutes > 0 ? sessTimeInfo.remainingMinutes + ' دقيقة' : 'الآن'}. يرجى التواجد بالموعد.`
+                                      : `Reminder: Session (${sess.title}) starts in ${sessTimeInfo.remainingMinutes} mins.`;
+                                    navigator.clipboard.writeText(groupMsg);
+                                    window.open(sess.groupObj?.whatsappGroupLink, "_blank", "noopener,noreferrer");
+                                  }}
+                                  className="w-full py-1.5 px-2.5 rounded-lg bg-indigo-600/80 hover:bg-indigo-600 text-white font-bold text-[10.5px] transition flex items-center justify-center gap-1.5 border border-indigo-400/30 shadow-xs"
+                                >
+                                  <Users className="w-3.5 h-3.5" />
+                                  <span>{isArabic ? "إرسال تذكير لجروب الواتساب بالكامل" : "Send to WhatsApp Group"}</span>
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Start Session Action */}
+                    <button
+                      onClick={() => onOpenLesson(sess.groupObj, sess.privateObj)}
+                      className="w-full py-2.5 rounded-2xl bg-blue-500 hover:bg-blue-400 text-slate-950 font-black text-xs transition shadow-lg flex items-center justify-center gap-2"
+                    >
+                      <Play className="w-3.5 h-3.5 fill-current" />
+                      <span>{isArabic ? "بدء الحصة وتسجيل الحضور" : "Start Session & Attendance"}</span>
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -903,6 +1240,15 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Student Lesson Reminder Modal */}
+      {activeReminderTarget && (
+        <StudentLessonReminderModal
+          target={activeReminderTarget}
+          isArabic={isArabic}
+          onClose={() => setActiveReminderTarget(null)}
+        />
       )}
     </div>
   );

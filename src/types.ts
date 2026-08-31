@@ -18,6 +18,8 @@ export type BillingType =
   | "monthly_elapsed_lessons"
   | "monthly_fixed_lessons";
 
+export type RateType = "per_lesson" | "per_hour" | "per_month";
+
 export type StudentStatus = "active" | "stopped";
 
 export type AttendanceStatus = "present" | "absent" | "late";
@@ -33,6 +35,9 @@ export interface StudentSubjectPlan {
   subject: string;
   studyType: StudyType; // "group" | "private"
   billingType?: BillingType; // طريقة الدفع والمحاسبة للمادة
+  rateType?: RateType; // وحدة المحاسبة: "per_lesson" (سعر الحصة) أو "per_hour" (سعر الساعة)
+  hourlyCost?: number; // سعر الساعة (في حال اختيار سعر الساعة)
+  defaultDurationMinutes?: number; // مدة الحصة المعتادة بالدقائق (مثال: 60 دقيقة)
   academicYear?: string; // الصف الدراسي e.g. "الصف الأول الثانوي"
   curriculum?: string; // المنهج e.g. "مصري", "سعودي", "إماراتي", "دولي"
   lessonCost: number; // سعر الحصة للمادة
@@ -62,6 +67,9 @@ export interface Student {
   
   // Unified Financial & Billing System
   billingType?: BillingType; // طريقة الدفع والمحاسبة للطالب
+  rateType?: RateType; // وحدة المحاسبة: "per_lesson" (سعر الحصة) أو "per_hour" (سعر الساعة)
+  hourlyCost?: number; // سعر الساعة
+  defaultDurationMinutes?: number; // مدة الحصة المعتادة بالدقائق
   monthlyCost?: number; // قيمة الاشتراك الشهري الكامل (مثلاً 400 ج.م شهرياً)
   lessonsPerMonth?: number; // عدد الحصص المحددة شهرياً (مثلاً 8 حصص شهرياً)
   monthlyBillingDay?: number; // يوم تجديد الاشتراك الشهري (الافتراضي 1)
@@ -124,6 +132,9 @@ export interface AttendanceRecord {
   lessonNumber?: number;
   attendance: AttendanceStatus;
   homeworkStatus: HomeworkStatus;
+  durationMinutes?: number; // مدة الحصة بالدقائق
+  lessonDuration?: string; // نص مدة الحصة مثل "60 دقيقة"
+  includeDuration?: boolean; // تفعيل أو إلغاء مدة الحصة
   teacherNotes?: string;
   classEvents?: string; // ما حدث داخل الحصة
   homeworkNotes?: string; // الواجب
@@ -164,6 +175,13 @@ export interface ExamRecord {
   date: string;
 }
 
+export interface SubjectPaymentAllocation {
+  subjectId?: string;
+  subjectName: string;
+  amount: number;
+  lessonsCovered?: number;
+}
+
 export interface PaymentTransaction {
   id: string;
   studentId: string;
@@ -173,6 +191,8 @@ export interface PaymentTransaction {
   notes?: string;
   lessonsCovered?: number;
   lessonCost?: number;
+  subject?: string;
+  subjectAllocations?: SubjectPaymentAllocation[];
 }
 
 export interface ReportAttachment {
@@ -192,10 +212,14 @@ export interface GeneratedReport {
   lessonNumber?: number;
   attendance?: AttendanceStatus;
   deductCost?: boolean;
+  durationMinutes?: number; // مدة الحصة بالدقائق
+  lessonDuration?: string; // مدة الحصة كنص e.g. "60 دقيقة (ساعة)"
+  includeDuration?: boolean; // هل تم تفعيل عرض مدة الحصة بالتقرير
   homeworkStatus?: HomeworkStatus;
   teacherNotes: string;
   classEvents?: string; // الحقل الأول: ما حدث داخل الحصة
   homeworkNotes?: string; // الحقل الثاني: الواجب والتكليفات
+  overallEvaluation?: string; // التقييم الإجمالي ومستوى الأداء
   aiInstructions: string;
   reportText?: string;
   generatedText?: string;
@@ -301,10 +325,21 @@ export interface AppNotification {
   date?: string;
 }
 
+export interface SubCombinedGroup {
+  id: string;
+  name: string; // e.g., "الأخوين الأكبر" أو "مجموعة الرياضيات والفيزياء"
+  studentIds: string[]; // IDs of students in this sub-merged group (subset of parent group's studentIds)
+  notes?: string;
+  sharedParentContact?: string;
+  sharedGroupLink?: string;
+  createdAt: string;
+}
+
 export interface CombinedStudentGroup {
   id: string;
   name: string; // e.g., "أبناء عائلة الشريف" or "أحمد وسارة"
   studentIds: string[]; // List of student IDs bundled in this group
+  subGroups?: SubCombinedGroup[]; // دمج داخل الدمج: مجموعات فرعية مدمجة داخل هذا الملف المجمع
   notes?: string;
   sharedParentContact?: string; // Optional custom shared parent WhatsApp / phone
   sharedGroupLink?: string; // Optional shared WhatsApp/Telegram group link

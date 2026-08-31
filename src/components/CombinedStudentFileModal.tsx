@@ -32,11 +32,17 @@ import {
   Link,
   Globe,
   Smartphone,
-  Send
+  Send,
+  FolderTree,
+  GitFork,
+  Tag,
+  UserPlus
 } from "lucide-react";
 import {
   CombinedStudentGroup,
+  SubCombinedGroup,
   Student,
+  StudentSubjectPlan,
   AttendanceRecord,
   ExamRecord,
   PaymentTransaction,
@@ -49,6 +55,50 @@ import {
 } from "../types";
 import { calculateStudentFinancials, StudentFinancialSummary } from "../lib/financeUtils";
 import { StudentPersonalReportView } from "./StudentPersonalReportView";
+
+const COMMON_CURRICULUMS = [
+  { label: "منهج مصري (عربي)", flag: "🇪🇬" },
+  { label: "منهج مصري (لغات / تجريبي)", flag: "🇪🇬" },
+  { label: "منهج سعودي", flag: "🇸🇦" },
+  { label: "منهج إماراتي", flag: "🇦🇪" },
+  { label: "منهج كويتي", flag: "🇰🇼" },
+  { label: "منهج قطري", flag: "🇶🇦" },
+  { label: "منهج عماني", flag: "🇴🇲" },
+  { label: "منهج أردني", flag: "🇯🇴" },
+  { label: "دولي (IGCSE / SAT / American)", flag: "🌐" },
+  { label: "أزهري (مصر)", flag: "🕌" },
+  { label: "منهج عام / حر", flag: "📚" }
+];
+
+const COMMON_GRADES = [
+  "الصف الأول الابتدائي",
+  "الصف الثاني الابتدائي",
+  "الصف الثالث الابتدائي",
+  "الصف الرابع الابتدائي",
+  "الصف الخامس الابتدائي",
+  "الصف السادس الابتدائي",
+  "الصف الأول الإعدادي",
+  "الصف الثاني الإعدادي",
+  "الصف الثالث الإعدادي",
+  "الصف الأول الثانوي",
+  "الصف الثاني الثانوي",
+  "الصف الثالث الثانوي",
+  "المرحلة الجامعية"
+];
+
+const COMMON_SUBJECT_SUGGESTIONS = [
+  "الرياضيات",
+  "الفيزياء",
+  "الكيمياء",
+  "الأحياء",
+  "اللغة العربية",
+  "اللغة الإنجليزية",
+  "العلوم",
+  "الدراسات",
+  "الحاسب الآلي",
+  "القرآن الكريم",
+  "الفرنساوي"
+];
 
 interface CombinedStudentFileModalProps {
   group: CombinedStudentGroup;
@@ -122,8 +172,28 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
     ? availableUnbundledStudents
     : studentList.filter(s => s && !targetGroupStudentIds.includes(s.id));
 
-  // Navigation Tabs inside Combined File: "overview" | "student_profile" | "manage"
-  const [activeTab, setActiveTab] = useState<"overview" | "student_profile" | "manage">("overview");
+  // Navigation Tabs inside Combined File: "overview" | "student_profile" | "sub_groups" | "manage"
+  const [activeTab, setActiveTab] = useState<"overview" | "student_profile" | "sub_groups" | "manage">("overview");
+
+  // Sub-groups (دمج داخل الدمج) state
+  const subGroupsList: SubCombinedGroup[] = Array.isArray(group?.subGroups) ? group.subGroups : [];
+  const [showCreateSubGroupModal, setShowCreateSubGroupModal] = useState(false);
+  const [editingSubGroupId, setEditingSubGroupId] = useState<string | null>(null);
+  const [subGroupNameVal, setSubGroupNameVal] = useState("");
+  const [subGroupStudentIdsVal, setSubGroupStudentIdsVal] = useState<string[]>([]);
+  const [subGroupNotesVal, setSubGroupNotesVal] = useState("");
+  const [subGroupContactVal, setSubGroupContactVal] = useState("");
+  const [subGroupLinkVal, setSubGroupLinkVal] = useState("");
+
+  // Sub-group specific payment modal
+  const [activeSubGroupForPayment, setActiveSubGroupForPayment] = useState<SubCombinedGroup | null>(null);
+  const [subGroupPayAmount, setSubGroupPayAmount] = useState<number>(0);
+  const [subGroupPayTarget, setSubGroupPayTarget] = useState<"auto_due" | "equal_split" | string>("auto_due");
+  const [subGroupPayNotes, setSubGroupPayNotes] = useState("");
+  const [subGroupPayDate, setSubGroupPayDate] = useState(new Date().toISOString().split("T")[0]);
+
+  // Filter in Student Profiles tab by sub-group
+  const [profileSubGroupFilter, setProfileSubGroupFilter] = useState<string>("all");
 
   // Active student selected for internal Profile tab
   const [selectedStudentId, setSelectedStudentId] = useState<string>(() => {
@@ -188,6 +258,134 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
   const [copiedReportId, setCopiedReportId] = useState<string | null>(null);
   const [expandedReportIds, setExpandedReportIds] = useState<string[]>([]);
   const [reportArchiveFilter, setReportArchiveFilter] = useState<"active" | "archived" | "all">("active");
+
+  // Dedicated In-Modal Student Editor State
+  const [editingStudent, setEditingStudent] = useState<Student | null>(null);
+  const [editFullName, setEditFullName] = useState("");
+  const [editStudentNumber, setEditStudentNumber] = useState("");
+  const [editStudentPhone, setEditStudentPhone] = useState("");
+  const [editAcademicYear, setEditAcademicYear] = useState("");
+  const [editCurriculum, setEditCurriculum] = useState("");
+  const [editParentContact, setEditParentContact] = useState("+20");
+  const [editWhatsappGroupLink, setEditWhatsappGroupLink] = useState("");
+  const [editNotes, setEditNotes] = useState("");
+  const [editStudentSubjects, setEditStudentSubjects] = useState<StudentSubjectPlan[]>([]);
+  const [editStudentStatus, setEditStudentStatus] = useState<StudentStatus>("active");
+
+  const handleOpenEditStudentDirectly = (st: Student) => {
+    setEditingStudent(st);
+    setEditFullName(st.fullName || "");
+    setEditStudentNumber(st.studentNumber || "");
+    setEditStudentPhone(st.studentPhone || "");
+    setEditAcademicYear(st.academicYear || "");
+    setEditCurriculum(st.curriculum || "");
+    setEditParentContact(st.parentContact || "+20");
+    setEditWhatsappGroupLink(st.whatsappGroupLink || "");
+    setEditNotes(st.notes || "");
+    setEditStudentStatus(st.status || "active");
+
+    if (st.subjects && st.subjects.length > 0) {
+      setEditStudentSubjects(
+        st.subjects.map(s => ({
+          ...s,
+          rateType: s.rateType || "per_lesson",
+          hourlyCost: s.hourlyCost || s.lessonCost || 100,
+          defaultDurationMinutes: s.defaultDurationMinutes || 60
+        }))
+      );
+    } else {
+      setEditStudentSubjects([
+        {
+          id: `subj_edit_1`,
+          subject: st.subject || "الرياضيات",
+          studyType: st.studyType || "private",
+          billingType: st.billingType || "monthly",
+          rateType: st.rateType || "per_lesson",
+          lessonCost: st.lessonCost || 100,
+          hourlyCost: st.hourlyCost || st.lessonCost || 100,
+          defaultDurationMinutes: st.defaultDurationMinutes || 60,
+          monthlyCost: st.monthlyCost || 400,
+          lessonsPerMonth: st.lessonsPerMonth || 8
+        }
+      ]);
+    }
+  };
+
+  const handleAddEditSubjectField = () => {
+    const nextIdx = editStudentSubjects.length + 1;
+    const available =
+      COMMON_SUBJECT_SUGGESTIONS.find(
+        s => !editStudentSubjects.some(sub => sub.subject === s)
+      ) || (isArabic ? `مادة ${nextIdx}` : `Subject ${nextIdx}`);
+    setEditStudentSubjects(prev => [
+      ...prev,
+      {
+        id: `subj_edit_${Date.now()}_${nextIdx}`,
+        subject: available,
+        studyType: "private",
+        billingType: "monthly",
+        rateType: "per_lesson",
+        lessonCost: 100,
+        hourlyCost: 100,
+        defaultDurationMinutes: 60,
+        monthlyCost: 400,
+        lessonsPerMonth: 8
+      }
+    ]);
+  };
+
+  const handleRemoveEditSubjectField = (indexToRemove: number) => {
+    if (editStudentSubjects.length <= 1) return;
+    setEditStudentSubjects(prev => prev.filter((_, idx) => idx !== indexToRemove));
+  };
+
+  const handleUpdateEditSubjectField = (index: number, patch: Partial<StudentSubjectPlan>) => {
+    setEditStudentSubjects(prev =>
+      prev.map((sub, idx) => (idx === index ? { ...sub, ...patch } : sub))
+    );
+  };
+
+  const handleSaveEditStudentDirectly = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingStudent || !editFullName.trim() || editStudentSubjects.length === 0) return;
+
+    const subjectsSummary = editStudentSubjects.map(s => s.subject.trim()).filter(Boolean).join(" + ") || "عام";
+    const primaryStudyType = editStudentSubjects.some(s => s.studyType === "group") ? "group" : "private";
+    const primarySub = editStudentSubjects[0];
+
+    const updatedData: Partial<Student> = {
+      fullName: editFullName.trim(),
+      studentNumber: editStudentNumber.trim() || undefined,
+      studentPhone: editStudentPhone.trim() || undefined,
+      academicYear: editAcademicYear.trim() || undefined,
+      curriculum: editCurriculum.trim() || undefined,
+      parentContact: editParentContact.trim(),
+      whatsappGroupLink: editWhatsappGroupLink.trim() || undefined,
+      studyType: primaryStudyType,
+      subject: subjectsSummary,
+      subjects: editStudentSubjects,
+      billingType: primarySub.billingType || "monthly",
+      rateType: primarySub.rateType || "per_lesson",
+      lessonCost: primarySub.lessonCost || 100,
+      hourlyCost: primarySub.hourlyCost || primarySub.lessonCost || 100,
+      defaultDurationMinutes: primarySub.defaultDurationMinutes || 60,
+      monthlyCost: primarySub.monthlyCost || 400,
+      lessonsPerMonth: primarySub.lessonsPerMonth || 8,
+      notes: editNotes,
+      status: editStudentStatus
+    };
+
+    if (onEditStudent) {
+      onEditStudent(editingStudent.id, updatedData);
+    }
+    if (onUpdateStudentStatus && editStudentStatus !== editingStudent.status) {
+      onUpdateStudentStatus(editingStudent.id, editStudentStatus);
+    }
+
+    setEditingStudent(null);
+    setPaymentSuccessMsg(isArabic ? `تم حفظ وتحديث بيانات الطالب (${editFullName}) بنجاح!` : "Student updated successfully!");
+    setTimeout(() => setPaymentSuccessMsg(""), 4000);
+  };
 
   // Calculate Combined Financials across all students in group
   const studentsFinancials: { student: Student; summary: StudentFinancialSummary }[] = groupStudents.map(st => ({
@@ -363,6 +561,243 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
     lines.push(`✨ نسعد دائماً بمتابعة وتفوق أبنائنا الكرام.`);
 
     return lines.join("\n");
+  };
+
+  // Generate WhatsApp Statement for a specific Sub-Group (دمج فرعي)
+  const generateSubGroupStatementText = (sg: SubCombinedGroup) => {
+    const teacherName = settings.teacherName ? `الأستاذ / ${settings.teacherName}` : "المعلم";
+    const dateStr = new Date().toLocaleDateString("ar-EG", { year: "numeric", month: "long", day: "numeric" });
+    const subStudents = groupStudents.filter(s => (sg.studentIds || []).includes(s.id));
+    const subFin = subStudents.map(st => ({
+      student: st,
+      summary: calculateStudentFinancials(st, attendanceRecords)
+    }));
+
+    const totalAtt = subFin.reduce((sum, item) => sum + item.summary.totalAttendedLessons, 0);
+    const totalPaid = subFin.reduce((sum, item) => sum + item.summary.totalPaidAmount, 0);
+    const totalCost = subFin.reduce((sum, item) => sum + item.summary.totalAccruedCost, 0);
+    const netBal = totalPaid - totalCost;
+    const dueAmt = netBal < 0 ? Math.abs(netBal) : 0;
+    const creditAmt = netBal > 0 ? netBal : 0;
+
+    let lines: string[] = [];
+    lines.push(`📊 *كشف حساب مالي ومتابعة (دمج فرعي)*`);
+    lines.push(`🗂️ *الدمج الفرعي:* ${sg.name}`);
+    lines.push(`📁 *الملف المجمع الرئيسي:* ${group.name}`);
+    lines.push(`👨‍🏫 *المعلم:* ${teacherName}`);
+    lines.push(`📅 *التاريخ:* ${dateStr}`);
+    if (sg.notes) {
+      lines.push(`📝 *ملاحظات:* ${sg.notes}`);
+    }
+    lines.push(`━━━━━━━━━━━━━━━━━━━━━`);
+    lines.push(`👥 *بيانات الطلاب في هذا الدمج الفرعي (${subStudents.length} طلاب):*`);
+
+    subFin.forEach((item, idx) => {
+      const st = item.student;
+      const f = item.summary;
+      lines.push(`\n${idx + 1}. *${st.fullName}* ${st.academicYear ? `(${st.academicYear})` : ""}`);
+      if (st.subjects && st.subjects.length > 0) {
+        lines.push(`   📚 المواد: ${st.subjects.map(s => s.subject).join("، ")}`);
+      } else if (st.subject) {
+        lines.push(`   📚 المادة: ${st.subject}`);
+      }
+      lines.push(`   🎯 الحصص المنفذة: ${f.totalAttendedLessons} حصة`);
+      lines.push(`   💵 إجمالي المسدد: ${f.totalPaidAmount} ج.م`);
+      if (f.amountDue > 0) {
+        lines.push(`   ⚠️ المستحق المطلوب سداده: ${f.amountDue} ج.م`);
+      } else if (f.creditRemaining > 0) {
+        lines.push(`   ✅ الرصيد الدائن المتبقي: +${f.creditRemaining} ج.م`);
+      } else {
+        lines.push(`   ✅ الحساب مسدد بالكامل`);
+      }
+    });
+
+    lines.push(`\n━━━━━━━━━━━━━━━━━━━━━`);
+    lines.push(`📈 *الملخص الإجمالي للدمج الفرعي:*`);
+    lines.push(`• عدد الطلاب: ${subStudents.length} طلاب`);
+    lines.push(`• إجمالي الحصص المنفذة للدمج: ${totalAtt} حصة`);
+    lines.push(`• إجمالي المبالغ المسددة: ${totalPaid} ج.م`);
+    if (dueAmt > 0) {
+      lines.push(`• 🔴 *إجمالي المستحق المطلوب سداده:* ${dueAmt} ج.م`);
+    } else if (creditAmt > 0) {
+      lines.push(`• 🟢 *إجمالي الرصيد الدائن المتبقي:* +${creditAmt} ج.م`);
+    } else {
+      lines.push(`• 🟢 *الحساب مسدد بالكامل ومضبوط.*`);
+    }
+    if (sg.sharedGroupLink || group.sharedGroupLink) {
+      lines.push(`• 🔗 *رابط الجروب:* ${sg.sharedGroupLink || group.sharedGroupLink}`);
+    }
+    lines.push(`━━━━━━━━━━━━━━━━━━━━━`);
+    lines.push(`✨ نسعد دائماً بمتابعة وتفوق أبنائنا الكرام.`);
+
+    return lines.join("\n");
+  };
+
+  // Open Sub-Group Creator
+  const handleOpenCreateSubGroup = () => {
+    setEditingSubGroupId(null);
+    setSubGroupNameVal("");
+    setSubGroupStudentIdsVal([]);
+    setSubGroupNotesVal("");
+    setSubGroupContactVal(effectiveParentContact || "");
+    setSubGroupLinkVal(group.sharedGroupLink || "");
+    setShowCreateSubGroupModal(true);
+  };
+
+  // Open Sub-Group Editor
+  const handleOpenEditSubGroup = (sg: SubCombinedGroup) => {
+    setEditingSubGroupId(sg.id);
+    setSubGroupNameVal(sg.name);
+    setSubGroupStudentIdsVal(sg.studentIds || []);
+    setSubGroupNotesVal(sg.notes || "");
+    setSubGroupContactVal(sg.sharedParentContact || "");
+    setSubGroupLinkVal(sg.sharedGroupLink || "");
+    setShowCreateSubGroupModal(true);
+  };
+
+  // Save Sub-Group
+  const handleSaveSubGroupSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!subGroupNameVal.trim()) return;
+    if (subGroupStudentIdsVal.length === 0) {
+      alert(isArabic ? "يرجى تحديد طالب أو أكثر للدمج الفرعي." : "Please select at least one student.");
+      return;
+    }
+
+    const currentSubs = Array.isArray(group.subGroups) ? group.subGroups : [];
+    let nextSubs: SubCombinedGroup[];
+
+    if (editingSubGroupId) {
+      nextSubs = currentSubs.map(sg =>
+        sg.id === editingSubGroupId
+          ? {
+              ...sg,
+              name: subGroupNameVal.trim(),
+              studentIds: subGroupStudentIdsVal,
+              notes: subGroupNotesVal.trim() || undefined,
+              sharedParentContact: subGroupContactVal.trim() || undefined,
+              sharedGroupLink: subGroupLinkVal.trim() || undefined
+            }
+          : sg
+      );
+    } else {
+      const newSub: SubCombinedGroup = {
+        id: `subgrp_${Date.now()}`,
+        name: subGroupNameVal.trim(),
+        studentIds: subGroupStudentIdsVal,
+        notes: subGroupNotesVal.trim() || undefined,
+        sharedParentContact: subGroupContactVal.trim() || undefined,
+        sharedGroupLink: subGroupLinkVal.trim() || undefined,
+        createdAt: new Date().toISOString()
+      };
+      nextSubs = [...currentSubs, newSub];
+    }
+
+    onUpdateGroup(group.id, { subGroups: nextSubs });
+    setShowCreateSubGroupModal(false);
+    setEditingSubGroupId(null);
+    setPaymentSuccessMsg(
+      isArabic
+        ? (editingSubGroupId ? "تم تحديث بيانات الدمج الفرعي بنجاح!" : "تم إنشاء الدمج الفرعي (دمج داخل الدمج) بنجاح!")
+        : "Sub-group saved successfully!"
+    );
+    setTimeout(() => setPaymentSuccessMsg(""), 4000);
+  };
+
+  // Delete Sub-Group
+  const handleDeleteSubGroupClick = (subGroupId: string, subName: string) => {
+    if (
+      confirm(
+        isArabic
+          ? `هل أنت متأكد من رغبتك في حذف الدمج الفرعي (${subName})؟\n(ملاحظة: سيظل الطلاب مسجلين في هذا الملف المجمع الرئيسي ولا تُحذف أي بيانات لهم).`
+          : `Delete sub-group (${subName})? Students will remain in the parent group.`
+      )
+    ) {
+      const currentSubs = Array.isArray(group.subGroups) ? group.subGroups : [];
+      const nextSubs = currentSubs.filter(sg => sg.id !== subGroupId);
+      onUpdateGroup(group.id, { subGroups: nextSubs });
+      setPaymentSuccessMsg(isArabic ? "تم حذف الدمج الفرعي بنجاح." : "Sub-group deleted.");
+      setTimeout(() => setPaymentSuccessMsg(""), 3500);
+    }
+  };
+
+  // Sub-Group Payment Submit
+  const handleRecordSubGroupPaymentSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeSubGroupForPayment) return;
+    const amount = Number(subGroupPayAmount);
+    if (!amount || amount <= 0) return;
+
+    const subStudentObjs = groupStudents.filter(s => activeSubGroupForPayment.studentIds.includes(s.id));
+    const subFinancials = subStudentObjs.map(st => ({
+      student: st,
+      summary: calculateStudentFinancials(st, attendanceRecords)
+    }));
+
+    if (subGroupPayTarget === "auto_due") {
+      let remaining = amount;
+      const sortedByDue = [...subFinancials].sort((a, b) => b.summary.amountDue - a.summary.amountDue);
+
+      for (const item of sortedByDue) {
+        if (remaining <= 0) break;
+        if (item.summary.amountDue > 0) {
+          const allocate = Math.min(remaining, item.summary.amountDue);
+          onRecordPayment(
+            item.student.id,
+            allocate,
+            subGroupPayNotes
+              ? `${subGroupPayNotes} (سداد دمج فرعي: ${activeSubGroupForPayment.name})`
+              : `سداد من دفعة الدمج الفرعي (${activeSubGroupForPayment.name})`,
+            subGroupPayDate
+          );
+          remaining -= allocate;
+        }
+      }
+
+      if (remaining > 0 && subStudentObjs.length > 0) {
+        const firstStudent = subStudentObjs[0];
+        onRecordPayment(
+          firstStudent.id,
+          remaining,
+          subGroupPayNotes
+            ? `${subGroupPayNotes} (فائض دمج فرعي: ${activeSubGroupForPayment.name})`
+            : `رصيد فائض من دفعة الدمج الفرعي (${activeSubGroupForPayment.name})`,
+          subGroupPayDate
+        );
+      }
+    } else if (subGroupPayTarget === "equal_split") {
+      const perStudent = Math.round((amount / Math.max(1, subStudentObjs.length)) * 100) / 100;
+      subStudentObjs.forEach(st => {
+        onRecordPayment(
+          st.id,
+          perStudent,
+          subGroupPayNotes
+            ? `${subGroupPayNotes} (تقسيم دمج فرعي: ${activeSubGroupForPayment.name})`
+            : `دفعة مقسمة من الدمج الفرعي (${activeSubGroupForPayment.name})`,
+          subGroupPayDate
+        );
+      });
+    } else {
+      const targetStudent = subStudentObjs.find(s => s.id === subGroupPayTarget);
+      if (targetStudent) {
+        onRecordPayment(
+          targetStudent.id,
+          amount,
+          subGroupPayNotes || `دفعة خاصة للدمج الفرعي (${activeSubGroupForPayment.name})`,
+          subGroupPayDate
+        );
+      }
+    }
+
+    setSubGroupPayAmount(0);
+    setSubGroupPayNotes("");
+    setActiveSubGroupForPayment(null);
+    setPaymentSuccessMsg(
+      isArabic
+        ? `تم تسجيل وتوزيع الدفعة للدمج الفرعي (${activeSubGroupForPayment.name}) بنجاح!`
+        : "Sub-group payment recorded successfully!"
+    );
+    setTimeout(() => setPaymentSuccessMsg(""), 4500);
   };
 
   const handleCopyStatement = () => {
@@ -633,6 +1068,21 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
               {isArabic
                 ? `👤 ملفات الطلاب الشخصية (${groupStudents.length})`
                 : `👤 Individual Student Profiles (${groupStudents.length})`}
+            </span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab("sub_groups")}
+            className={`px-4 py-2.5 font-bold text-xs border-b-2 transition flex items-center gap-1.5 shrink-0 ${
+              activeTab === "sub_groups"
+                ? "border-purple-600 text-purple-700 bg-white shadow-2xs"
+                : "border-transparent text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            <FolderTree className="w-3.5 h-3.5 text-purple-600" />
+            <span>{isArabic ? "🗂️ المجموعات الفرعية (دمج داخل الدمج)" : "🗂️ Sub-Groups (Nested Merge)"}</span>
+            <span className="px-1.5 py-0.2 rounded-full bg-purple-100 text-purple-800 font-black text-[10px]">
+              {subGroupsList.length}
             </span>
           </button>
 
@@ -956,9 +1406,10 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
                         <input
                           type="number"
                           required
-                          min="1"
+                          min="0.01"
+                          step="any"
                           value={groupPaymentAmount || ""}
-                          onChange={e => setGroupPaymentAmount(Number(e.target.value))}
+                          onChange={e => setGroupPaymentAmount(parseFloat(e.target.value) || 0)}
                           placeholder="مثال: 500"
                           className="w-full bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-900 font-bold focus:outline-none focus:border-indigo-500 font-mono"
                         />
@@ -1134,7 +1585,17 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
                             </span>
                           </td>
                           <td className="py-2.5 px-3 text-center">
-                            <div className="flex items-center justify-center gap-1">
+                            <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEditStudentDirectly(st)}
+                                title={isArabic ? "تعديل بيانات ومواد الطالب" : "Edit Student"}
+                                className="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-[10.5px] border border-indigo-200 hover:border-indigo-300 transition flex items-center gap-1 shadow-2xs"
+                              >
+                                <Edit2 className="w-3 h-3 text-indigo-600" />
+                                <span>{isArabic ? "تعديل البيانات" : "Edit"}</span>
+                              </button>
+
                               <button
                                 onClick={() => {
                                   setSelectedStudentId(st.id);
@@ -1160,6 +1621,175 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
                   </tbody>
                 </table>
               </div>
+            </div>
+
+            {/* Sub-Groups (Nested Merging / دمج داخل الدمج) Section in Overview */}
+            <div className="bg-gradient-to-r from-purple-50/80 via-indigo-50/50 to-purple-50/80 border border-purple-200/90 rounded-2xl p-4 shadow-2xs space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-purple-100 pb-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-purple-600 text-white flex items-center justify-center font-black shadow-xs">
+                    <FolderTree className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-xs sm:text-sm font-black text-purple-950 flex items-center gap-1.5">
+                      <span>{isArabic ? "المجموعات الفرعية المدمجة (دمج داخل الدمج)" : "Sub-Groups (Nested Merging)"}</span>
+                      <span className="px-2 py-0.2 rounded-full bg-purple-200 text-purple-900 text-[10px] font-extrabold">
+                        {subGroupsList.length}
+                      </span>
+                    </h3>
+                    <p className="text-[10.5px] text-purple-700">
+                      {isArabic
+                        ? "دمج وتقسيم بعض طلاب هذا الملف المجمع في مجموعات فرعية خاصة مع حسابات وكشوفات مستقلة."
+                        : "Sub-merge specific students inside this bundle with dedicated statements and balances."}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleOpenCreateSubGroup}
+                    className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs transition shadow-2xs flex items-center gap-1.5"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>{isArabic ? "+ دمج فرعي جديد" : "+ New Sub-Group"}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("sub_groups")}
+                    className="px-3 py-1.5 rounded-xl bg-white hover:bg-purple-100 text-purple-800 border border-purple-200 font-bold text-xs transition"
+                  >
+                    <span>{isArabic ? "عرض إدارة المجموعات الفرعية" : "Manage Sub-Groups"}</span>
+                  </button>
+                </div>
+              </div>
+
+              {subGroupsList.length === 0 ? (
+                <div className="p-4 rounded-xl bg-white/90 border border-purple-150 text-center space-y-2">
+                  <p className="text-xs text-purple-950 font-bold">
+                    {isArabic
+                      ? "هل ترغب في دمج بعض طلاب هذا الملف معاً في مجموعة فرعية (مثل الأخوين الأكبر، أو طالبين يتشاركان نفس الحصص)؟"
+                      : "Would you like to nest-merge some students in this bundle together?"}
+                  </p>
+                  <p className="text-[11px] text-slate-500 max-w-xl mx-auto">
+                    {isArabic
+                      ? "خاصية «الدمج داخل الدمج» تمكنك من إصدار كشف حساب واتساب منفصل لمجموعة فرعية وتسجيل دفعات خاصة بهم مع بقائهم داخل هذا الملف المجمع."
+                      : "Nested merging allows you to generate dedicated statements and record payments for a subset of students while keeping them in this group."}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleOpenCreateSubGroup}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs transition shadow-2xs"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>{isArabic ? "إنشاء أول دمج فرعي الآن" : "Create First Sub-Group"}</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {subGroupsList.map(sg => {
+                    const sgStudents = groupStudents.filter(s => (sg.studentIds || []).includes(s.id));
+                    const sgFinancials = sgStudents.map(st => ({
+                      student: st,
+                      summary: calculateStudentFinancials(st, attendanceRecords)
+                    }));
+                    const sgAttended = sgFinancials.reduce((sum, i) => sum + i.summary.totalAttendedLessons, 0);
+                    const sgCost = sgFinancials.reduce((sum, i) => sum + i.summary.totalAccruedCost, 0);
+                    const sgPaid = sgFinancials.reduce((sum, i) => sum + i.summary.totalPaidAmount, 0);
+                    const sgNet = sgPaid - sgCost;
+                    const sgDue = sgNet < 0 ? Math.abs(sgNet) : 0;
+                    const sgCredit = sgNet > 0 ? sgNet : 0;
+
+                    return (
+                      <div
+                        key={sg.id}
+                        className="bg-white rounded-xl p-3.5 border border-purple-200/80 shadow-2xs space-y-2.5 hover:border-purple-300 transition"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-purple-600" />
+                              <h4 className="font-black text-purple-950 text-xs sm:text-sm">{sg.name}</h4>
+                              <span className="px-2 py-0.2 rounded-full bg-purple-100 text-purple-800 text-[9.5px] font-bold">
+                                {sgStudents.length} {isArabic ? "طلاب" : "students"}
+                              </span>
+                            </div>
+                            <div className="text-[10.5px] text-slate-500 mt-1 flex flex-wrap gap-1">
+                              {sgStudents.map(st => (
+                                <span key={st.id} className="px-1.5 py-0.2 rounded bg-slate-100 text-slate-700 font-medium">
+                                  👦 {st.fullName}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+
+                          <span
+                            className={`px-2 py-0.5 rounded-lg text-[10px] font-black shrink-0 ${
+                              sgDue > 0
+                                ? "bg-rose-50 text-rose-700 border border-rose-200"
+                                : sgCredit > 0
+                                ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                : "bg-blue-50 text-blue-700 border border-blue-200"
+                            }`}
+                          >
+                            {sgDue > 0
+                              ? `مستحق ${sgDue} ج.م`
+                              : sgCredit > 0
+                              ? `رصيد +${sgCredit} ج.م`
+                              : (isArabic ? "خالص ومسدد" : "Settled")}
+                          </span>
+                        </div>
+
+                        {/* Quick Action Buttons for Sub-Group */}
+                        <div className="flex items-center justify-between pt-2 border-t border-slate-100 gap-1.5 flex-wrap">
+                          <div className="text-[10.5px] text-slate-500 font-mono">
+                            {sgAttended} {isArabic ? "حصة" : "lss"} • {sgPaid} {isArabic ? "مسدد" : "paid"}
+                          </div>
+
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActiveSubGroupForPayment(sg);
+                                setSubGroupPayAmount(sgDue > 0 ? sgDue : 0);
+                                setSubGroupPayTarget("auto_due");
+                              }}
+                              className="px-2 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold text-[10.5px] transition flex items-center gap-1"
+                              title={isArabic ? "تسجيل دفعة خاصة بهذا الدمج الفرعي" : "Record Sub-Group Payment"}
+                            >
+                              <DollarSign className="w-3 h-3" />
+                              <span>{isArabic ? "سداد" : "Pay"}</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const stText = generateSubGroupStatementText(sg);
+                                handleOpenWhatsAppChooser(stText, isArabic ? `كشف حساب دمج فرعي: ${sg.name}` : `Statement: ${sg.name}`);
+                              }}
+                              className="px-2 py-1 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-800 border border-purple-200 font-bold text-[10.5px] transition flex items-center gap-1"
+                              title={isArabic ? "إرسال كشف حساب مخصص لهذا الدمج الفرعي عبر الواتساب" : "Send WhatsApp Statement"}
+                            >
+                              <MessageSquare className="w-3 h-3" />
+                              <span>{isArabic ? "واتساب" : "WhatsApp"}</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditSubGroup(sg)}
+                              className="p-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
+                              title={isArabic ? "تعديل الدمج الفرعي" : "Edit Sub-Group"}
+                            >
+                              <Edit2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* Combined Transactions History */}
@@ -1263,24 +1893,24 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <button
-                    onClick={() => setStudentForPersonalReport(activeStudent)}
-                    className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs transition shadow-md shadow-purple-600/20 flex items-center gap-1.5"
+                    type="button"
+                    onClick={() => handleOpenEditStudentDirectly(activeStudent)}
+                    className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition shadow-md shadow-indigo-600/20 flex items-center gap-1.5"
                   >
-                    <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                    <span>{isArabic ? "صفحة التقرير الشخصي المستقلة" : "Personal Report View"}</span>
+                    <Edit2 className="w-3.5 h-3.5" />
+                    <span>{isArabic ? "تعديل بيانات ومواد الطالب" : "Edit Student & Subjects"}</span>
                   </button>
 
-                  {onOpenEditStudentModal && (
-                    <button
-                      onClick={() => onOpenEditStudentModal(activeStudent)}
-                      className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition flex items-center gap-1"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                      <span>{isArabic ? "تعديل البيانات" : "Edit"}</span>
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => setStudentForPersonalReport(activeStudent)}
+                    className="px-3 py-1.5 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 font-bold text-xs transition flex items-center gap-1.5"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                    <span>{isArabic ? "تقرير المتابعة والذكاء الاصطناعي" : "Personal Report"}</span>
+                  </button>
                 </div>
               </div>
 
@@ -1361,9 +1991,10 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
                         <div className="pt-3 border-t border-slate-200 flex flex-wrap items-center gap-2">
                           <input
                             type="number"
-                            min="1"
+                            min="0.01"
+                            step="any"
                             value={singlePayAmount || ""}
-                            onChange={e => setSinglePayAmount(Number(e.target.value))}
+                            onChange={e => setSinglePayAmount(parseFloat(e.target.value) || 0)}
                             placeholder={isArabic ? "تسجيل دفعة لهذا الطالب (ج.م)..." : "Amount to record..."}
                             className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-800 font-bold focus:outline-none focus:border-indigo-500 font-mono flex-1 min-w-[150px]"
                           />
@@ -1542,7 +2173,301 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
           </div>
         )}
 
-        {/* TAB 3: MANAGE GROUP MEMBERS & SETTINGS */}
+        {/* TAB 3: SUB-GROUPS / NESTED MERGE (دمج داخل الدمج) */}
+        {activeTab === "sub_groups" && (
+          <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-5">
+            {/* Header Banner */}
+            <div className="bg-gradient-to-r from-purple-950 via-indigo-950 to-purple-900 text-white rounded-3xl p-5 shadow-lg space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-white/10 backdrop-blur-md flex items-center justify-center font-black text-xl border border-white/20">
+                    <FolderTree className="w-6 h-6 text-purple-300" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-base sm:text-lg font-black">{isArabic ? "المجموعات الفرعية المدمجة (دمج داخل الدمج)" : "Nested Sub-Groups Management"}</h2>
+                      <span className="px-2 py-0.5 rounded-full bg-purple-500/40 text-purple-200 text-[10px] font-bold border border-purple-400/30">
+                        {subGroupsList.length} {isArabic ? "مجموعات فرعية" : "sub-groups"}
+                      </span>
+                    </div>
+                    <p className="text-xs text-purple-200/80 mt-0.5 max-w-2xl">
+                      {isArabic
+                        ? "خاصية مرنة تتيح لك تقسيم أو دمج بعض طلاب هذا الملف المجمع معاً في مجموعات فرعية خاصة، لإصدار كشوفات حساب واتساب مخصصة لهم، ومتابعة ماليتهم وتسجيل دفعاتهم بشكل مستقل دون التأثير على الملف الرئيسي."
+                        : "Merge and partition specific students within this group into dedicated sub-groups for custom statements, focused payments, and tailored financial tracking."}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleOpenCreateSubGroup}
+                  className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs transition shadow-md shadow-emerald-500/30 flex items-center gap-2"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>{isArabic ? "+ إنشاء دمج فرعي جديد" : "+ Create Sub-Group"}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* List of Sub-Groups or Empty State */}
+            {subGroupsList.length === 0 ? (
+              <div className="bg-white border border-slate-200 rounded-3xl p-8 text-center space-y-4 shadow-2xs max-w-2xl mx-auto my-6">
+                <div className="w-16 h-16 rounded-3xl bg-purple-50 text-purple-600 flex items-center justify-center mx-auto shadow-inner">
+                  <FolderTree className="w-8 h-8" />
+                </div>
+                <div className="space-y-1">
+                  <h3 className="text-sm sm:text-base font-black text-slate-900">
+                    {isArabic ? "لا توجد مجموعات فرعية مدمجة بعد في هذا الملف" : "No nested sub-groups created yet"}
+                  </h3>
+                  <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
+                    {isArabic
+                      ? "يمكنك الآن دمج طالبين أو أكثر من طلاب هذا الملف (مثلاً الأخوين الكبار أو طلاب نفس المادة) لإرسال كشف حساب مالي مستقل لولي أمرهم أو جروبهم وتسجيل مدفوعات مخصصة لهم."
+                      : "You can group two or more students together inside this bundle to dispatch targeted WhatsApp statements and record dedicated payments."}
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleOpenCreateSubGroup}
+                  className="px-5 py-2.5 rounded-2xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs transition shadow-md shadow-purple-600/20 inline-flex items-center gap-2"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>{isArabic ? "إنشاء أول دمج فرعي الآن" : "Create First Sub-Group"}</span>
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs sm:text-sm font-black text-slate-900 flex items-center gap-2">
+                    <FolderTree className="w-4 h-4 text-purple-600" />
+                    <span>{isArabic ? `المجموعات الفرعية الحالية (${subGroupsList.length})` : `Active Sub-Groups (${subGroupsList.length})`}</span>
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={handleOpenCreateSubGroup}
+                    className="px-3 py-1.5 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 font-bold text-xs transition flex items-center gap-1.5"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>{isArabic ? "+ إضافة دمج فرعي" : "+ Add Sub-Group"}</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  {subGroupsList.map(sg => {
+                    const sgStudents = groupStudents.filter(s => (sg.studentIds || []).includes(s.id));
+                    const sgFinancials = sgStudents.map(st => ({
+                      student: st,
+                      summary: calculateStudentFinancials(st, attendanceRecords)
+                    }));
+                    const sgAttended = sgFinancials.reduce((sum, i) => sum + i.summary.totalAttendedLessons, 0);
+                    const sgCost = sgFinancials.reduce((sum, i) => sum + i.summary.totalAccruedCost, 0);
+                    const sgPaid = sgFinancials.reduce((sum, i) => sum + i.summary.totalPaidAmount, 0);
+                    const sgNet = sgPaid - sgCost;
+                    const sgDue = sgNet < 0 ? Math.abs(sgNet) : 0;
+                    const sgCredit = sgNet > 0 ? sgNet : 0;
+
+                    return (
+                      <div
+                        key={sg.id}
+                        className="bg-white rounded-3xl p-5 border border-slate-200 shadow-2xs space-y-4 hover:border-purple-300 transition flex flex-col justify-between"
+                      >
+                        <div className="space-y-3">
+                          {/* Card Header */}
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-10 h-10 rounded-2xl bg-purple-100 text-purple-800 flex items-center justify-center font-black text-sm shrink-0">
+                                🗂️
+                              </div>
+                              <div>
+                                <h4 className="font-black text-slate-900 text-sm sm:text-base flex items-center gap-2">
+                                  <span>{sg.name}</span>
+                                  <span className="px-2 py-0.2 rounded-full bg-purple-50 text-purple-800 border border-purple-200 text-[10px] font-bold">
+                                    {sgStudents.length} {isArabic ? "طلاب" : "students"}
+                                  </span>
+                                </h4>
+                                <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-2 flex-wrap">
+                                  {sg.sharedParentContact && (
+                                    <span className="font-mono text-emerald-700 dir-ltr">
+                                      📱 {sg.sharedParentContact}
+                                    </span>
+                                  )}
+                                  {sg.sharedGroupLink && (
+                                    <a
+                                      href={sg.sharedGroupLink}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-indigo-600 hover:underline flex items-center gap-0.5 font-bold"
+                                    >
+                                      <Link className="w-2.5 h-2.5" />
+                                      <span>{isArabic ? "رابط الجروب" : "Group Link"}</span>
+                                    </a>
+                                  )}
+                                  {sg.createdAt && (
+                                    <span className="text-slate-400">
+                                      📅 {new Date(sg.createdAt).toLocaleDateString(isArabic ? "ar-EG" : "en-US")}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            <span
+                              className={`px-3 py-1 rounded-xl text-xs font-black shrink-0 ${
+                                sgDue > 0
+                                  ? "bg-rose-50 text-rose-700 border border-rose-200"
+                                  : sgCredit > 0
+                                  ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                  : "bg-blue-50 text-blue-700 border border-blue-200"
+                              }`}
+                            >
+                              {sgDue > 0
+                                ? `مستحق ${sgDue} ج.م`
+                                : sgCredit > 0
+                                ? `رصيد +${sgCredit} ج.م`
+                                : (isArabic ? "مسدد بالكامل" : "Settled")}
+                            </span>
+                          </div>
+
+                          {/* Notes if present */}
+                          {sg.notes && (
+                            <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-150 text-xs text-slate-700">
+                              <span className="font-bold text-slate-500 ml-1">{isArabic ? "ملاحظة:" : "Note:"}</span>
+                              {sg.notes}
+                            </div>
+                          )}
+
+                          {/* Members List inside Sub-Group */}
+                          <div className="space-y-1.5">
+                            <span className="text-[11px] font-bold text-slate-500 block">
+                              {isArabic ? "الطلاب المدمجون في هذه المجموعة الفرعية:" : "Sub-group Members:"}
+                            </span>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              {sgStudents.map(st => {
+                                const stFin = calculateStudentFinancials(st, attendanceRecords);
+                                return (
+                                  <div
+                                    key={st.id}
+                                    className="p-2 rounded-xl bg-slate-50/80 border border-slate-200 flex items-center justify-between text-xs"
+                                  >
+                                    <div className="flex items-center gap-1.5 min-w-0">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-purple-500 shrink-0" />
+                                      <span className="font-bold text-slate-900 truncate">{st.fullName}</span>
+                                    </div>
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      <div className="text-[10.5px] font-mono mr-1">
+                                        {stFin.amountDue > 0 ? (
+                                          <span className="text-rose-600 font-bold">-{stFin.amountDue}</span>
+                                        ) : stFin.creditRemaining > 0 ? (
+                                          <span className="text-emerald-600 font-bold">+{stFin.creditRemaining}</span>
+                                        ) : (
+                                          <span className="text-slate-400">0</span>
+                                        )}
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenEditStudentDirectly(st)}
+                                        title={isArabic ? `تعديل بيانات الطالب (${st.fullName})` : `Edit ${st.fullName}`}
+                                        className="p-1 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition"
+                                      >
+                                        <Edit2 className="w-3 h-3" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          {/* Financial 3-Metric Summary Bar */}
+                          <div className="grid grid-cols-3 gap-2 p-2.5 rounded-2xl bg-purple-50/50 border border-purple-100 text-center text-xs">
+                            <div>
+                              <span className="text-[10px] text-purple-700 font-bold block">{isArabic ? "الحصص" : "Lessons"}</span>
+                              <span className="font-black text-purple-950">{sgAttended} {isArabic ? "حصة" : "lss"}</span>
+                            </div>
+                            <div>
+                              <span className="text-[10px] text-purple-700 font-bold block">{isArabic ? "المسدد" : "Paid"}</span>
+                              <span className="font-black text-emerald-700">{sgPaid} ج.م</span>
+                            </div>
+                            <div>
+                              <span className="text-[10px] text-purple-700 font-bold block">{isArabic ? "المطلوب" : "Cost"}</span>
+                              <span className="font-black text-slate-800">{sgCost} ج.م</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Action Bar */}
+                        <div className="flex items-center justify-between pt-3 border-t border-slate-100 gap-2 flex-wrap">
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActiveSubGroupForPayment(sg);
+                                setSubGroupPayAmount(sgDue > 0 ? sgDue : 0);
+                                setSubGroupPayTarget("auto_due");
+                              }}
+                              className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition shadow-2xs flex items-center gap-1.5"
+                            >
+                              <DollarSign className="w-3.5 h-3.5" />
+                              <span>{isArabic ? "تسجيل دفعة للدمج" : "Record Payment"}</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const stText = generateSubGroupStatementText(sg);
+                                handleOpenWhatsAppChooser(stText, isArabic ? `كشف حساب دمج فرعي: ${sg.name}` : `Statement: ${sg.name}`);
+                              }}
+                              className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs transition shadow-2xs flex items-center gap-1.5"
+                            >
+                              <MessageSquare className="w-3.5 h-3.5" />
+                              <span>{isArabic ? "كشف واتساب" : "WhatsApp"}</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const stText = generateSubGroupStatementText(sg);
+                                navigator.clipboard.writeText(stText);
+                                setPaymentSuccessMsg(isArabic ? `تم نسخ كشف حساب (${sg.name}) للحافظة بنجاح!` : "Statement copied!");
+                                setTimeout(() => setPaymentSuccessMsg(""), 3500);
+                              }}
+                              className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
+                              title={isArabic ? "نسخ كشف حساب هذا الدمج الفرعي" : "Copy Statement"}
+                            >
+                              <Copy className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditSubGroup(sg)}
+                              className="p-2 rounded-xl bg-slate-100 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 border border-slate-200 transition"
+                              title={isArabic ? "تعديل بيانات وأعضاء الدمج الفرعي" : "Edit Sub-Group"}
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteSubGroupClick(sg.id, sg.name)}
+                              className="p-2 rounded-xl bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-700 border border-slate-200 transition"
+                              title={isArabic ? "حذف هذا الدمج الفرعي (مع بقاء الطلاب في الملف الأساسي)" : "Delete Sub-Group"}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* TAB 4: MANAGE GROUP MEMBERS & SETTINGS */}
         {activeTab === "manage" && (
           <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-5 text-xs">
             {/* Edit Group Info Box */}
@@ -1652,24 +2577,35 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
                       <div className="text-[10.5px] text-slate-500 mt-0.5">📚 {st.subject}</div>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (
-                          confirm(
-                            isArabic
-                              ? `هل تريد فك تجميع الطالب (${st.fullName}) وإعادته كملف مستقل في القائمة الرئيسية؟`
-                              : `Remove ${st.fullName} from this group?`
-                          )
-                        ) {
-                          onRemoveStudentFromGroup(group.id, st.id);
-                        }
-                      }}
-                      className="px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-rose-600 border border-slate-200 hover:border-rose-200 transition font-bold text-[10.5px] flex items-center gap-1"
-                    >
-                      <UserX className="w-3.5 h-3.5" />
-                      <span>{isArabic ? "فك التجميع وإخراجه" : "Unlink Student"}</span>
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEditStudentDirectly(st)}
+                        className="px-2.5 py-1 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 hover:text-indigo-800 border border-indigo-200 transition font-bold text-[10.5px] flex items-center gap-1"
+                      >
+                        <Edit2 className="w-3 h-3" />
+                        <span>{isArabic ? "تعديل البيانات" : "Edit"}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (
+                            confirm(
+                              isArabic
+                                ? `هل تريد فك تجميع الطالب (${st.fullName}) وإعادته كملف مستقل في القائمة الرئيسية؟`
+                                : `Remove ${st.fullName} from this group?`
+                            )
+                          ) {
+                            onRemoveStudentFromGroup(group.id, st.id);
+                          }
+                        }}
+                        className="px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-rose-600 border border-slate-200 hover:border-rose-200 transition font-bold text-[10.5px] flex items-center gap-1"
+                      >
+                        <UserX className="w-3.5 h-3.5" />
+                        <span>{isArabic ? "فك التجميع" : "Unlink"}</span>
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1765,6 +2701,345 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
                 <Trash2 className="w-3.5 h-3.5" />
                 <span>{isArabic ? "فك الملف المجمع" : "Disband Group"}</span>
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Create or Edit Sub-Group (دمج داخل الدمج) */}
+        {showCreateSubGroupModal && (
+          <div className="fixed inset-0 z-70 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+            <div className="bg-white border border-slate-200 rounded-3xl p-5 max-w-lg w-full shadow-2xl animate-in fade-in zoom-in-95 duration-150 my-4 flex flex-col space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-2xl bg-purple-100 text-purple-700 flex items-center justify-center font-black">
+                    <FolderTree className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm sm:text-base font-black text-slate-900">
+                      {editingSubGroupId
+                        ? (isArabic
+                            ? `تعديل الدمج الفرعي (${subGroupsList.find(s => s.id === editingSubGroupId)?.name || ""})`
+                            : `Edit Sub-Group (${subGroupsList.find(s => s.id === editingSubGroupId)?.name || ""})`)
+                        : (isArabic ? "إنشاء مجموعة فرعية جديدة (دمج داخل الدمج)" : "Create New Sub-Group (Nested Merge)")}
+                    </h3>
+                    <p className="text-[11px] text-slate-500">
+                      {isArabic
+                        ? `داخل الملف المجمع: ${group.name}`
+                        : `Inside Group: ${group.name}`}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowCreateSubGroupModal(false)}
+                  className="text-slate-400 hover:text-slate-700 p-1.5 rounded-xl hover:bg-slate-100 transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveSubGroupSubmit} className="space-y-4">
+                {/* Sub-Group Name */}
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1 text-xs">
+                    {isArabic ? "اسم المجموعة الفرعية (الدمج الفرعي) *" : "Sub-Group Name *"}
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={subGroupNameVal}
+                    onChange={e => setSubGroupNameVal(e.target.value)}
+                    placeholder={isArabic ? "مثال: الأخوين الكبار، طلاب الرياضيات المتقدمة..." : "e.g., Senior Siblings, Advanced Math..."}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 focus:outline-none focus:border-purple-500"
+                  />
+                </div>
+
+                {/* Student Selection (Checkboxes) */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block font-bold text-slate-700 text-xs">
+                      {isArabic ? "اختر الطلاب المطلوب دمجهم معاً *" : "Select Students to Merge *"}
+                    </label>
+                    <div className="flex items-center gap-2 text-[10.5px]">
+                      <button
+                        type="button"
+                        onClick={() => setSubGroupStudentIdsVal(groupStudents.map(s => s.id))}
+                        className="text-purple-600 font-bold hover:underline"
+                      >
+                        {isArabic ? "تحديد الكل" : "Select All"}
+                      </button>
+                      <span className="text-slate-300">|</span>
+                      <button
+                        type="button"
+                        onClick={() => setSubGroupStudentIdsVal([])}
+                        className="text-slate-500 font-bold hover:underline"
+                      >
+                        {isArabic ? "إلغاء التحديد" : "Deselect All"}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 space-y-2 max-h-48 overflow-y-auto">
+                    {groupStudents.map(st => {
+                      const isChecked = subGroupStudentIdsVal.includes(st.id);
+                      return (
+                        <label
+                          key={st.id}
+                          className={`flex items-center justify-between p-2 rounded-xl border transition cursor-pointer text-xs ${
+                            isChecked
+                              ? "bg-purple-50/80 border-purple-300 text-purple-950 font-bold"
+                              : "bg-white border-slate-200 text-slate-700 hover:bg-slate-100"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={e => {
+                                if (e.target.checked) {
+                                  setSubGroupStudentIdsVal(prev => [...prev, st.id]);
+                                } else {
+                                  setSubGroupStudentIdsVal(prev => prev.filter(id => id !== st.id));
+                                }
+                              }}
+                              className="w-4 h-4 rounded text-purple-600 focus:ring-purple-500"
+                            />
+                            <div>
+                              <div className="font-bold">{st.fullName}</div>
+                              <div className="text-[10px] text-slate-500 font-normal">📚 {st.subject}</div>
+                            </div>
+                          </div>
+
+                          {st.academicYear && (
+                            <span className="px-1.5 py-0.2 rounded bg-amber-50 text-amber-800 text-[9.5px] font-bold border border-amber-200">
+                              {st.academicYear}
+                            </span>
+                          )}
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[10.5px] text-slate-500 mt-1">
+                    {isArabic
+                      ? `تم تحديد ${subGroupStudentIdsVal.length} من أصل ${groupStudents.length} طلاب.`
+                      : `Selected ${subGroupStudentIdsVal.length} of ${groupStudents.length} students.`}
+                  </p>
+                </div>
+
+                {/* Optional Contact & WhatsApp Link */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                      {isArabic ? "رقم ولي الأمر الخاص بهذه المجموعة الفرعية" : "Sub-Group Contact (WhatsApp)"}
+                    </label>
+                    <input
+                      type="text"
+                      value={subGroupContactVal}
+                      onChange={e => setSubGroupContactVal(e.target.value)}
+                      placeholder="+201000000000"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-mono font-bold text-slate-900 focus:outline-none focus:border-purple-500 dir-ltr text-right"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                      {isArabic ? "رابط الجروب الخاص بهذه المجموعة" : "Sub-Group WhatsApp Link"}
+                    </label>
+                    <input
+                      type="url"
+                      value={subGroupLinkVal}
+                      onChange={e => setSubGroupLinkVal(e.target.value)}
+                      placeholder="https://chat.whatsapp.com/..."
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-mono text-slate-900 focus:outline-none focus:border-purple-500 dir-ltr text-right"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                      {isArabic ? "ملاحظات إضافية" : "Sub-Group Notes"}
+                    </label>
+                    <input
+                      type="text"
+                      value={subGroupNotesVal}
+                      onChange={e => setSubGroupNotesVal(e.target.value)}
+                      placeholder={isArabic ? "مثال: محاسبة خاصة شهرياً..." : "Additional notes..."}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-purple-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Form Buttons */}
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateSubGroupModal(false)}
+                    className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition"
+                  >
+                    {isArabic ? "إلغاء" : "Cancel"}
+                  </button>
+
+                  <button
+                    type="submit"
+                    className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs transition shadow-md shadow-purple-600/20 flex items-center gap-1.5"
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>{isArabic ? "حفظ الدمج الفرعي" : "Save Sub-Group"}</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Record Payment for Sub-Group (سداد دفعة للدمج الفرعي) */}
+        {activeSubGroupForPayment && (
+          <div className="fixed inset-0 z-70 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+            <div className="bg-white border border-slate-200 rounded-3xl p-5 max-w-md w-full shadow-2xl animate-in fade-in zoom-in-95 duration-150 my-4 flex flex-col space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-black">
+                    <DollarSign className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm sm:text-base font-black text-slate-900">
+                      {isArabic ? "تسجيل دفعة للدمج الفرعي" : "Record Sub-Group Payment"}
+                    </h3>
+                    <p className="text-[11px] text-purple-700 font-bold">
+                      {activeSubGroupForPayment.name}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveSubGroupForPayment(null)}
+                  className="text-slate-400 hover:text-slate-700 p-1.5 rounded-xl hover:bg-slate-100 transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Quick Summary of Sub-Group Financials */}
+              {(() => {
+                const sgStudents = groupStudents.filter(s => (activeSubGroupForPayment.studentIds || []).includes(s.id));
+                const sgFinancials = sgStudents.map(st => ({
+                  student: st,
+                  summary: calculateStudentFinancials(st, attendanceRecords)
+                }));
+                const sgCost = sgFinancials.reduce((sum, i) => sum + i.summary.totalAccruedCost, 0);
+                const sgPaid = sgFinancials.reduce((sum, i) => sum + i.summary.totalPaidAmount, 0);
+                const sgNet = sgPaid - sgCost;
+                const sgDue = sgNet < 0 ? Math.abs(sgNet) : 0;
+
+                return (
+                  <div className="p-3 rounded-2xl bg-emerald-50/70 border border-emerald-200 text-xs space-y-2">
+                    <div className="flex items-center justify-between font-bold">
+                      <span className="text-emerald-900">{isArabic ? "إجمالي المستحق على هذا الدمج الفرعي:" : "Total Due for Sub-Group:"}</span>
+                      <span className="font-mono font-black text-emerald-800 text-sm">{sgDue} ج.م</span>
+                    </div>
+
+                    <div className="text-[10.5px] text-slate-600 flex flex-wrap gap-1 pt-1 border-t border-emerald-200/50">
+                      <span className="font-bold text-slate-500">{isArabic ? "الطلاب المشمولون:" : "Included:"}</span>
+                      {sgStudents.map(st => (
+                        <span key={st.id} className="bg-white px-1.5 py-0.2 rounded border border-emerald-200 font-medium">
+                          {st.fullName}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <form onSubmit={handleRecordSubGroupPaymentSubmit} className="space-y-3.5">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1 text-xs">
+                    {isArabic ? "قيمة المبلغ المسدد (ج.م) *" : "Payment Amount (EGP) *"}
+                  </label>
+                  <input
+                    type="number"
+                    min="0.01"
+                    step="any"
+                    required
+                    value={subGroupPayAmount || ""}
+                    onChange={e => setSubGroupPayAmount(parseFloat(e.target.value) || 0)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-mono font-black text-slate-900 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1 text-xs">
+                    {isArabic ? "طريقة توزيع الدفعة بين طلاب الدمج الفرعي:" : "Allocation Strategy:"}
+                  </label>
+                  <select
+                    value={subGroupPayTarget}
+                    onChange={e => setSubGroupPayTarget(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value="auto_due">
+                      {isArabic ? "⚡ توزيع ذكي تلقائي (سداد المستحقات أولاً ثم تقسيم الفائض)" : "⚡ Smart Auto-Allocation"}
+                    </option>
+                    <option value="equal">
+                      {isArabic ? "⚖️ تقسيم المبلغ بالتساوي بين طلاب هذا الدمج الفرعي" : "⚖️ Split Equally"}
+                    </option>
+                    {groupStudents
+                      .filter(s => (activeSubGroupForPayment.studentIds || []).includes(s.id))
+                      .map(st => (
+                        <option key={st.id} value={st.id}>
+                          {isArabic ? `👤 تخصيص المبلغ بالكامل لـ (${st.fullName})` : `👤 Allocate to ${st.fullName}`}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                      {isArabic ? "تاريخ السداد" : "Date"}
+                    </label>
+                    <input
+                      type="date"
+                      value={subGroupPayDate}
+                      onChange={e => setSubGroupPayDate(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                      {isArabic ? "ملاحظات الدفعة" : "Notes"}
+                    </label>
+                    <input
+                      type="text"
+                      value={subGroupPayNotes}
+                      onChange={e => setSubGroupPayNotes(e.target.value)}
+                      placeholder={isArabic ? "مثال: تحويل إنستاباي..." : "Payment notes..."}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setActiveSubGroupForPayment(null)}
+                    className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition"
+                  >
+                    {isArabic ? "إلغاء" : "Cancel"}
+                  </button>
+
+                  <button
+                    type="submit"
+                    disabled={subGroupPayAmount <= 0}
+                    className={`px-5 py-2 rounded-xl font-bold text-xs transition flex items-center gap-1.5 ${
+                      subGroupPayAmount > 0
+                        ? "bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-600/20"
+                        : "bg-slate-200 text-slate-400 cursor-not-allowed"
+                    }`}
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>{isArabic ? "تأكيد وتسجيل الدفعة" : "Confirm Payment"}</span>
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         )}
@@ -2058,6 +3333,398 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
                   <span>{copiedStatement ? (isArabic ? "تم نسخ النص كاملاً للحافظة!" : "Text Copied!") : (isArabic ? "نسخ النص كاملاً للحافظة" : "Copy Full Text")}</span>
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Direct Edit Merged Student Profile & Subjects (تعديل بيانات الطالب داخل الملف المجمع) */}
+        {editingStudent && (
+          <div className="fixed inset-0 z-[85] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+            <div className="bg-white border border-slate-200 rounded-3xl p-5 max-w-2xl w-full shadow-2xl animate-in fade-in zoom-in-95 duration-150 my-6 flex flex-col max-h-[90vh]">
+              {/* Header */}
+              <div className="flex items-center justify-between pb-4 border-b border-slate-100 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-indigo-100 text-indigo-700 flex items-center justify-center font-black">
+                    <Edit2 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm sm:text-base font-black text-slate-900">
+                      {isArabic ? `تعديل بيانات الطالب (${editingStudent.fullName})` : `Edit Student Profile: ${editingStudent.fullName}`}
+                    </h3>
+                    <p className="text-[11px] text-slate-500">
+                      {isArabic
+                        ? `طالب مدمج داخل الملف المجمع: ${group.name}`
+                        : `Merged student inside group: ${group.name}`}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditingStudent(null)}
+                  className="text-slate-400 hover:text-slate-700 p-2 rounded-xl hover:bg-slate-100 transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Form Content */}
+              <form onSubmit={handleSaveEditStudentDirectly} className="overflow-y-auto py-4 space-y-4 flex-1 text-xs">
+                {/* Section 1: Basic Information */}
+                <div className="bg-slate-50/70 p-4 rounded-2xl border border-slate-200 space-y-3">
+                  <h4 className="font-black text-slate-900 text-xs flex items-center gap-1.5 border-b border-slate-200 pb-2">
+                    <Users className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>{isArabic ? "البيانات الأساسية ومعلومات التواصل" : "Basic Information & Contact"}</span>
+                  </h4>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                        {isArabic ? "اسم الطالب بالكامل *" : "Full Name *"}
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={editFullName}
+                        onChange={e => setEditFullName(e.target.value)}
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                        {isArabic ? "رقم ولي الأمر (واتساب) *" : "Parent WhatsApp Number *"}
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={editParentContact}
+                        onChange={e => setEditParentContact(e.target.value)}
+                        placeholder="+201000000000"
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono font-bold text-slate-900 focus:outline-none focus:border-indigo-500 dir-ltr text-right"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                        {isArabic ? "رقم هاتف الطالب (اختياري)" : "Student Phone (Optional)"}
+                      </label>
+                      <input
+                        type="text"
+                        value={editStudentPhone}
+                        onChange={e => setEditStudentPhone(e.target.value)}
+                        placeholder="+201000000000"
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono text-slate-900 focus:outline-none focus:border-indigo-500 dir-ltr text-right"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                        {isArabic ? "كود / رقم قيد الطالب" : "Student ID / Code"}
+                      </label>
+                      <input
+                        type="text"
+                        value={editStudentNumber}
+                        onChange={e => setEditStudentNumber(e.target.value)}
+                        placeholder="مثال: 1042"
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono text-slate-900 focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                        {isArabic ? "الصف الدراسي" : "Academic Grade"}
+                      </label>
+                      <select
+                        value={editAcademicYear}
+                        onChange={e => setEditAcademicYear(e.target.value)}
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-indigo-500"
+                      >
+                        <option value="">{isArabic ? "-- اختر الصف الدراسي --" : "-- Select Grade --"}</option>
+                        {COMMON_GRADES.map(g => (
+                          <option key={g} value={g}>{g}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                        {isArabic ? "المنهج الدراسي" : "Curriculum"}
+                      </label>
+                      <select
+                        value={editCurriculum}
+                        onChange={e => setEditCurriculum(e.target.value)}
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-indigo-500"
+                      >
+                        <option value="">{isArabic ? "-- اختر المنهج الدراسي --" : "-- Select Curriculum --"}</option>
+                        {COMMON_CURRICULUMS.map(c => (
+                          <option key={c.label} value={c.label}>{c.flag} {c.label}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                        {isArabic ? "حالة الطالب" : "Student Status"}
+                      </label>
+                      <select
+                        value={editStudentStatus}
+                        onChange={e => setEditStudentStatus(e.target.value as StudentStatus)}
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 focus:outline-none focus:border-indigo-500"
+                      >
+                        <option value="active">🟢 {isArabic ? "نشط ومستمر" : "Active"}</option>
+                        <option value="stopped">🔴 {isArabic ? "متوقف مؤقتاً" : "Stopped / Inactive"}</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                        {isArabic ? "رابط جروب الواتساب الخاص بالطالب" : "Student WhatsApp Group Link"}
+                      </label>
+                      <input
+                        type="url"
+                        value={editWhatsappGroupLink}
+                        onChange={e => setEditWhatsappGroupLink(e.target.value)}
+                        placeholder="https://chat.whatsapp.com/..."
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono text-slate-900 focus:outline-none focus:border-indigo-500 dir-ltr text-right"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section 2: Subjects & Pricing Plans */}
+                <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs space-y-3">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                    <h4 className="font-black text-slate-900 text-xs flex items-center gap-1.5">
+                      <BookOpen className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>{isArabic ? "المواد والاشتراكات وأسعار الحصص" : "Subjects & Tuition Rates"}</span>
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={handleAddEditSubjectField}
+                      className="px-2.5 py-1 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-[11px] transition flex items-center gap-1 border border-indigo-200"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>{isArabic ? "+ إضافة مادة أخرى" : "+ Add Subject"}</span>
+                    </button>
+                  </div>
+
+                  <div className="space-y-3">
+                    {editStudentSubjects.map((sub, sIdx) => (
+                      <div
+                        key={sub.id || sIdx}
+                        className="p-3.5 rounded-2xl bg-slate-50/90 border border-slate-200 space-y-3 relative"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-black text-indigo-950 text-xs flex items-center gap-1">
+                            <span>📚 {isArabic ? `المادة ${sIdx + 1}` : `Subject ${sIdx + 1}`}</span>
+                          </span>
+
+                          {editStudentSubjects.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveEditSubjectField(sIdx)}
+                              className="text-rose-600 hover:bg-rose-50 p-1 rounded-lg transition"
+                              title={isArabic ? "حذف هذه المادة" : "Remove"}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                          {/* Subject Name */}
+                          <div>
+                            <label className="block font-bold text-slate-700 mb-1 text-[10.5px]">
+                              {isArabic ? "اسم المادة *" : "Subject Name *"}
+                            </label>
+                            <input
+                              type="text"
+                              required
+                              value={sub.subject}
+                              onChange={e => handleUpdateEditSubjectField(sIdx, { subject: e.target.value })}
+                              placeholder={isArabic ? "مثال: الرياضيات" : "e.g., Math"}
+                              className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-bold text-slate-900 focus:outline-none focus:border-indigo-500"
+                            />
+                            {/* Suggestions */}
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {COMMON_SUBJECT_SUGGESTIONS.slice(0, 4).map(sugg => (
+                                <button
+                                  key={sugg}
+                                  type="button"
+                                  onClick={() => handleUpdateEditSubjectField(sIdx, { subject: sugg })}
+                                  className="text-[9.5px] px-1.5 py-0.2 rounded bg-slate-200/80 hover:bg-indigo-100 text-slate-700 transition"
+                                >
+                                  {sugg}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Study Type */}
+                          <div>
+                            <label className="block font-bold text-slate-700 mb-1 text-[10.5px]">
+                              {isArabic ? "نوع الدراسة" : "Study Type"}
+                            </label>
+                            <select
+                              value={sub.studyType}
+                              onChange={e => handleUpdateEditSubjectField(sIdx, { studyType: e.target.value as any })}
+                              className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-indigo-500"
+                            >
+                              <option value="private">👤 {isArabic ? "درس خاص (فردي)" : "Private (1-on-1)"}</option>
+                              <option value="group">👥 {isArabic ? "مجموعة (سنتر / جماعي)" : "Group"}</option>
+                            </select>
+                          </div>
+
+                          {/* Billing Type */}
+                          <div>
+                            <label className="block font-bold text-slate-700 mb-1 text-[10.5px]">
+                              {isArabic ? "نظام المحاسبة" : "Billing Mode"}
+                            </label>
+                            <select
+                              value={sub.billingType || "monthly"}
+                              onChange={e => handleUpdateEditSubjectField(sIdx, { billingType: e.target.value as any })}
+                              className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-indigo-500"
+                            >
+                              <option value="monthly">📅 {isArabic ? "اشتراك شهري كامل" : "Full Monthly"}</option>
+                              <option value="per_lesson">💵 {isArabic ? "محاسبة بالحصة المنفذة" : "Per Lesson"}</option>
+                              <option value="monthly_elapsed_lessons">🗓️ {isArabic ? "حصص الشهر المنقضية" : "Elapsed Lessons"}</option>
+                              <option value="monthly_fixed_lessons">🎯 {isArabic ? "باقة حصص شهرية محددة" : "Fixed Lessons Package"}</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        {/* Pricing inputs */}
+                        <div className="space-y-2 pt-1">
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                            <div>
+                              <label className="block font-bold text-slate-700 mb-1 text-[10.5px]">
+                                {isArabic ? "سعر الشهر الكامل (ج.م)" : "Monthly Cost"}
+                              </label>
+                              <input
+                                type="number"
+                                min="0"
+                                step="any"
+                                value={sub.monthlyCost || 0}
+                                onChange={e => {
+                                  const mCost = parseFloat(e.target.value) || 0;
+                                  const count = sub.lessonsPerMonth || 4;
+                                  const lCost = Math.max(0, Number((mCost / count).toFixed(2)));
+                                  handleUpdateEditSubjectField(sIdx, {
+                                    monthlyCost: mCost,
+                                    lessonCost: (sub.billingType === "monthly" || sub.billingType === "monthly_fixed_lessons" || !sub.billingType) ? lCost : sub.lessonCost
+                                  });
+                                }}
+                                className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-mono font-bold text-slate-900 focus:outline-none focus:border-indigo-500"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block font-bold text-slate-700 mb-1 text-[10.5px]">
+                                {isArabic ? "سعر الحصة (ج.م)" : "Lesson Cost"}
+                              </label>
+                              <input
+                                type="number"
+                                min="0"
+                                step="any"
+                                value={sub.lessonCost}
+                                onChange={e => {
+                                  const lCost = parseFloat(e.target.value) || 0;
+                                  const count = sub.lessonsPerMonth || 4;
+                                  handleUpdateEditSubjectField(sIdx, {
+                                    lessonCost: lCost,
+                                    monthlyCost: sub.billingType === "monthly_fixed_lessons" ? Number((lCost * count).toFixed(2)) : sub.monthlyCost
+                                  });
+                                }}
+                                className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-mono font-bold text-slate-900 focus:outline-none focus:border-indigo-500"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block font-bold text-slate-700 mb-1 text-[10.5px]">
+                                {isArabic ? "الحصص شهرياً" : "Lessons / Month"}
+                              </label>
+                              <input
+                                type="number"
+                                min="1"
+                                value={sub.lessonsPerMonth || 4}
+                                onChange={e => {
+                                  const count = Math.max(1, Number(e.target.value) || 1);
+                                  const mCost = sub.monthlyCost || 0;
+                                  const lCost = mCost > 0 ? Math.max(0, Number((mCost / count).toFixed(2))) : sub.lessonCost;
+                                  handleUpdateEditSubjectField(sIdx, {
+                                    lessonsPerMonth: count,
+                                    lessonCost: (sub.billingType === "monthly" || sub.billingType === "monthly_fixed_lessons") && mCost > 0 ? lCost : sub.lessonCost
+                                  });
+                                }}
+                                className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-mono text-slate-900 focus:outline-none focus:border-indigo-500"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block font-bold text-slate-700 mb-1 text-[10.5px]">
+                                {isArabic ? "مدة الحصة (دقيقة)" : "Duration (min)"}
+                              </label>
+                              <input
+                                type="number"
+                                min="15"
+                                value={sub.defaultDurationMinutes || 60}
+                                onChange={e => handleUpdateEditSubjectField(sIdx, { defaultDurationMinutes: Number(e.target.value) || 60 })}
+                                className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-mono text-slate-900 focus:outline-none focus:border-indigo-500"
+                              />
+                            </div>
+                          </div>
+
+                          {(sub.monthlyCost && sub.monthlyCost > 0 && sub.lessonsPerMonth && sub.lessonsPerMonth > 0) && (
+                            <div className="flex items-center justify-between gap-2 bg-indigo-50/70 px-3 py-1.5 rounded-xl border border-indigo-200 text-xs">
+                              <span className="font-bold text-indigo-900 text-[11px]">
+                                {isArabic ? "➗ ناتج تقسيم سعر الشهر على عدد الحصص:" : "Monthly Split Rate:"}
+                              </span>
+                              <span className="font-black text-indigo-700 bg-white px-2 py-0.5 rounded-lg border border-indigo-200 text-[11px]">
+                                = {Number((sub.monthlyCost / sub.lessonsPerMonth).toFixed(2))} {isArabic ? "ج.م / حصة" : "EGP / lesson"} ({sub.monthlyCost} ÷ {sub.lessonsPerMonth})
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Section 3: Notes */}
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1 text-[11px]">
+                    {isArabic ? "ملاحظات إضافية عن الطالب" : "Additional Notes"}
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={editNotes}
+                    onChange={e => setEditNotes(e.target.value)}
+                    placeholder={isArabic ? "أي ملاحظات خاصة بالطالب أو الاتفاق المالي..." : "Any special instructions or notes..."}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-900 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+
+                {/* Submit Actions */}
+                <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setEditingStudent(null)}
+                    className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition"
+                  >
+                    {isArabic ? "إلغاء" : "Cancel"}
+                  </button>
+
+                  <button
+                    type="submit"
+                    className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition shadow-md shadow-indigo-600/20 flex items-center gap-1.5"
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>{isArabic ? "حفظ وتحديث بيانات الطالب" : "Save Changes"}</span>
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         )}

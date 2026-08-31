@@ -70,7 +70,7 @@ interface GroupsViewProps {
   onEditStudent?: (studentId: string, data: Partial<Student>) => void;
   onDeleteStudent?: (studentId: string) => void;
   onUpdateStudentStatus?: (studentId: string, status: StudentStatus) => void;
-  onRecordPayment?: (studentId: string, amount: number, lessonsCount: number, notes?: string) => void;
+  onRecordPayment?: (studentId: string, amount: number, notes?: string, date?: string) => void;
   onAddExamRecord?: (studentId: string, examName: string, score: number, totalScore: number, date: string) => void;
   onSaveAttendanceAndNotes: (
     lessonId: string,
@@ -654,7 +654,10 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
   const handleSavePaymentSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!studentForPayment || !onRecordPayment) return;
-    onRecordPayment(studentForPayment.id, Number(payAmount) || 0, Number(payLessons) || 0, payNotes);
+    const combinedNotes = payNotes.trim()
+      ? (payLessons > 0 ? `${payNotes.trim()} (${payLessons} حصص)` : payNotes.trim())
+      : (payLessons > 0 ? `سداد ${payLessons} حصص` : undefined);
+    onRecordPayment(studentForPayment.id, Number(payAmount) || 0, combinedNotes, new Date().toISOString().split("T")[0]);
     setStudentForPayment(null);
     setPayNotes("");
   };
@@ -1676,8 +1679,9 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
                   <input
                     type="number"
                     min="0"
+                    step="any"
                     value={editStudentLessonCost}
-                    onChange={e => setEditStudentLessonCost(Number(e.target.value))}
+                    onChange={e => setEditStudentLessonCost(parseFloat(e.target.value) || 0)}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 font-bold text-slate-800"
                   />
                 </div>
@@ -1723,10 +1727,11 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
                   <label className="block font-bold text-slate-700 mb-1">{isArabic ? "المبلغ المسدد (ج.م) *" : "Amount (EGP) *"}</label>
                   <input
                     type="number"
-                    min="1"
+                    min="0.01"
+                    step="any"
                     required
                     value={payAmount}
-                    onChange={e => setPayAmount(Number(e.target.value))}
+                    onChange={e => setPayAmount(parseFloat(e.target.value) || 0)}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold text-slate-800 text-sm"
                   />
                 </div>
@@ -1735,8 +1740,9 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
                   <input
                     type="number"
                     min="0"
+                    step="any"
                     value={payLessons}
-                    onChange={e => setPayLessons(Number(e.target.value))}
+                    onChange={e => setPayLessons(parseFloat(e.target.value) || 0)}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold text-slate-800 text-sm"
                   />
                 </div>
@@ -1805,9 +1811,10 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
                   <input
                     type="number"
                     min="0"
+                    step="any"
                     required
                     value={examScore}
-                    onChange={e => setExamScore(Number(e.target.value))}
+                    onChange={e => setExamScore(parseFloat(e.target.value) || 0)}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold text-slate-800 text-sm"
                   />
                 </div>
@@ -1815,10 +1822,11 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
                   <label className="block font-bold text-slate-700 mb-1">{isArabic ? "الدرجة النهائية *" : "Total Score *"}</label>
                   <input
                     type="number"
-                    min="1"
+                    min="0.1"
+                    step="any"
                     required
                     value={examTotalScore}
-                    onChange={e => setExamTotalScore(Number(e.target.value))}
+                    onChange={e => setExamTotalScore(parseFloat(e.target.value) || 0)}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold text-slate-800 text-sm"
                   />
                 </div>

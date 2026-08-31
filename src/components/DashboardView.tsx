@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   Sparkles,
   BookOpen,
@@ -12,11 +12,17 @@ import {
   UserCheck,
   ChevronRight,
   Trash2,
-  RotateCcw
+  RotateCcw,
+  Bell,
+  Send,
+  Copy,
+  Check
 } from "lucide-react";
 import { Student, Lesson, AppSettings, AttendanceRecord, Group, PrivateLesson } from "../types";
 import { sanitizeTeacherName } from "../lib/storage";
 import { calculateStudentFinancials } from "../lib/financeUtils";
+import { StudentLessonReminderModal, ReminderTargetInfo } from "./StudentLessonReminderModal";
+import { calculateLessonTimeInfo, buildWhatsAppUrl } from "../lib/timeUtils";
 
 interface DashboardViewProps {
   settings: AppSettings;
@@ -48,6 +54,29 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onRestoreNotifications
 }) => {
   const isArabic = settings.preferredLanguage === "ar";
+  const [activeReminderTarget, setActiveReminderTarget] = useState<ReminderTargetInfo | null>(null);
+  const [quickCopiedStudentId, setQuickCopiedStudentId] = useState<string | null>(null);
+
+  const handleQuickCopyReminder = (student: Student, sessionTime: string, subject?: string) => {
+    const info = calculateLessonTimeInfo(sessionTime, student.fullName, subject);
+    navigator.clipboard.writeText(info.reminderText);
+    setQuickCopiedStudentId(student.id);
+    setTimeout(() => setQuickCopiedStudentId(null), 2000);
+  };
+
+  const handleQuickSendWhatsApp = (
+    student: Student,
+    sessionTime: string,
+    subject?: string,
+    groupLink?: string
+  ) => {
+    const info = calculateLessonTimeInfo(sessionTime, student.fullName, subject);
+    const targetContact = groupLink || student.whatsappGroupLink || student.parentContact;
+    const { url } = buildWhatsAppUrl(targetContact, info.reminderText);
+    navigator.clipboard.writeText(info.reminderText);
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
+
   const todayStr = new Date().toISOString().split("T")[0];
 
   // Calculations
@@ -269,58 +298,129 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             ) : (
               todayLessons.map(lesson => {
                 const isGroup = lesson.studyType === "group";
+                const sessTimeInfo = calculateLessonTimeInfo(
+                  lesson.time,
+                  isGroup ? (lesson.groupName || "") : (lesson.studentName || ""),
+                  lesson.subject
+                );
+
+                // Find student for private lesson or first student for group
+                let matchedStudent: Student | null = null;
+                if (!isGroup) {
+                  matchedStudent = students.find(
+                    st => st.id === lesson.studentId || st.fullName === lesson.studentName
+                  ) || {
+                    id: lesson.studentId || "priv-st",
+                    fullName: lesson.studentName || "الطالب",
+                    parentContact: "",
+                    subject: lesson.subject,
+                    studyType: "private",
+                    status: "active",
+                    paymentStatus: "unpaid",
+                    lessonCost: 0
+                  };
+                } else if (lesson.groupId) {
+                  const grp = groups.find(g => g.id === lesson.groupId);
+                  if (grp && grp.studentIds && grp.studentIds.length > 0) {
+                    matchedStudent = students.find(st => grp.studentIds?.includes(st.id)) || null;
+                  }
+                }
+
                 return (
                   <div
                     key={lesson.id}
-                    className="p-2.5 rounded-xl bg-slate-50/80 border border-slate-200/80 hover:border-blue-300 transition flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                    className="p-3 rounded-2xl bg-slate-50/80 border border-slate-200/80 hover:border-blue-300 transition flex flex-col gap-2.5 shadow-2xs"
                   >
-                    <div className="flex items-start gap-2.5">
-                      <div
-                        className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs shrink-0 ${
-                          isGroup ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"
+                    <div className="flex items-start justify-between gap-2.5">
+                      <div className="flex items-start gap-2.5">
+                        <div
+                          className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 ${
+                            isGroup ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"
+                          }`}
+                        >
+                          {isGroup ? "👥" : "👤"}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <h3 className="font-bold text-slate-900 text-xs sm:text-sm">
+                              {isGroup ? lesson.groupName : lesson.studentName}
+                            </h3>
+                            <span
+                              className={`px-1.5 py-0.2 rounded text-[9px] font-bold ${
+                                isGroup ? "bg-blue-50 text-blue-600 border border-blue-200" : "bg-purple-50 text-purple-600 border border-purple-200"
+                              }`}
+                            >
+                              {isGroup ? (isArabic ? "مجموعة" : "Group") : (isArabic ? "خاص" : "Private")}
+                            </span>
+                          </div>
+                          <p className="text-[10.5px] text-slate-500 font-medium mt-0.5">
+                            {lesson.subject} • {lesson.time} ({lesson.durationMinutes} {isArabic ? "دقيقة" : "mins"})
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Status / Countdown badge */}
+                      <span
+                        className={`px-2 py-0.5 rounded-lg text-[10px] font-black border shrink-0 ${
+                          sessTimeInfo.status === "now"
+                            ? "bg-amber-100 text-amber-900 border-amber-300 animate-pulse"
+                            : sessTimeInfo.status === "past"
+                            ? "bg-slate-100 text-slate-700 border-slate-300"
+                            : "bg-emerald-50 text-emerald-800 border-emerald-300"
                         }`}
                       >
-                        {isGroup ? "👥" : "👤"}
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <h3 className="font-bold text-slate-900 text-xs sm:text-sm">
-                            {isGroup ? lesson.groupName : lesson.studentName}
-                          </h3>
-                          <span
-                            className={`px-1.5 py-0.2 rounded text-[9px] font-bold ${
-                              isGroup ? "bg-blue-50 text-blue-600" : "bg-purple-50 text-purple-600"
-                            }`}
-                          >
-                            {isGroup ? (isArabic ? "مجموعة" : "Group") : (isArabic ? "خاص" : "Private")}
-                          </span>
-                        </div>
-                        <p className="text-[10.5px] text-slate-500 font-medium mt-0.5">
-                          {lesson.subject} • {lesson.time} ({lesson.durationMinutes} {isArabic ? "دقيقة" : "mins"})
-                        </p>
-                      </div>
+                        {sessTimeInfo.status === "now"
+                          ? (isArabic ? "الآن" : "Now")
+                          : sessTimeInfo.status === "past"
+                          ? (isArabic ? `بدأت منذ ${Math.abs(sessTimeInfo.remainingMinutes)} د` : `${Math.abs(sessTimeInfo.remainingMinutes)}m ago`)
+                          : (isArabic ? `بعد ${sessTimeInfo.remainingMinutes} دقيقة` : `In ${sessTimeInfo.remainingMinutes}m`)}
+                      </span>
                     </div>
 
-                    <div className="flex items-center justify-between sm:justify-end gap-2 pt-1.5 sm:pt-0 border-t sm:border-t-0 border-slate-200/60">
-                      <span
-                        className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
-                          lesson.status === "completed"
-                            ? "bg-emerald-100 text-emerald-800"
-                            : lesson.status === "starting_soon"
-                            ? "bg-amber-100 text-amber-800 animate-pulse"
-                            : "bg-sky-100 text-sky-800"
-                        }`}
-                      >
-                        {lesson.status === "completed"
-                          ? (isArabic ? "تمت" : "Completed")
-                          : lesson.status === "starting_soon"
-                          ? (isArabic ? "حان وقتها" : "Starting Soon")
-                          : (isArabic ? "قادمة" : "Upcoming")}
-                      </span>
+                    {/* Bottom Action Bar */}
+                    <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-200/60">
+                      {/* Reminder Button */}
+                      {matchedStudent ? (
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setActiveReminderTarget({
+                                student: matchedStudent!,
+                                sessionTime: lesson.time,
+                                subject: lesson.subject,
+                                groupName: lesson.groupName,
+                                type: isGroup ? "group" : "private"
+                              })
+                            }
+                            className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 font-bold text-[11px] transition flex items-center gap-1.5 shadow-2xs"
+                          >
+                            <Bell className="w-3 h-3 text-amber-600" />
+                            <span>{isArabic ? "إرسال تذكير بالحصة" : "Send Reminder"}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            title={isArabic ? "نسخ نص التذكير" : "Copy Reminder"}
+                            onClick={() => handleQuickCopyReminder(matchedStudent!, lesson.time, lesson.subject)}
+                            className="p-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
+                          >
+                            {quickCopiedStudentId === matchedStudent.id ? (
+                              <Check className="w-3.5 h-3.5 text-emerald-600" />
+                            ) : (
+                              <Copy className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-[10px] text-slate-400 font-medium">
+                          {isArabic ? "تذكير الحصة" : "Lesson reminder"}
+                        </span>
+                      )}
 
                       <button
                         onClick={() => onOpenLessonDetails(lesson)}
-                        className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition shadow-2xs flex items-center gap-1"
+                        className="px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition shadow-2xs flex items-center gap-1 shrink-0"
                       >
                         <Play className="w-3 h-3 fill-current" />
                         <span>{isArabic ? "تسجيل الحضور" : "Attendance"}</span>
@@ -453,6 +553,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Student Lesson Reminder Modal */}
+      {activeReminderTarget && (
+        <StudentLessonReminderModal
+          target={activeReminderTarget}
+          isArabic={isArabic}
+          onClose={() => setActiveReminderTarget(null)}
+        />
+      )}
     </div>
   );
 };

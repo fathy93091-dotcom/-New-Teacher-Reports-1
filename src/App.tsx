@@ -17,6 +17,7 @@ import {
   AttendanceRecord,
   ExamRecord,
   PaymentTransaction,
+  SubjectPaymentAllocation,
   GeneratedReport,
   AppSettings,
   AttendanceStatus,
@@ -522,12 +523,24 @@ export function App() {
     studentId: string,
     amount: number,
     notes?: string,
-    date?: string
+    date?: string,
+    subjectAllocations?: SubjectPaymentAllocation[],
+    targetSubject?: string
   ) => {
     const student = students.find(s => s.id === studentId);
     if (!student || amount <= 0) return;
 
     const paymentDate = date || new Date().toISOString().split("T")[0];
+
+    // Determine subject tag for the transaction
+    let assignedSubject = targetSubject;
+    if (!assignedSubject && subjectAllocations && subjectAllocations.length > 0) {
+      if (subjectAllocations.length === 1) {
+        assignedSubject = subjectAllocations[0].subjectName;
+      } else {
+        assignedSubject = subjectAllocations.map(a => `${a.subjectName}: ${a.amount} ج.م`).join(" • ");
+      }
+    }
 
     const newTransaction: PaymentTransaction = {
       id: `pay_${Date.now()}`,
@@ -535,24 +548,56 @@ export function App() {
       studentName: student.fullName,
       amount,
       date: paymentDate,
-      notes
+      notes,
+      subject: assignedSubject || student.subject,
+      subjectAllocations: subjectAllocations && subjectAllocations.length > 0 ? subjectAllocations : undefined
     };
 
     setPaymentTransactions(prev => [newTransaction, ...prev]);
 
-    // Update Student Balance & Payment Status
+    // Update Student Balance & Payment Status & per-subject paid amounts
     setStudents(prev =>
       prev.map(s => {
         if (s.id === studentId) {
           const newTotalPaid = (s.totalPaidAmount || 0) + amount;
-          const attended = s.totalAttendedLessons || 0;
-          const cost = s.lessonCost || 100;
-          const isPaid = newTotalPaid >= (attended * cost);
+
+          let updatedSubjects = s.subjects;
+          if (s.subjects && s.subjects.length > 0) {
+            if (subjectAllocations && subjectAllocations.length > 0) {
+              updatedSubjects = s.subjects.map(sub => {
+                const alloc = subjectAllocations.find(
+                  a => (a.subjectId && a.subjectId === sub.id) || a.subjectName === sub.subject
+                );
+                if (alloc) {
+                  return {
+                    ...sub,
+                    totalPaidAmount: (sub.totalPaidAmount || 0) + alloc.amount
+                  };
+                }
+                return sub;
+              });
+            } else if (targetSubject) {
+              updatedSubjects = s.subjects.map(sub => {
+                if (sub.subject === targetSubject || sub.id === targetSubject) {
+                  return {
+                    ...sub,
+                    totalPaidAmount: (sub.totalPaidAmount || 0) + amount
+                  };
+                }
+                return sub;
+              });
+            } else if (s.subjects.length === 1) {
+              updatedSubjects = s.subjects.map(sub => ({
+                ...sub,
+                totalPaidAmount: (sub.totalPaidAmount || 0) + amount
+              }));
+            }
+          }
 
           return {
             ...s,
-            totalPaidAmount: newTotalPaid,
-            paymentStatus: isPaid ? "paid" : "unpaid"
+            subjects: updatedSubjects,
+            totalPaidAmount: newTotalPaid
           };
         }
         return s;
@@ -710,6 +755,9 @@ export function App() {
       date: reportData.date,
       attendance: attStatus,
       homeworkStatus: hwStatus,
+      durationMinutes: reportData.durationMinutes || 60,
+      lessonDuration: reportData.lessonDuration,
+      includeDuration: reportData.includeDuration,
       teacherNotes: reportData.teacherNotes,
       aiInstructions: reportData.aiInstructions,
       generatedReportText: reportData.reportText || reportData.generatedText,
@@ -746,6 +794,10 @@ export function App() {
     teacherNotes?: string;
     classEvents?: string;
     homeworkNotes?: string;
+    overallEvaluation?: string;
+    lessonDuration?: string;
+    includeDuration?: boolean;
+    durationMinutes?: number;
     aiInstructions?: string;
     generalAiInstructions?: string;
     subjectAiInstructions?: string;
@@ -795,6 +847,7 @@ export function App() {
     if (success) {
       setSettings(StorageEngine.getSettings(uid));
       setStudents(StorageEngine.getStudents(uid));
+      setCombinedStudentGroups(StorageEngine.getCombinedStudentGroups(uid));
       setGroups(StorageEngine.getGroups(uid));
       setPrivateLessons(StorageEngine.getPrivateLessons(uid));
       setLessons(StorageEngine.getLessons(uid));
@@ -834,7 +887,7 @@ export function App() {
   return (
     <div
       dir={settings.preferredLanguage === "ar" ? "rtl" : "ltr"}
-      className="min-h-screen bg-slate-100 text-slate-800 flex flex-col font-sans selection:bg-blue-500 selection:text-white"
+      className="min-h-screen bg-slate-100/80 text-slate-800 flex flex-col font-sans selection:bg-blue-500 selection:text-white antialiased"
     >
       {/* Top Header */}
       <Header
@@ -855,8 +908,8 @@ export function App() {
         onRestoreNotifications={handleRestoreNotifications}
       />
 
-      {/* Main Content View Container */}
-      <main className="flex-1 max-w-[1920px] w-full mx-auto px-2 sm:px-3 lg:px-5 2xl:px-6 pt-2 pb-24 lg:pb-6">
+      {/* Main Content View Container - Full Width Space Optimization */}
+      <main className="flex-1 w-full max-w-[1850px] mx-auto px-3 sm:px-4 lg:px-6 2xl:px-8 pt-3 pb-24 lg:pb-6">
         {activeTab === "home" && (
           <DashboardView
             settings={settings}
@@ -940,6 +993,7 @@ export function App() {
             groups={groups}
             privateLessons={privateLessons}
             lessons={lessons}
+            students={students}
             onOpenLesson={() => setActiveTab("groups")}
           />
         )}
@@ -948,6 +1002,8 @@ export function App() {
           <FinanceView
             settings={settings}
             students={students}
+            groups={groups}
+            privateLessons={privateLessons}
             attendanceRecords={attendanceRecords}
             paymentTransactions={paymentTransactions}
             onRecordPayment={handleRecordPayment}

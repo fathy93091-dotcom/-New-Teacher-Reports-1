@@ -18,11 +18,13 @@ import {
   LogOut,
   Globe,
   Trash2,
-  RotateCcw
+  RotateCcw,
+  Download
 } from "lucide-react";
 import { AppSettings, Student, AppNotification } from "../types";
 import { sanitizeTeacherName } from "../lib/storage";
 import { User as FirebaseUser } from "../lib/firebase";
+import { InstallAppModal } from "./InstallAppModal";
 
 export type NavTab = "home" | "groups" | "students" | "schedule" | "finance";
 
@@ -64,6 +66,7 @@ export const Header: React.FC<HeaderProps> = ({
   const [showNotifications, setShowNotifications] = useState(false);
   const [showMobileSearch, setShowMobileSearch] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showInstallModal, setShowInstallModal] = useState(false);
   const notificationsRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
 
@@ -246,6 +249,17 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <HardDriveDownload className="w-4 h-4 text-sky-400 shrink-0" />
               <span className="hidden 2xl:inline">{isArabic ? "نسخة احتياطية" : "Backup"}</span>
+            </button>
+
+            {/* Install App as PWA Button */}
+            <button
+              type="button"
+              onClick={() => setShowInstallModal(true)}
+              title={isArabic ? "تثبيت المنصة كتطبيق على الهاتف أو الكمبيوتر" : "Install App on Phone or PC"}
+              className="h-8 sm:h-9 px-2 sm:px-2.5 rounded-lg bg-gradient-to-r from-blue-600/90 to-indigo-600/90 hover:from-blue-500 hover:to-indigo-500 text-white border border-blue-400/40 transition flex items-center gap-1.5 text-xs font-bold shrink-0 shadow-sm shadow-blue-500/20"
+            >
+              <Download className="w-3.5 h-3.5 text-white shrink-0 animate-bounce" />
+              <span className="hidden sm:inline">{isArabic ? "تثبيت التطبيق" : "Install App"}</span>
             </button>
 
             {/* Notifications Bell */}
@@ -522,6 +536,18 @@ export const Header: React.FC<HeaderProps> = ({
                       </button>
                     )}
 
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowUserMenu(false);
+                        setShowInstallModal(true);
+                      }}
+                      className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs font-semibold text-blue-300 hover:text-white hover:bg-slate-800 transition text-right rtl:text-right ltr:text-left"
+                    >
+                      <Download className="w-4 h-4 text-blue-400 shrink-0" />
+                      <span>{isArabic ? "تثبيت التطبيق على الجهاز (PWA)" : "Install App on Device"}</span>
+                    </button>
+
                     {onLogout && (
                       <button
                         type="button"
@@ -567,6 +593,12 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           </div>
         )}
+        {/* INSTALL APP MODAL */}
+        <InstallAppModal
+          isOpen={showInstallModal}
+          onClose={() => setShowInstallModal(false)}
+          isArabic={isArabic}
+        />
       </div>
     </header>
   );

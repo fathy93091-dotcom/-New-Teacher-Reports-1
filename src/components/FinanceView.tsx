@@ -18,28 +18,49 @@ import {
   Check,
   Share2,
   LayoutGrid,
-  List
+  List,
+  Target,
+  CalendarDays,
+  ChevronDown,
+  ChevronUp,
+  PieChart,
+  Info,
+  Calendar
 } from "lucide-react";
-import { Student, PaymentTransaction, AppSettings, AttendanceRecord } from "../types";
+import { Student, PaymentTransaction, SubjectPaymentAllocation, AppSettings, AttendanceRecord, Group, PrivateLesson } from "../types";
 import {
   calculateStudentFinancialProfile,
+  calculateTotalExpectedMonthlyRevenue,
   buildCentralTransactionsLog,
   StudentFinancialProfile,
   FinancialStatusType,
-  CentralTransactionItem
+  CentralTransactionItem,
+  ExpectedMonthlyRevenueSummary,
+  SubjectFinancialItem
 } from "../lib/financeEngine";
 
 interface FinanceViewProps {
   settings: AppSettings;
   students: Student[];
+  groups?: Group[];
+  privateLessons?: PrivateLesson[];
   attendanceRecords?: AttendanceRecord[];
   paymentTransactions: PaymentTransaction[];
-  onRecordPayment: (studentId: string, amount: number, notes?: string, date?: string) => void;
+  onRecordPayment: (
+    studentId: string,
+    amount: number,
+    notes?: string,
+    date?: string,
+    subjectAllocations?: SubjectPaymentAllocation[],
+    targetSubject?: string
+  ) => void;
 }
 
 export const FinanceView: React.FC<FinanceViewProps> = ({
   settings,
   students = [],
+  groups = [],
+  privateLessons = [],
   attendanceRecords = [],
   paymentTransactions = [],
   onRecordPayment
@@ -49,6 +70,7 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
   // Navigation Sub-tab: "students" (قائمة الطلاب وبطاقاتهم) | "transactions" (سجل المعاملات المركزي)
   const [mainSection, setMainSection] = useState<"students" | "transactions">("students");
   const [financeLayout, setFinanceLayout] = useState<"grid" | "table">("grid");
+  const [showExpectedRevenueBreakdown, setShowExpectedRevenueBreakdown] = useState<boolean>(false);
 
   // Filter for Student Financial Status
   const [statusFilter, setStatusFilter] = useState<"all" | FinancialStatusType>("all");
@@ -61,16 +83,37 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
   const [amount, setAmount] = useState<number>(100);
   const [paymentDate, setPaymentDate] = useState<string>(new Date().toISOString().split("T")[0]);
   const [paymentNotes, setPaymentNotes] = useState<string>("");
+  const [allocationMode, setAllocationMode] = useState<"per_subject" | "single_subject" | "general">("per_subject");
+  const [subjectAllocationsMap, setSubjectAllocationsMap] = useState<Record<string, number>>({});
+  const [selectedSingleSubject, setSelectedSingleSubject] = useState<string>("");
 
   // 2. Student Statement Modal (كشف حساب الطالب)
   const [statementModalProfile, setStatementModalProfile] = useState<StudentFinancialProfile | null>(null);
 
-  // Compute all profiles
+  // Compute all profiles with schedule & groups/private lessons info
   const allProfiles = useMemo(() => {
     return students
       .filter(s => s.status === "active")
-      .map(s => calculateStudentFinancialProfile(s, attendanceRecords, paymentTransactions));
-  }, [students, attendanceRecords, paymentTransactions]);
+      .map(s => calculateStudentFinancialProfile(s, attendanceRecords, paymentTransactions, groups, privateLessons));
+  }, [students, attendanceRecords, paymentTransactions, groups, privateLessons]);
+
+  // Expected Monthly Revenue Summary calculation based on student schedules and billing systems
+  const expectedMonthlySummary = useMemo<ExpectedMonthlyRevenueSummary>(() => {
+    return calculateTotalExpectedMonthlyRevenue(
+      students,
+      groups,
+      privateLessons,
+      paymentTransactions,
+      attendanceRecords,
+      new Date()
+    );
+  }, [students, groups, privateLessons, paymentTransactions, attendanceRecords]);
+
+  // Current Month Name
+  const currentMonthName = useMemo(() => {
+    const now = new Date();
+    return now.toLocaleString(isArabic ? "ar-EG" : "en-US", { month: "long", year: "numeric" });
+  }, [isArabic]);
 
   // KPIs
   const currentMonthStr = useMemo(() => {
@@ -103,6 +146,11 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
   // 4. عدد الحصص المنفذة (Total Attended Lessons executed)
   const totalAttendedLessonsCount = useMemo(() => {
     return allProfiles.reduce((sum, p) => sum + p.attendedLessonsCount, 0);
+  }, [allProfiles]);
+
+  // 5. إجمالي الساعات المنفذة (Total Taught Hours)
+  const totalTaughtHours = useMemo(() => {
+    return Number(allProfiles.reduce((sum, p) => sum + (p.totalTaughtHours || 0), 0).toFixed(1));
   }, [allProfiles]);
 
   // Monthly vs Per Lesson count
@@ -146,24 +194,103 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
     setPaymentModalStudent(profile);
     setPaymentDate(new Date().toISOString().split("T")[0]);
     setPaymentNotes("");
-    if (profile.amountDue > 0) {
-      setAmount(profile.amountDue);
+
+    const hasMultiSubjects = profile.subjectBreakdown && profile.subjectBreakdown.length > 1;
+    if (hasMultiSubjects) {
+      setAllocationMode("per_subject");
+      const initMap: Record<string, number> = {};
+      let total = 0;
+      profile.subjectBreakdown!.forEach(sub => {
+        const subDue = Math.max(0, sub.amountDue);
+        initMap[sub.subjectId || sub.subjectName] = subDue;
+        total += subDue;
+      });
+      if (total === 0) {
+        profile.subjectBreakdown!.forEach(sub => {
+          const defaultVal = sub.isMonthly ? sub.monthlyCost : sub.lessonCost;
+          initMap[sub.subjectId || sub.subjectName] = defaultVal;
+          total += defaultVal;
+        });
+      }
+      setSubjectAllocationsMap(initMap);
+      setAmount(total);
+      setSelectedSingleSubject(profile.subjectBreakdown![0].subjectId || profile.subjectBreakdown![0].subjectName);
     } else {
-      setAmount(profile.isMonthly ? (profile.monthlyCost || 400) : (profile.lessonCost || 100));
+      setAllocationMode("general");
+      setSubjectAllocationsMap({});
+      if (profile.amountDue > 0) {
+        setAmount(profile.amountDue);
+      } else {
+        setAmount(profile.isMonthly ? (profile.monthlyCost || 400) : (profile.lessonCost || 100));
+      }
+      setSelectedSingleSubject("");
     }
   };
 
   // Submit Payment
   const handleSubmitPayment = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!paymentModalStudent || amount <= 0) return;
+    if (!paymentModalStudent) return;
 
-    onRecordPayment(
-      paymentModalStudent.studentId,
-      amount,
-      paymentNotes.trim() ? paymentNotes.trim() : undefined,
-      paymentDate
-    );
+    const hasMultiSubjects = paymentModalStudent.subjectBreakdown && paymentModalStudent.subjectBreakdown.length > 1;
+
+    if (hasMultiSubjects && allocationMode === "per_subject") {
+      const allocations: SubjectPaymentAllocation[] = [];
+      let calculatedTotal = 0;
+
+      paymentModalStudent.subjectBreakdown!.forEach(sub => {
+        const key = sub.subjectId || sub.subjectName;
+        const subAmt = Number(subjectAllocationsMap[key]) || 0;
+        if (subAmt > 0) {
+          allocations.push({
+            subjectId: sub.subjectId,
+            subjectName: sub.subjectName,
+            amount: subAmt
+          });
+          calculatedTotal += subAmt;
+        }
+      });
+
+      if (calculatedTotal <= 0) return;
+
+      onRecordPayment(
+        paymentModalStudent.studentId,
+        calculatedTotal,
+        paymentNotes.trim() ? paymentNotes.trim() : undefined,
+        paymentDate,
+        allocations
+      );
+    } else if (hasMultiSubjects && allocationMode === "single_subject") {
+      if (amount <= 0) return;
+      const targetSub = paymentModalStudent.subjectBreakdown?.find(
+        s => s.subjectId === selectedSingleSubject || s.subjectName === selectedSingleSubject
+      );
+      const subName = targetSub ? targetSub.subjectName : selectedSingleSubject;
+      const allocations: SubjectPaymentAllocation[] = [
+        {
+          subjectId: targetSub?.subjectId,
+          subjectName: subName,
+          amount: amount
+        }
+      ];
+
+      onRecordPayment(
+        paymentModalStudent.studentId,
+        amount,
+        paymentNotes.trim() ? paymentNotes.trim() : undefined,
+        paymentDate,
+        allocations,
+        subName
+      );
+    } else {
+      if (amount <= 0) return;
+      onRecordPayment(
+        paymentModalStudent.studentId,
+        amount,
+        paymentNotes.trim() ? paymentNotes.trim() : undefined,
+        paymentDate
+      );
+    }
 
     setPaymentModalStudent(null);
   };
@@ -221,79 +348,263 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
         </div>
       </div>
 
-      {/* KPIs: إيرادات الشهر + إجمالي المستحقات + إجمالي الأرصدة المتبقية + عدد الحصص المنفذة */}
+      {/* Hero: بطاقة إجمالي الإيرادات المتوقعة لهذا الشهر بناءً على جداول الطلاب ونظام الحصص */}
+      <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white rounded-3xl p-4 sm:p-6 shadow-xl border border-slate-700/80 relative overflow-hidden">
+        {/* Background ambient lighting effects */}
+        <div className="absolute top-0 right-0 w-72 h-72 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20"></div>
+        <div className="absolute bottom-0 left-0 w-72 h-72 bg-blue-500/10 rounded-full blur-3xl pointer-events-none -ml-20 -mb-20"></div>
+
+        <div className="relative z-10 space-y-4">
+          {/* Header Row */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-700/60 pb-3.5">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center justify-center font-bold shadow-inner shrink-0">
+                <Target className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-base sm:text-lg font-black text-white">
+                    {isArabic ? "إجمالي الإيرادات المتوقعة هذا الشهر" : "Expected Monthly Revenue"}
+                  </h2>
+                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[11px] font-bold">
+                    {currentMonthName}
+                  </span>
+                </div>
+                <p className="text-[11px] sm:text-xs text-slate-400 font-medium mt-0.5">
+                  {isArabic
+                    ? "محسوبة بدقة بناءً على جدول مواعيد الحصص الأسبوعية ونظام محاسبة كل طالب (شهري / بالحصة / باقة حصص)."
+                    : "Accurately calculated from weekly schedules and each student's billing configuration."}
+                </p>
+              </div>
+            </div>
+
+            {/* Toggle Breakdown Button */}
+            <button
+              type="button"
+              onClick={() => setShowExpectedRevenueBreakdown(!showExpectedRevenueBreakdown)}
+              className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 text-xs font-bold transition flex items-center gap-1.5 self-start sm:self-auto shadow-xs"
+            >
+              <PieChart className="w-3.5 h-3.5 text-emerald-400" />
+              <span>{isArabic ? "تفصيل الإيرادات حسب نظام الحصص" : "Breakdown by Billing System"}</span>
+              {showExpectedRevenueBreakdown ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            </button>
+          </div>
+
+          {/* 4 Core Financial Projection Metrics */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {/* Metric 1: Expected Revenue */}
+            <div className="bg-slate-800/80 backdrop-blur-xs rounded-2xl p-3.5 border border-slate-700/70 flex flex-col justify-between">
+              <span className="text-[11px] font-bold text-slate-400">
+                {isArabic ? "🎯 الإيراد المتوقع للشهر" : "Target Revenue"}
+              </span>
+              <div className="text-xl sm:text-2xl font-black text-emerald-400 my-1 truncate">
+                {expectedMonthlySummary.totalExpectedRevenue.toLocaleString()} <span className="text-xs font-normal text-slate-300">{isArabic ? "ج.م" : "EGP"}</span>
+              </div>
+              <span className="text-[10px] text-slate-400 font-medium">
+                {isArabic ? `لعدد ${expectedMonthlySummary.activeStudentsCount} طالب نشط` : `For ${expectedMonthlySummary.activeStudentsCount} active students`}
+              </span>
+            </div>
+
+            {/* Metric 2: Actual Collected This Month */}
+            <div className="bg-slate-800/80 backdrop-blur-xs rounded-2xl p-3.5 border border-slate-700/70 flex flex-col justify-between">
+              <span className="text-[11px] font-bold text-slate-400">
+                {isArabic ? "💵 المحصل الفعلي حتى الآن" : "Collected This Month"}
+              </span>
+              <div className="text-xl sm:text-2xl font-black text-white my-1 truncate">
+                {expectedMonthlySummary.totalActualCollectedThisMonth.toLocaleString()} <span className="text-xs font-normal text-slate-300">{isArabic ? "ج.م" : "EGP"}</span>
+              </div>
+              <span className="text-[10px] text-emerald-400 font-bold">
+                {isArabic ? `نسبة التحصيل: ${expectedMonthlySummary.overallCollectionPercent}%` : `${expectedMonthlySummary.overallCollectionPercent}% collected`}
+              </span>
+            </div>
+
+            {/* Metric 3: Remaining to Collect */}
+            <div className="bg-slate-800/80 backdrop-blur-xs rounded-2xl p-3.5 border border-slate-700/70 flex flex-col justify-between">
+              <span className="text-[11px] font-bold text-slate-400">
+                {isArabic ? "⏳ المتبقي لتحقيقه" : "Remaining Target"}
+              </span>
+              <div className="text-xl sm:text-2xl font-black text-amber-300 my-1 truncate">
+                {expectedMonthlySummary.totalRemainingToCollect.toLocaleString()} <span className="text-xs font-normal text-slate-300">{isArabic ? "ج.م" : "EGP"}</span>
+              </div>
+              <span className="text-[10px] text-slate-400 font-medium">
+                {isArabic ? "متبقي متوقع تحصيله هذا الشهر" : "Expected to be collected"}
+              </span>
+            </div>
+
+            {/* Metric 4: Expected Lessons */}
+            <div className="bg-slate-800/80 backdrop-blur-xs rounded-2xl p-3.5 border border-slate-700/70 flex flex-col justify-between">
+              <span className="text-[11px] font-bold text-slate-400">
+                {isArabic ? "📅 الحصص المجدولة بالشهر" : "Scheduled Lessons"}
+              </span>
+              <div className="text-xl sm:text-2xl font-black text-sky-400 my-1 truncate">
+                {expectedMonthlySummary.totalExpectedLessons} <span className="text-xs font-normal text-slate-300">{isArabic ? "حصة متوقعة" : "lessons"}</span>
+              </div>
+              <span className="text-[10px] text-sky-300 font-medium">
+                {isArabic ? `نفذ منها: ${expectedMonthlySummary.totalAttendedThisMonth} حصة` : `Attended: ${expectedMonthlySummary.totalAttendedThisMonth}`}
+              </span>
+            </div>
+          </div>
+
+          {/* Target Progress Bar */}
+          <div className="space-y-1.5 pt-1">
+            <div className="flex items-center justify-between text-[11px] font-bold text-slate-300">
+              <span>{isArabic ? "نسبة إنجاز الهدف المالي الشهري" : "Monthly Target Progress"}</span>
+              <span className="text-emerald-400 font-mono font-black">{expectedMonthlySummary.overallCollectionPercent}%</span>
+            </div>
+            <div className="w-full h-2.5 bg-slate-700/80 rounded-full overflow-hidden p-0.5 border border-slate-600/60">
+              <div
+                className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 rounded-full transition-all duration-500"
+                style={{ width: `${Math.min(100, Math.max(0, expectedMonthlySummary.overallCollectionPercent))}%` }}
+              ></div>
+            </div>
+          </div>
+
+          {/* Expandable Breakdown Drawer by Billing Type */}
+          {showExpectedRevenueBreakdown && (
+            <div className="mt-4 pt-4 border-t border-slate-700/80 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 animate-in fade-in">
+              {/* 1. Flat Monthly Subscription */}
+              <div className="bg-slate-800/90 rounded-2xl p-3 border border-purple-500/30 space-y-1">
+                <div className="flex items-center justify-between text-purple-300 font-bold text-xs">
+                  <span>📅 {isArabic ? "اشتراك شهري ثابت" : "Monthly Plan"}</span>
+                  <span className="text-[10px] bg-purple-500/20 px-1.5 py-0.5 rounded text-purple-200">
+                    {expectedMonthlySummary.byBillingType.monthly.studentsCount} {isArabic ? "طالب" : "std"}
+                  </span>
+                </div>
+                <div className="text-base font-black text-white">
+                  {expectedMonthlySummary.byBillingType.monthly.expectedRevenue.toLocaleString()} <span className="text-[10px] font-normal text-slate-300">{isArabic ? "ج.م" : "EGP"}</span>
+                </div>
+                <p className="text-[10px] text-slate-400">
+                  {isArabic ? `محصل منها: ${expectedMonthlySummary.byBillingType.monthly.collectedThisMonth} ج.م` : `Collected: ${expectedMonthlySummary.byBillingType.monthly.collectedThisMonth}`}
+                </p>
+              </div>
+
+              {/* 2. Fixed Lesson Packages */}
+              <div className="bg-slate-800/90 rounded-2xl p-3 border border-blue-500/30 space-y-1">
+                <div className="flex items-center justify-between text-blue-300 font-bold text-xs">
+                  <span>🎟️ {isArabic ? "باقة حصص محددة" : "Lesson Package"}</span>
+                  <span className="text-[10px] bg-blue-500/20 px-1.5 py-0.5 rounded text-blue-200">
+                    {expectedMonthlySummary.byBillingType.monthly_fixed_lessons.studentsCount} {isArabic ? "طالب" : "std"}
+                  </span>
+                </div>
+                <div className="text-base font-black text-white">
+                  {expectedMonthlySummary.byBillingType.monthly_fixed_lessons.expectedRevenue.toLocaleString()} <span className="text-[10px] font-normal text-slate-300">{isArabic ? "ج.م" : "EGP"}</span>
+                </div>
+                <p className="text-[10px] text-slate-400">
+                  {isArabic ? `إجمالي ${expectedMonthlySummary.byBillingType.monthly_fixed_lessons.totalLessons} حصة باقة` : `${expectedMonthlySummary.byBillingType.monthly_fixed_lessons.totalLessons} package lessons`}
+                </p>
+              </div>
+
+              {/* 3. Per Lesson by Schedule */}
+              <div className="bg-slate-800/90 rounded-2xl p-3 border border-emerald-500/30 space-y-1">
+                <div className="flex items-center justify-between text-emerald-300 font-bold text-xs">
+                  <span>🗓️ {isArabic ? "بالحصة وفق الجدول" : "Per Lesson Schedule"}</span>
+                  <span className="text-[10px] bg-emerald-500/20 px-1.5 py-0.5 rounded text-emerald-200">
+                    {expectedMonthlySummary.byBillingType.per_lesson.studentsCount} {isArabic ? "طالب" : "std"}
+                  </span>
+                </div>
+                <div className="text-base font-black text-white">
+                  {expectedMonthlySummary.byBillingType.per_lesson.expectedRevenue.toLocaleString()} <span className="text-[10px] font-normal text-slate-300">{isArabic ? "ج.م" : "EGP"}</span>
+                </div>
+                <p className="text-[10px] text-slate-400">
+                  {isArabic ? `إجمالي ${expectedMonthlySummary.byBillingType.per_lesson.totalLessons} حصة مجدولة` : `${expectedMonthlySummary.byBillingType.per_lesson.totalLessons} scheduled lessons`}
+                </p>
+              </div>
+
+              {/* 4. Elapsed Lessons */}
+              <div className="bg-slate-800/90 rounded-2xl p-3 border border-amber-500/30 space-y-1">
+                <div className="flex items-center justify-between text-amber-300 font-bold text-xs">
+                  <span>⏱️ {isArabic ? "محاسبة الحصص المنقضية" : "Elapsed Lessons"}</span>
+                  <span className="text-[10px] bg-amber-500/20 px-1.5 py-0.5 rounded text-amber-200">
+                    {expectedMonthlySummary.byBillingType.monthly_elapsed_lessons.studentsCount} {isArabic ? "طالب" : "std"}
+                  </span>
+                </div>
+                <div className="text-base font-black text-white">
+                  {expectedMonthlySummary.byBillingType.monthly_elapsed_lessons.expectedRevenue.toLocaleString()} <span className="text-[10px] font-normal text-slate-300">{isArabic ? "ج.م" : "EGP"}</span>
+                </div>
+                <p className="text-[10px] text-slate-400">
+                  {isArabic ? "وفق أيام الجدول المنقضية" : "Calculated from elapsed calendar"}
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Unified Financial Summary Cards (Non-repetitive, high-clarity) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3.5">
-        {/* KPI 1: إيرادات الشهر */}
-        <div className="bg-white border border-slate-200/90 rounded-2xl p-3.5 sm:p-4 shadow-2xs flex flex-col justify-between">
+        {/* KPI 1: إجمالي المتوقع هذا الشهر */}
+        <div className="bg-white border border-emerald-200/90 rounded-2xl p-3.5 sm:p-4 shadow-2xs flex flex-col justify-between">
           <div className="flex items-center justify-between mb-1">
-            <span className="text-[11px] font-bold text-slate-500 truncate">
-              {isArabic ? "إيرادات الشهر الحالي" : "Current Month Revenue"}
+            <span className="text-[11px] font-bold text-emerald-800 truncate">
+              {isArabic ? "الإيرادات المتوقعة للشهر" : "Expected Revenue"}
             </span>
             <div className="w-7 h-7 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold shrink-0">
+              <Target className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="text-lg sm:text-2xl font-black text-emerald-600 truncate">
+            {expectedMonthlySummary.totalExpectedRevenue.toLocaleString()} <span className="text-xs font-normal text-slate-500">{isArabic ? "ج.م" : "EGP"}</span>
+          </div>
+          <div className="mt-1.5 flex items-center justify-between text-[10px] text-slate-500 font-semibold">
+            <span>{isArabic ? `${expectedMonthlySummary.activeStudentsCount} طالب نشط` : `${expectedMonthlySummary.activeStudentsCount} active students`}</span>
+            <span className="text-emerald-700 font-bold">{expectedMonthlySummary.totalExpectedLessons} {isArabic ? "حصة" : "lessons"}</span>
+          </div>
+        </div>
+
+        {/* KPI 2: المحصل الفعلي */}
+        <div className="bg-white border border-slate-200/90 rounded-2xl p-3.5 sm:p-4 shadow-2xs flex flex-col justify-between">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[11px] font-bold text-slate-600 truncate">
+              {isArabic ? "المحصل الفعلي هذا الشهر" : "Collected This Month"}
+            </span>
+            <div className="w-7 h-7 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold shrink-0">
               <TrendingUp className="w-4 h-4" />
             </div>
           </div>
           <div className="text-lg sm:text-2xl font-black text-slate-900 truncate">
-            {monthRevenue} <span className="text-xs font-normal text-slate-500">{isArabic ? "ج.م" : "EGP"}</span>
+            {monthRevenue.toLocaleString()} <span className="text-xs font-normal text-slate-500">{isArabic ? "ج.م" : "EGP"}</span>
           </div>
-          <p className="text-[10px] text-emerald-700 font-semibold mt-1">
-            {isArabic ? `إجمالي المقبوضات: ${totalRevenue} ج.م` : `Total collected: ${totalRevenue} EGP`}
-          </p>
+          <div className="mt-1.5 flex items-center justify-between text-[10px] font-semibold">
+            <span className="text-blue-600">{isArabic ? `نسبة التحصيل:` : "Collection Rate:"} {expectedMonthlySummary.overallCollectionPercent}%</span>
+            <span className="text-slate-400">{expectedMonthlySummary.totalAttendedThisMonth} {isArabic ? "حصة منفذة" : "attended"}</span>
+          </div>
         </div>
 
-        {/* KPI 2: إجمالي المستحقات */}
+        {/* KPI 3: إجمالي المستحقات المطلوبة */}
         <div className="bg-white border border-rose-200 rounded-2xl p-3.5 sm:p-4 shadow-2xs flex flex-col justify-between">
           <div className="flex items-center justify-between mb-1">
             <span className="text-[11px] font-bold text-rose-700 truncate">
-              {isArabic ? "إجمالي المستحقات المطلوبة" : "Total Receivables Due"}
+              {isArabic ? "إجمالي المستحقات المطلوبة" : "Receivables Due"}
             </span>
             <div className="w-7 h-7 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center font-bold shrink-0">
               <AlertTriangle className="w-4 h-4" />
             </div>
           </div>
           <div className="text-lg sm:text-2xl font-black text-rose-600 truncate">
-            {totalAmountDue} <span className="text-xs font-normal text-rose-500">{isArabic ? "ج.م" : "EGP"}</span>
+            {totalAmountDue.toLocaleString()} <span className="text-xs font-normal text-rose-500">{isArabic ? "ج.م" : "EGP"}</span>
           </div>
           <p className="text-[10px] text-rose-700 font-semibold mt-1">
             {isArabic
-              ? `مستحق على ${allProfiles.filter(p => p.amountDue > 0).length} طلاب`
+              ? `مستحق على ${allProfiles.filter(p => p.amountDue > 0).length} طالب`
               : `Due from ${allProfiles.filter(p => p.amountDue > 0).length} students`}
           </p>
         </div>
 
-        {/* KPI 3: إجمالي الأرصدة المتبقية */}
-        <div className="bg-white border border-slate-200/90 rounded-2xl p-3.5 sm:p-4 shadow-2xs flex flex-col justify-between">
+        {/* KPI 4: الأرصدة المتبقية الفائضة */}
+        <div className="bg-white border border-sky-200/90 rounded-2xl p-3.5 sm:p-4 shadow-2xs flex flex-col justify-between">
           <div className="flex items-center justify-between mb-1">
-            <span className="text-[11px] font-bold text-slate-500 truncate">
-              {isArabic ? "إجمالي الأرصدة المتبقية" : "Credit Balances"}
+            <span className="text-[11px] font-bold text-sky-700 truncate">
+              {isArabic ? "الأرصدة المتبقية (فائض)" : "Prepaid Credit"}
             </span>
-            <div className="w-7 h-7 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold shrink-0">
+            <div className="w-7 h-7 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center font-bold shrink-0">
               <Clock className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-lg sm:text-2xl font-black text-indigo-700 truncate">
-            {totalCreditRemaining} <span className="text-xs font-normal text-slate-500">{isArabic ? "ج.م" : "EGP"}</span>
+          <div className="text-lg sm:text-2xl font-black text-sky-700 truncate">
+            {totalCreditRemaining.toLocaleString()} <span className="text-xs font-normal text-slate-500">{isArabic ? "ج.م" : "EGP"}</span>
           </div>
-          <p className="text-[10px] text-indigo-600 font-semibold mt-1">
-            {isArabic ? "رصيد فائض مدفوع مقدماً لدى المعلم" : "Prepaid credit on account"}
-          </p>
-        </div>
-
-        {/* KPI 4: عدد الحصص المنفذة */}
-        <div className="bg-white border border-slate-200/90 rounded-2xl p-3.5 sm:p-4 shadow-2xs flex flex-col justify-between">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[11px] font-bold text-slate-500 truncate">
-              {isArabic ? "عدد الحصص المنفذة" : "Attended Lessons"}
-            </span>
-            <div className="w-7 h-7 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold shrink-0">
-              <Layers className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="text-lg sm:text-2xl font-black text-blue-700 truncate">
-            {totalAttendedLessonsCount} <span className="text-xs font-normal text-slate-500">{isArabic ? "حصة" : "lss"}</span>
-          </div>
-          <p className="text-[10px] text-blue-600 font-semibold mt-1">
-            {isArabic ? "محسوبة آلياً من سجلات الحضور" : "Calculated from attendance"}
+          <p className="text-[10px] text-sky-700 font-semibold mt-1">
+            {isArabic ? "رصيد فائض مدفوع مقدماً" : "Prepaid credit on account"}
           </p>
         </div>
       </div>
@@ -498,8 +809,9 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                       <th className="py-2.5 px-3">{isArabic ? "الطالب" : "Student"}</th>
                       <th className="py-2.5 px-3">{isArabic ? "المادة" : "Subject"}</th>
                       <th className="py-2.5 px-2.5 text-center">{isArabic ? "الحالة المالية" : "Status"}</th>
-                      <th className="py-2.5 px-2.5 text-center">{isArabic ? "سعر الحصة" : "Cost/Lesson"}</th>
-                      <th className="py-2.5 px-2.5 text-center">{isArabic ? "الحصص المنفذة" : "Attended"}</th>
+                      <th className="py-2.5 px-2.5 text-center">{isArabic ? "المتوقع هذا الشهر" : "Expected / Mo"}</th>
+                      <th className="py-2.5 px-2.5 text-center">{isArabic ? "سعر الحصة / الساعة" : "Rate"}</th>
+                      <th className="py-2.5 px-2.5 text-center">{isArabic ? "الحصص والساعات" : "Lessons & Hours"}</th>
                       <th className="py-2.5 px-2.5 text-center">{isArabic ? "إجمالي القيمة" : "Total Cost"}</th>
                       <th className="py-2.5 px-2.5 text-center">{isArabic ? "إجمالي المدفوع" : "Total Paid"}</th>
                       <th className="py-2.5 px-3 text-center">{isArabic ? "المستحق / الرصيد" : "Due / Credit"}</th>
@@ -544,6 +856,10 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                                 <span className="font-bold text-purple-700 bg-purple-50 px-1.5 py-0.2 rounded text-[9.5px]">
                                   📅 {isArabic ? "شهري" : "Monthly"}
                                 </span>
+                              ) : profile.rateType === "per_hour" ? (
+                                <span className="font-bold text-sky-700 bg-sky-50 px-1.5 py-0.2 rounded text-[9.5px]">
+                                  ⏱️ {isArabic ? "بالساعة" : "Per Hour"}
+                                </span>
                               ) : (
                                 <span className="font-bold text-slate-600 bg-slate-100 px-1.5 py-0.2 rounded text-[9.5px]">
                                   🎟️ {isArabic ? "بالحصة" : "Per Lesson"}
@@ -559,14 +875,28 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                               <span>{isArabic ? profile.status.labelAr : profile.status.labelEn}</span>
                             </span>
                           </td>
+                          <td className="py-2 px-2.5 text-center bg-emerald-50/30">
+                            <div className="leading-tight">
+                              <span className="font-black text-emerald-700 text-xs">
+                                {profile.expectedRevenueInfo?.expectedRevenue || (profile.isMonthly ? profile.monthlyCost : profile.lessonCost * 4)} <span className="text-[10px] font-normal">{isArabic ? "ج.م" : "EGP"}</span>
+                              </span>
+                              <span className="text-[9.5px] text-slate-500 block">
+                                {profile.expectedRevenueInfo?.expectedLessonsCount || 4} {isArabic ? "حصة متوقعة" : "lessons"}
+                              </span>
+                            </div>
+                          </td>
                           <td className="py-2 px-2.5 text-center font-bold text-slate-800">
                             {profile.isMonthly ? (
                               <span>
                                 {profile.monthlyCost} <span className="text-[10px] text-purple-600">{isArabic ? "ج.م/شهر" : "EGP/mo"}</span>
                               </span>
+                            ) : profile.rateType === "per_hour" ? (
+                              <span>
+                                {profile.hourlyCost} <span className="text-[10px] text-sky-600 font-semibold">{isArabic ? "ج.م/ساعة" : "EGP/hr"}</span>
+                              </span>
                             ) : (
                               <span>
-                                {profile.lessonCost} <span className="text-[10px] text-slate-400">{isArabic ? "ج.م" : "EGP"}</span>
+                                {profile.lessonCost} <span className="text-[10px] text-slate-400">{isArabic ? "ج.م/حصة" : "EGP/lss"}</span>
                               </span>
                             )}
                           </td>
@@ -574,12 +904,19 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                             {profile.isMonthly ? (
                               <div className="leading-tight">
                                 <span className="font-black text-purple-700">{profile.billedMonthsCount} {isArabic ? "شهر" : "mo"}</span>
-                                <span className="text-[9.5px] text-slate-400 block font-normal">({profile.attendedLessonsCount} {isArabic ? "حضور" : "att."})</span>
+                                <span className="text-[9.5px] text-slate-400 block font-normal">
+                                  ({profile.attendedLessonsCount} {isArabic ? "حصة" : "lss"} • {profile.totalTaughtHours} {isArabic ? "س" : "hrs"})
+                                </span>
                               </div>
                             ) : (
-                              <span className="font-black text-blue-700">
-                                {profile.attendedLessonsCount} {isArabic ? "حصة" : "lss"}
-                              </span>
+                              <div className="leading-tight">
+                                <span className="font-black text-blue-700">
+                                  {profile.attendedLessonsCount} {isArabic ? "حصة" : "lss"}
+                                </span>
+                                <span className="text-[10px] text-sky-700 block font-semibold">
+                                  {profile.totalTaughtHours} {isArabic ? "ساعة" : "hrs"}
+                                </span>
+                              </div>
                             )}
                           </td>
                           <td className="py-2 px-2.5 text-center font-bold text-slate-700">
@@ -678,9 +1015,13 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                             <span className="font-bold text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded">
                               📅 {isArabic ? "اشتراك شهري" : "Monthly Plan"}
                             </span>
+                          ) : profile.rateType === "per_hour" ? (
+                            <span className="font-bold text-sky-700 bg-sky-50 px-1.5 py-0.5 rounded">
+                              ⏱️ {isArabic ? "سعر الساعة" : "Per Hour"}
+                            </span>
                           ) : (
                             <span className="font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">
-                              🎟️ {isArabic ? "نظام الحصة" : "Per Lesson"}
+                              🎟️ {isArabic ? "سعر الحصة" : "Per Lesson"}
                             </span>
                           )}
                         </div>
@@ -695,53 +1036,40 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                       </span>
                     </div>
 
-                    {/* Financial Metrics Grid */}
-                    <div className="grid grid-cols-3 gap-1.5 bg-slate-50/80 p-2 rounded-xl border border-slate-100 text-center">
+                    {/* Financial Metrics Grid - Crisp & Clean */}
+                    <div className="grid grid-cols-3 gap-1.5 bg-slate-50/80 p-2.5 rounded-xl border border-slate-100 text-center">
                       <div>
                         <span className="text-[9.5px] font-bold text-slate-400 block">
                           {profile.isMonthly ? (isArabic ? "الشهور المحتسبة" : "Billed Months") : (isArabic ? "الحصص المنفذة" : "Attended")}
                         </span>
-                        {profile.isMonthly ? (
-                          <span className="text-xs font-black text-purple-700">
-                            {profile.billedMonthsCount} <span className="text-[9px] font-normal">{isArabic ? "شهر" : "mo"}</span>
-                          </span>
-                        ) : (
-                          <span className="text-xs font-black text-blue-700">
-                            {profile.attendedLessonsCount} <span className="text-[9px] font-normal">{isArabic ? "حصة" : "lss"}</span>
-                          </span>
-                        )}
-                        <span className="text-[9px] font-bold text-slate-400 block">
-                          ({profile.attendedLessonsCost} ج.م)
+                        <span className="text-xs font-black text-blue-700 block">
+                          {profile.isMonthly ? `${profile.billedMonthsCount} شهر` : `${profile.attendedLessonsCount} حصة`}
                         </span>
-                      </div>
-
-                      <div>
-                        <span className="text-[9.5px] font-bold text-slate-400 block">
-                          {profile.isMonthly ? (isArabic ? "سعر الشهر" : "Month Fee") : (isArabic ? "سعر الحصة" : "Lesson Fee")}
+                        <span className="text-[9.5px] font-bold text-slate-400 block mt-0.5">
+                          {profile.attendedLessonsCost} ج.م
                         </span>
-                        <span className="text-xs font-black text-slate-800">
-                          {profile.isMonthly ? profile.monthlyCost : profile.lessonCost} <span className="text-[9px] font-normal">{isArabic ? "ج.م" : "EGP"}</span>
-                        </span>
-                        {profile.isMonthly && (
-                          <span className="text-[8.5px] text-purple-600 block font-semibold">
-                            {isArabic ? "يحسب كاملاً" : "Fixed"}
-                          </span>
-                        )}
                       </div>
 
                       <div>
                         <span className="text-[9.5px] font-bold text-slate-400 block">
                           {isArabic ? "إجمالي المسدد" : "Paid"}
                         </span>
-                        <span className="text-xs font-black text-emerald-600">
+                        <span className="text-xs font-black text-emerald-600 block">
                           {profile.totalPaidAmount} <span className="text-[9px] font-normal">{isArabic ? "ج.م" : "EGP"}</span>
                         </span>
+                        <span className="text-[9px] text-slate-400 block mt-0.5">
+                          {profile.isMonthly ? (isArabic ? "شهري" : "Monthly") : `${profile.lessonCost} ج.م/ح`}
+                        </span>
                       </div>
-                    </div>
 
-                    {/* Explanation */}
-                    <div className="text-[10.5px] text-slate-600 font-medium px-1 bg-white/70 py-1 rounded-lg border border-slate-100">
-                      {isArabic ? profile.explanationAr : profile.explanationEn}
+                      <div>
+                        <span className="text-[9.5px] font-bold text-slate-400 block">
+                          {isDue ? (isArabic ? "المستحق" : "Due") : (isArabic ? "الرصيد الفائض" : "Credit")}
+                        </span>
+                        <span className={`text-xs font-black block ${isDue ? "text-rose-600" : isCredit ? "text-emerald-700" : "text-slate-700"}`}>
+                          {isDue ? `${profile.amountDue} ج.م` : isCredit ? `+${profile.creditRemaining} ج.م` : (isArabic ? "مسدد" : "Settled")}
+                        </span>
+                      </div>
                     </div>
 
                     {/* Footer Actions */}
@@ -888,15 +1216,23 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
             {/* Modal Body */}
             <div className="p-4 sm:p-5 space-y-4 max-h-[70vh] overflow-y-auto">
               {/* Summary Stats Grid */}
-              <div className="grid grid-cols-3 gap-2 bg-slate-50 p-3 rounded-2xl border border-slate-200/80 text-center">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-slate-50 p-3 rounded-2xl border border-slate-200/80 text-center">
                 <div className="bg-white p-2 rounded-xl border border-slate-100">
                   <span className="text-[10px] font-bold text-slate-400 block">
                     {statementModalProfile.isMonthly ? (isArabic ? "الشهور المحتسبة" : "Billed Months") : (isArabic ? "الحصص المنفذة" : "Attended")}
                   </span>
                   <span className="text-sm font-black text-blue-700">
-                    {statementModalProfile.isMonthly ? `${statementModalProfile.billedMonthsCount} شهر` : statementModalProfile.attendedLessonsCount}
+                    {statementModalProfile.isMonthly ? `${statementModalProfile.billedMonthsCount} شهر` : `${statementModalProfile.attendedLessonsCount} حصة`}
                   </span>
                   <span className="text-[9.5px] text-slate-400 block">({statementModalProfile.attendedLessonsCost} ج.م)</span>
+                </div>
+
+                <div className="bg-white p-2 rounded-xl border border-slate-100">
+                  <span className="text-[10px] font-bold text-slate-400 block">{isArabic ? "الساعات المنفذة" : "Taught Hours"}</span>
+                  <span className="text-sm font-black text-sky-700">{statementModalProfile.totalTaughtHours} ساعة</span>
+                  <span className="text-[9.5px] text-slate-400 block">
+                    {statementModalProfile.rateType === "per_hour" ? `${statementModalProfile.hourlyCost} ج.م/س` : `${statementModalProfile.lessonCost} ج.م/ح`}
+                  </span>
                 </div>
 
                 <div className="bg-white p-2 rounded-xl border border-slate-100">
@@ -920,18 +1256,78 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                 </div>
               </div>
 
+              {/* Expected Monthly Revenue Box */}
+              {statementModalProfile.expectedRevenueInfo && (
+                <div className="p-3 rounded-2xl bg-emerald-50/90 border border-emerald-200 text-slate-800 text-xs flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Target className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <div>
+                      <span className="font-bold text-emerald-900 block">
+                        {isArabic ? "الإيراد المتوقع لهذا الشهر من هذا الطالب:" : "Expected Revenue This Month:"}
+                      </span>
+                      <span className="text-[11px] text-slate-600">
+                        {statementModalProfile.expectedRevenueInfo.scheduleDescription}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="text-left shrink-0">
+                    <span className="text-sm font-black text-emerald-700 block">
+                      {statementModalProfile.expectedRevenueInfo.expectedRevenue.toLocaleString()} {isArabic ? "ج.م" : "EGP"}
+                    </span>
+                    <span className="text-[10px] text-slate-500 font-medium">
+                      {statementModalProfile.expectedRevenueInfo.expectedLessonsCount} {isArabic ? "حصة متوقعة" : "lessons"}
+                    </span>
+                  </div>
+                </div>
+              )}
+
               {/* Status Explanation */}
               <div className="p-3 rounded-2xl bg-blue-50/70 border border-blue-100 text-slate-800 text-xs font-semibold">
                 {isArabic ? statementModalProfile.explanationAr : statementModalProfile.explanationEn}
               </div>
 
-              {/* Billing Plan Info Notice if monthly */}
+            {/* Billing Plan Info Notice if monthly */}
               {statementModalProfile.isMonthly && (
                 <div className="p-2.5 rounded-xl bg-purple-50 border border-purple-200 text-purple-900 text-[11px] font-medium flex items-start gap-2">
                   <span className="text-sm shrink-0">📅</span>
                   <div>
                     <span className="font-bold block">نظام الاشتراك الشهري الكامل:</span>
                     <span>قيمة الاشتراك الثابتة هي {statementModalProfile.monthlyCost} ج.م لكل شهر، ويتم احتساب الشهر كاملاً سواء حضر الطالب جميع الحصص أو بعضها. يتم تسجيل الحضور للتقييم الأكاديمي والتربوي.</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Subject Breakdown if student is enrolled in multiple subjects */}
+              {statementModalProfile.subjectBreakdown && statementModalProfile.subjectBreakdown.length > 1 && (
+                <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
+                  <h4 className="font-black text-slate-900 text-xs flex items-center gap-1.5">
+                    <Layers className="w-3.5 h-3.5 text-blue-600" />
+                    <span>{isArabic ? "تفصيل الحساب المالي لكل مادة مسجلة:" : "Financial Breakdown by Subject:"}</span>
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {statementModalProfile.subjectBreakdown.map(sub => (
+                      <div
+                        key={sub.subjectId || sub.subjectName}
+                        className="bg-white p-2.5 rounded-xl border border-slate-200/80 space-y-1 text-xs"
+                      >
+                        <div className="flex items-center justify-between font-black">
+                          <span className="text-slate-900">{sub.subjectName}</span>
+                          <span className="text-[10px] px-1.5 py-0.2 rounded bg-blue-50 text-blue-700">
+                            {sub.studyTypeLabel}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-[11px] text-slate-500">
+                          <span>{isArabic ? "المحسوب:" : "Accrued:"} {sub.attendedCost} ج.م</span>
+                          <span>{isArabic ? "المسدد:" : "Paid:"} {sub.paidAmount} ج.م</span>
+                        </div>
+                        <div className="pt-1 border-t border-slate-100 flex items-center justify-between font-bold text-[11px]">
+                          <span className="text-slate-600">{isArabic ? "الحالة:" : "Status:"}</span>
+                          <span className={sub.amountDue > 0 ? "text-rose-600 font-black" : "text-emerald-600 font-black"}>
+                            {sub.amountDue > 0 ? `${sub.amountDue} ج.م مستحق` : (isArabic ? "مسدد بالكامل" : "Paid")}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
@@ -1087,23 +1483,226 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
               )}
             </div>
 
+            {/* Multi-subject allocation mode toggle */}
+            {paymentModalStudent.subjectBreakdown && paymentModalStudent.subjectBreakdown.length > 1 && (
+              <div className="mb-3 space-y-2">
+                <div className="flex rounded-xl bg-slate-100 p-1 border border-slate-200 text-[11px] font-bold">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAllocationMode("per_subject");
+                      let sum = 0;
+                      paymentModalStudent.subjectBreakdown!.forEach(sub => {
+                        sum += Number(subjectAllocationsMap[sub.subjectId || sub.subjectName]) || 0;
+                      });
+                      setAmount(sum);
+                    }}
+                    className={`flex-1 py-1.5 rounded-lg transition text-center ${
+                      allocationMode === "per_subject"
+                        ? "bg-white text-emerald-700 font-black shadow-xs"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    {isArabic ? "🔀 توزيع للمواد" : "Per Subject"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAllocationMode("single_subject")}
+                    className={`flex-1 py-1.5 rounded-lg transition text-center ${
+                      allocationMode === "single_subject"
+                        ? "bg-white text-blue-700 font-black shadow-xs"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    {isArabic ? "🎯 مادة واحدة" : "Single Subject"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAllocationMode("general")}
+                    className={`flex-1 py-1.5 rounded-lg transition text-center ${
+                      allocationMode === "general"
+                        ? "bg-white text-slate-900 font-black shadow-xs"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    {isArabic ? "⚡ سداد عام" : "General"}
+                  </button>
+                </div>
+
+                {paymentModalStudent.amountDue > 0 && allocationMode === "per_subject" && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const newMap: Record<string, number> = {};
+                      paymentModalStudent.subjectBreakdown!.forEach(sub => {
+                        newMap[sub.subjectId || sub.subjectName] = Math.max(0, sub.amountDue);
+                      });
+                      setSubjectAllocationsMap(newMap);
+                      setAmount(paymentModalStudent.amountDue);
+                    }}
+                    className="w-full py-1.5 px-3 rounded-xl bg-emerald-50 hover:bg-emerald-100/80 border border-emerald-200 text-emerald-800 text-[11px] font-bold transition flex items-center justify-between"
+                  >
+                    <span>{isArabic ? "⚡ تعبئة كامل المستحق تلقائياً لكل مادة:" : "Fill all dues:"}</span>
+                    <span className="font-black bg-emerald-200/80 px-2 py-0.5 rounded-lg text-emerald-900">
+                      {paymentModalStudent.amountDue} {isArabic ? "ج.م" : "EGP"}
+                    </span>
+                  </button>
+                )}
+              </div>
+            )}
+
             {/* Unified Form: Amount + Date + Optional Notes */}
             <form onSubmit={handleSubmitPayment} className="space-y-3.5 text-xs">
-              {/* 1. المبلغ */}
-              <div>
-                <label className="block font-black text-slate-700 mb-1">
-                  {isArabic ? "المبلغ المدفوع (بالجنيه المصري):" : "Amount Paid (EGP):"}
-                </label>
-                <input
-                  type="number"
-                  required
-                  min="1"
-                  value={amount}
-                  onChange={e => setAmount(Number(e.target.value))}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 font-black text-lg text-emerald-700 focus:outline-none focus:border-emerald-500 shadow-2xs"
-                  placeholder="100"
-                />
-              </div>
+              {/* Conditional Amount Fields depending on allocationMode */}
+              {paymentModalStudent.subjectBreakdown && paymentModalStudent.subjectBreakdown.length > 1 && allocationMode === "per_subject" ? (
+                <div className="space-y-2">
+                  <label className="block font-black text-slate-700">
+                    {isArabic ? "حدد المبلغ المسدد لكل مادة:" : "Amount for each subject:"}
+                  </label>
+                  <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                    {paymentModalStudent.subjectBreakdown.map(sub => {
+                      const key = sub.subjectId || sub.subjectName;
+                      const curVal = subjectAllocationsMap[key] ?? 0;
+                      return (
+                        <div
+                          key={key}
+                          className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/90 space-y-1.5"
+                        >
+                          <div className="flex items-center justify-between text-[11px]">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-black text-slate-900">{sub.subjectName}</span>
+                              <span className="text-[10px] text-slate-500 font-medium">({sub.studyTypeLabel})</span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              {sub.amountDue > 0 ? (
+                                <span className="text-rose-700 font-black">
+                                  {isArabic ? `مستحق: ${sub.amountDue} ج.م` : `Due: ${sub.amountDue} EGP`}
+                                </span>
+                              ) : (
+                                <span className="text-emerald-700 font-bold">
+                                  {isArabic ? "مسدد" : "Paid"}
+                                </span>
+                              )}
+                              {sub.amountDue > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSubjectAllocationsMap(prev => {
+                                      const next = { ...prev, [key]: sub.amountDue };
+                                      let sum = 0;
+                                      paymentModalStudent.subjectBreakdown!.forEach(s => {
+                                        const k = s.subjectId || s.subjectName;
+                                        sum += k === key ? sub.amountDue : (Number(next[k]) || 0);
+                                      });
+                                      setAmount(sum);
+                                      return next;
+                                    });
+                                  }}
+                                  className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 font-black hover:bg-emerald-200 text-[10px]"
+                                >
+                                  {isArabic ? "سداد المستحق" : "Pay Due"}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="relative">
+                            <input
+                              type="number"
+                              min="0"
+                              step="any"
+                              value={curVal === 0 ? "" : curVal}
+                              onChange={e => {
+                                const val = parseFloat(e.target.value) || 0;
+                                setSubjectAllocationsMap(prev => {
+                                  const next = { ...prev, [key]: val };
+                                  let sum = 0;
+                                  paymentModalStudent.subjectBreakdown!.forEach(s => {
+                                    const k = s.subjectId || s.subjectName;
+                                    sum += Number(next[k]) || 0;
+                                  });
+                                  setAmount(sum);
+                                  return next;
+                                });
+                              }}
+                              placeholder="0"
+                              className="w-full bg-white border border-slate-200 rounded-xl px-3 py-1.5 font-black text-slate-800 text-sm focus:outline-none focus:border-emerald-500 shadow-2xs"
+                            />
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">
+                              {isArabic ? "ج.م" : "EGP"}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="p-2 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-between text-xs font-black">
+                    <span className="text-emerald-800">{isArabic ? "إجمالي المبلغ المحسوب:" : "Total Allocated:"}</span>
+                    <span className="text-sm text-emerald-700">{amount} {isArabic ? "ج.م" : "EGP"}</span>
+                  </div>
+                </div>
+              ) : paymentModalStudent.subjectBreakdown && paymentModalStudent.subjectBreakdown.length > 1 && allocationMode === "single_subject" ? (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">
+                      {isArabic ? "اختر المادة المراد تسجيل السداد لها:" : "Select Subject:"}
+                    </label>
+                    <select
+                      value={selectedSingleSubject}
+                      onChange={e => {
+                        const sel = e.target.value;
+                        setSelectedSingleSubject(sel);
+                        const matched = paymentModalStudent.subjectBreakdown?.find(
+                          s => s.subjectId === sel || s.subjectName === sel
+                        );
+                        if (matched) {
+                          setAmount(matched.amountDue > 0 ? matched.amountDue : (matched.isMonthly ? matched.monthlyCost : matched.lessonCost));
+                        }
+                      }}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-bold text-xs focus:outline-none focus:border-blue-500"
+                    >
+                      {paymentModalStudent.subjectBreakdown.map(sub => (
+                        <option key={sub.subjectId || sub.subjectName} value={sub.subjectId || sub.subjectName}>
+                          {sub.subjectName} ({sub.studyTypeLabel}) - {sub.amountDue > 0 ? (isArabic ? `مستحق ${sub.amountDue} ج.م` : `Due ${sub.amountDue}`) : (isArabic ? "مسدد" : "Paid")}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block font-black text-slate-700 mb-1">
+                      {isArabic ? "المبلغ المدفوع لهذه المادة (ج.م):" : "Amount Paid for this subject (EGP):"}
+                    </label>
+                    <input
+                      type="number"
+                      required
+                      min="0.01"
+                      step="any"
+                      value={amount}
+                      onChange={e => setAmount(parseFloat(e.target.value) || 0)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 font-black text-lg text-emerald-700 focus:outline-none focus:border-emerald-500 shadow-2xs"
+                      placeholder="100"
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <label className="block font-black text-slate-700 mb-1">
+                    {isArabic ? "المبلغ المدفوع (بالجنيه المصري):" : "Amount Paid (EGP):"}
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min="0.01"
+                    step="any"
+                    value={amount}
+                    onChange={e => setAmount(parseFloat(e.target.value) || 0)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 font-black text-lg text-emerald-700 focus:outline-none focus:border-emerald-500 shadow-2xs"
+                    placeholder="100"
+                  />
+                </div>
+              )}
 
               {/* 2. التاريخ */}
               <div>

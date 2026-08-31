@@ -23,7 +23,9 @@ import {
   Layers,
   ChevronDown,
   ChevronUp,
-  RefreshCw
+  RefreshCw,
+  Star,
+  Clock
 } from "lucide-react";
 import {
   AppSettings,
@@ -53,6 +55,10 @@ interface StudentPersonalReportViewProps {
     teacherNotes?: string;
     classEvents?: string;
     homeworkNotes?: string;
+    overallEvaluation?: string;
+    lessonDuration?: string;
+    includeDuration?: boolean;
+    durationMinutes?: number;
     aiInstructions?: string;
     generalAiInstructions?: string;
     subjectAiInstructions?: string;
@@ -113,6 +119,8 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
     settings.generalAiInstructions
   );
 
+  const initialSubjPlan = student.subjects?.find(s => s.subject === initialSubject);
+
   // Form State
   const [reportSubject, setReportSubject] = useState<string>(initialSubject);
   const [reportLessonNumber, setReportLessonNumber] = useState<number>(() =>
@@ -121,12 +129,17 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
   const [reportDate, setReportDate] = useState<string>(
     new Date().toISOString().split("T")[0]
   );
+  const [includeDuration, setIncludeDuration] = useState<boolean>(false);
+  const [durationMinutes, setDurationMinutes] = useState<number>(
+    initialSubjPlan?.defaultDurationMinutes || 60
+  );
   const [reportAttendance, setReportAttendance] = useState<AttendanceStatus>("present");
   const [reportDeductCost, setReportDeductCost] = useState<boolean>(true);
   const [reportHomeworkStatus, setReportHomeworkStatus] = useState<HomeworkStatus>("done");
   const [absentNotes, setAbsentNotes] = useState<string>("");
   const [classEvents, setClassEvents] = useState<string>("");
   const [homeworkNotes, setHomeworkNotes] = useState<string>("");
+  const [overallEvaluation, setOverallEvaluation] = useState<string>("");
   const [newAiInstructions, setNewAiInstructions] = useState<string>(initialAiInst);
   const [newGeneratedReportText, setNewGeneratedReportText] = useState<string>("");
   const [reportAttachment, setReportAttachment] = useState<ReportAttachment | null>(null);
@@ -323,8 +336,10 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
   // Helper for saving present report
   const handleSavePresentReport = (textToSave?: string) => {
     const combinedNotes = [
+      includeDuration ? `مدة الحصة: ${durationMinutes} دقيقة` : "",
       classEvents.trim() ? `ما حدث داخل الحصة:\n${classEvents.trim()}` : "",
-      homeworkNotes.trim() ? `الواجب والتكليفات:\n${homeworkNotes.trim()}` : ""
+      homeworkNotes.trim() ? `الواجب والتكليفات:\n${homeworkNotes.trim()}` : "",
+      overallEvaluation.trim() ? `التقييم الإجمالي: ${overallEvaluation.trim()}` : ""
     ].filter(Boolean).join("\n\n");
 
     const finalText = textToSave || newGeneratedReportText || combinedNotes;
@@ -339,9 +354,13 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
       attendance: "present",
       deductCost: true,
       homeworkStatus: reportHomeworkStatus,
+      durationMinutes: includeDuration ? durationMinutes : undefined,
+      lessonDuration: includeDuration ? `${durationMinutes} دقيقة` : undefined,
+      includeDuration: includeDuration,
       teacherNotes: combinedNotes,
       classEvents: classEvents.trim(),
       homeworkNotes: homeworkNotes.trim(),
+      overallEvaluation: overallEvaluation.trim() || undefined,
       aiInstructions: newAiInstructions,
       reportText: finalText,
       generatedText: finalText
@@ -353,6 +372,7 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
     setReportLessonNumber(prev => prev + 1);
     setClassEvents("");
     setHomeworkNotes("");
+    setOverallEvaluation("");
     setNewGeneratedReportText("");
     setReportAttachment(null);
   };
@@ -722,6 +742,74 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
           </div>
         </div>
 
+        {/* مدة الحصة (يمكن تفعيلها أو إلغاؤها) */}
+        <div className="p-3.5 rounded-2xl bg-purple-50/50 border border-purple-200/80 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Clock className="w-4 h-4 text-purple-600" />
+              <span className="text-xs font-black text-slate-800">
+                {isArabic ? "مدة الحصة بالتقرير:" : "Lesson Duration in Report:"}
+              </span>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setIncludeDuration(!includeDuration)}
+              className={`px-3 py-1 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                includeDuration
+                  ? "bg-purple-600 text-white shadow-2xs"
+                  : "bg-white border border-slate-200 text-slate-600 hover:border-purple-300"
+              }`}
+            >
+              <span>{includeDuration ? (isArabic ? "✓ مفعلة بالتقرير" : "✓ Included") : (isArabic ? "✕ غير مفعلة" : "✕ Disabled")}</span>
+            </button>
+          </div>
+
+          {includeDuration && (
+            <div className="pt-2 border-t border-purple-100/80 space-y-2 animate-in fade-in duration-200">
+              <div className="flex flex-wrap items-center gap-1.5">
+                {[
+                  { label: isArabic ? "45 دقيقة" : "45 min", mins: 45 },
+                  { label: isArabic ? "60 دقيقة (ساعة)" : "60 min (1 hr)", mins: 60 },
+                  { label: isArabic ? "90 دقيقة (ساعة ونصف)" : "90 min (1.5 hr)", mins: 90 },
+                  { label: isArabic ? "120 دقيقة (ساعتان)" : "120 min (2 hrs)", mins: 120 }
+                ].map(item => (
+                  <button
+                    key={item.mins}
+                    type="button"
+                    onClick={() => setDurationMinutes(item.mins)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+                      durationMinutes === item.mins
+                        ? "bg-purple-600 text-white shadow-2xs font-black"
+                        : "bg-white border border-purple-200 text-slate-700 hover:bg-purple-50"
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+
+                <div className="flex items-center gap-1 bg-white border border-purple-200 rounded-lg px-2 py-0.5">
+                  <span className="text-[10px] text-slate-500 font-bold">{isArabic ? "مخصص:" : "Custom:"}</span>
+                  <input
+                    type="number"
+                    min="5"
+                    max="360"
+                    value={durationMinutes}
+                    onChange={e => setDurationMinutes(Math.max(5, parseInt(e.target.value) || 60))}
+                    className="w-12 text-center text-xs font-black text-purple-900 focus:outline-none"
+                  />
+                  <span className="text-[10px] text-purple-700 font-bold">{isArabic ? "دقيقة" : "min"}</span>
+                </div>
+              </div>
+              <p className="text-[10.5px] text-purple-700 font-medium">
+                {isArabic
+                  ? `⏱️ سيتم ذكر مدة الحصة (${durationMinutes} دقيقة) في ترويسة التقرير وتفاصيله.`
+                  : `⏱️ Lesson duration (${durationMinutes} mins) will be included in the report header.`}
+              </p>
+            </div>
+          )}
+        </div>
+
         {/* STEP 4: حالة الحضور والغياب */}
         <div className="space-y-2 pt-2 border-t border-slate-100">
           <label className="block font-black text-slate-800 text-xs flex items-center gap-2">
@@ -958,6 +1046,78 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
                   className="w-full bg-white border border-slate-200 rounded-xl p-3 text-slate-800 text-xs sm:text-sm focus:outline-none focus:border-indigo-500 leading-relaxed transition shadow-2xs font-sans placeholder:text-slate-400"
                 />
               </div>
+
+              {/* Field 3: Overall Evaluation (Presets + Free Text) */}
+              <div className="bg-amber-50/60 border border-amber-200/90 rounded-2xl p-3.5 sm:p-4 space-y-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <label className="block font-black text-slate-800 text-xs sm:text-sm flex items-center gap-1.5">
+                    <Star className="w-4 h-4 text-amber-500 fill-amber-400" />
+                    <span>{isArabic ? "⭐ التقييم الإجمالي ومستوى الأداء (خيارات سريعة + كتابة حرة):" : "⭐ Overall Evaluation & Performance Rating:"}</span>
+                  </label>
+                  <div className="flex items-center gap-1.5">
+                    {overallEvaluation && (
+                      <button
+                        type="button"
+                        onClick={() => setOverallEvaluation("")}
+                        className="text-[11px] text-rose-600 hover:text-rose-700 font-bold px-2 py-0.5 rounded-md hover:bg-rose-50 transition"
+                      >
+                        {isArabic ? "مسح التقييم" : "Clear"}
+                      </button>
+                    )}
+                    <span className="text-[10px] font-black text-amber-800 bg-amber-100/90 px-2 py-0.5 rounded-md">
+                      {isArabic ? "التقييم الإجمالي" : "Overall Rating"}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Preset Options Buttons */}
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    { label: isArabic ? "🌟 ممتاز مرتفع" : "🌟 Excellent+", value: isArabic ? "ممتاز مرتفع (⭐⭐⭐⭐⭐)" : "Excellent+ (5/5)" },
+                    { label: isArabic ? "⭐ ممتاز" : "⭐ Excellent", value: isArabic ? "ممتاز (⭐⭐⭐⭐⭐)" : "Excellent (5/5)" },
+                    { label: isArabic ? "📈 جيد جداً مرتفع" : "📈 Very Good+", value: isArabic ? "جيد جداً مرتفع (⭐⭐⭐⭐)" : "Very Good+ (4/5)" },
+                    { label: isArabic ? "👍 جيد جداً" : "👍 Very Good", value: isArabic ? "جيد جداً (⭐⭐⭐⭐)" : "Very Good (4/5)" },
+                    { label: isArabic ? "✨ جيد" : "✨ Good", value: isArabic ? "جيد (⭐⭐⭐)" : "Good (3/5)" },
+                    { label: isArabic ? "⚖️ مقبول / متوسط" : "⚖️ Average", value: isArabic ? "مقبول / متوسط (⭐⭐)" : "Average (2/5)" },
+                    { label: isArabic ? "⚠️ يحتاج متابعة وتطوير" : "⚠️ Needs Improvement", value: isArabic ? "يحتاج إلى متابعة وتطوير مستمر ⚠️" : "Needs continuous improvement ⚠️" },
+                    { label: isArabic ? "🚀 متفوق ومبدع" : "🚀 Outstanding", value: isArabic ? "متفوق ومبدع 🚀" : "Outstanding 🚀" },
+                    { label: "💯 10 / 10", value: "10 / 10" },
+                    { label: "🎯 9 / 10", value: "9 / 10" },
+                    { label: "📊 8 / 10", value: "8 / 10" }
+                  ].map((preset, idx) => {
+                    const isSelected = overallEvaluation === preset.value;
+                    return (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => setOverallEvaluation(isSelected ? "" : preset.value)}
+                        className={`px-2.5 py-1 rounded-xl text-xs font-bold transition flex items-center gap-1 border shadow-2xs ${
+                          isSelected
+                            ? "bg-amber-500 border-amber-600 text-white shadow-sm scale-102"
+                            : "bg-white border-amber-200 text-slate-700 hover:bg-amber-100/70 hover:border-amber-300"
+                        }`}
+                      >
+                        <span>{preset.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Free Text Writing Input */}
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={overallEvaluation}
+                    onChange={e => setOverallEvaluation(e.target.value)}
+                    placeholder={
+                      isArabic
+                        ? "اختر من الخيارات أعلاه أو اكتب تقييماً أو درجة أو ملاحظة مخصصة بحرية..."
+                        : "Select preset above or type custom assessment freely..."
+                    }
+                    className="w-full bg-white border border-amber-200/90 rounded-xl p-3 text-slate-800 text-xs sm:text-sm focus:outline-none focus:border-amber-500 leading-relaxed transition shadow-2xs font-sans placeholder:text-slate-400"
+                  />
+                </div>
+              </div>
             </div>
 
             {/* Subject AI Instructions */}
@@ -1078,7 +1238,11 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
                     subject: reportSubject,
                     classEvents: classEvents.trim(),
                     homeworkNotes: homeworkNotes.trim(),
-                    teacherNotes: `الحصة #${reportLessonNumber} (${reportDate}):\nما تم في الحصة: ${classEvents.trim() || "تم شرح الدرس ومتابعة التطبيق العملي."}\nالواجب المطلوب: ${homeworkNotes.trim() || (reportHomeworkStatus === "no_homework" ? "لم يتم تكليف الطالب بواجب." : "حسب المعتاد")}\nحالة الواجب: ${
+                    overallEvaluation: overallEvaluation.trim() || undefined,
+                    lessonDuration: includeDuration ? `${durationMinutes} دقيقة` : undefined,
+                    includeDuration: includeDuration,
+                    durationMinutes: includeDuration ? durationMinutes : undefined,
+                    teacherNotes: `الحصة #${reportLessonNumber} (${reportDate}):${includeDuration ? `\nمدة الحصة: ${durationMinutes} دقيقة` : ""}\nما تم في الحصة: ${classEvents.trim() || "تم شرح الدرس ومتابعة التطبيق العملي."}\nالواجب المطلوب: ${homeworkNotes.trim() || (reportHomeworkStatus === "no_homework" ? "لم يتم تكليف الطالب بواجب." : "حسب المعتاد")}\nحالة الواجب: ${
                       reportHomeworkStatus === "no_homework"
                         ? "لم يكن هناك واجب (لا تذكر أي بند أو سطر أو إشارة عن الواجب في التقرير نهائياً ما لم يحدده المعلم)"
                         : reportHomeworkStatus === "done"
@@ -1086,7 +1250,7 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
                         : reportHomeworkStatus === "not_done"
                         ? "لم يتم حل الواجب"
                         : "حل الواجب بتأخير أو جزئياً"
-                    }`,
+                    }${overallEvaluation.trim() ? `\nالتقييم الإجمالي ومستوى الأداء: ${overallEvaluation.trim()}` : ""}`,
                     aiInstructions: effectiveAiInst,
                     generalAiInstructions: generalInst,
                     subjectAiInstructions: subjSpecificInst,
@@ -1184,15 +1348,17 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
             ) : (
               /* Direct Save without AI */
               <div className="pt-2 flex flex-wrap items-center justify-end gap-2">
-                {(classEvents.trim() || homeworkNotes.trim()) && (
+                {(classEvents.trim() || homeworkNotes.trim() || overallEvaluation.trim()) && (
                   <button
                     type="button"
                     onClick={() => {
                       const manualText = [
                         `تقرير الحصة #${reportLessonNumber} - مادة: ${reportSubject}`,
                         `التاريخ: ${reportDate}`,
+                        includeDuration ? `مدة الحصة: ${durationMinutes} دقيقة` : "",
                         classEvents.trim() ? `ما حدث داخل الحصة:\n${classEvents.trim()}` : "",
-                        homeworkNotes.trim() ? `الواجب والتكليفات:\n${homeworkNotes.trim()}` : ""
+                        homeworkNotes.trim() ? `الواجب والتكليفات:\n${homeworkNotes.trim()}` : "",
+                        overallEvaluation.trim() ? `التقييم الإجمالي:\n${overallEvaluation.trim()}` : ""
                       ].filter(Boolean).join("\n\n");
                       handleOpenWhatsAppChooser(manualText);
                     }}
@@ -1205,13 +1371,15 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
 
                 <button
                   type="button"
-                  disabled={!classEvents.trim() && !homeworkNotes.trim()}
+                  disabled={!classEvents.trim() && !homeworkNotes.trim() && !overallEvaluation.trim()}
                   onClick={() => {
                     const manualText = [
                       `تقرير الحصة #${reportLessonNumber} - مادة: ${reportSubject}`,
                       `التاريخ: ${reportDate}`,
+                      includeDuration ? `مدة الحصة: ${durationMinutes} دقيقة` : "",
                       classEvents.trim() ? `ما حدث داخل الحصة:\n${classEvents.trim()}` : "",
-                      homeworkNotes.trim() ? `الواجب والتكليفات:\n${homeworkNotes.trim()}` : ""
+                      homeworkNotes.trim() ? `الواجب والتكليفات:\n${homeworkNotes.trim()}` : "",
+                      overallEvaluation.trim() ? `التقييم الإجمالي:\n${overallEvaluation.trim()}` : ""
                     ].filter(Boolean).join("\n\n");
                     handleSavePresentReport(manualText);
                   }}
@@ -1334,6 +1502,11 @@ export const StudentPersonalReportView: React.FC<StudentPersonalReportViewProps>
                       <span className="text-[11px] text-slate-400 font-medium">
                         {report.date}
                       </span>
+                      {(report.durationMinutes || report.lessonDuration) && (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">
+                          ⏱️ {report.lessonDuration || `${report.durationMinutes} دقيقة`}
+                        </span>
+                      )}
                       {report.attendance === "absent" ? (
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-700">
                           {isArabic ? "🔴 غائب" : "Absent"}

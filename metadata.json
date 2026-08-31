@@ -1,6 +1,6 @@
 {
-  "name": "مساعد GoStars",
-  "description": "مساعد GoStars الشامل لإدارة المعلم والدروس: تنظيم المجموعات والدروس الخاصة، متابعة الحضور والغياب، الحساب المالي التلقائي للحصص، الجدولة الذكية، وتقارير الذكاء الاصطناعي.",
+  "name": "GoStars Assistant",
+  "description": "GoStars Assistant الشامل لإدارة المعلم والدروس: تنظيم المجموعات والدروس الخاصة، متابعة الحضور والغياب، الحساب المالي التلقائي للحصص، الجدولة الذكية، وتقارير الذكاء الاصطناعي.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

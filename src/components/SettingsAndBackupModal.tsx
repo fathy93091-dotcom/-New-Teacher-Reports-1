@@ -9,7 +9,10 @@ import {
   X,
   Sparkles,
   BookOpen,
-  Plus
+  Plus,
+  Download,
+  Smartphone,
+  Laptop
 } from "lucide-react";
 import { AppSettings, GoStarsBackupData, SubjectAiInstruction } from "../types";
 import { sanitizeTeacherName } from "../lib/storage";
@@ -31,9 +34,7 @@ export const SettingsAndBackupModal: React.FC<SettingsAndBackupModalProps> = ({
   onExportBackup,
   onRestoreBackup
 }) => {
-  if (!isOpen) return null;
-
-  const [activeTab, setActiveTab] = useState<"general" | "ai" | "backup">("general");
+  const [activeTab, setActiveTab] = useState<"general" | "ai" | "backup" | "install">("general");
   const [teacherName, setTeacherName] = useState(sanitizeTeacherName(settings.teacherName));
   const [subject, setSubject] = useState(settings.defaultSubject || "");
   const [lang, setLang] = useState<"ar" | "en">(settings.preferredLanguage || "ar");
@@ -49,6 +50,21 @@ export const SettingsAndBackupModal: React.FC<SettingsAndBackupModalProps> = ({
   const [newSubjectInstruction, setNewSubjectInstruction] = useState("");
 
   const [importStatus, setImportStatus] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (isOpen) {
+      setTeacherName(sanitizeTeacherName(settings.teacherName));
+      setSubject(settings.defaultSubject || "");
+      setLang(settings.preferredLanguage || "ar");
+      setGeneralAiInstructions(
+        settings.generalAiInstructions || "اكتب تقريراً احترافياً ومشجعاً لولي الأمر، ابدأ بنقطة إيجابية، ثم وضح ما يحتاج الطالب إلى تحسينه، وأنهِ التقرير بتوصية قصيرة."
+      );
+      setSubjectDefaults(settings.subjectDefaults || []);
+      setImportStatus(null);
+    }
+  }, [isOpen, settings]);
+
+  if (!isOpen) return null;
 
   const isArabic = lang === "ar";
 
@@ -162,30 +178,38 @@ export const SettingsAndBackupModal: React.FC<SettingsAndBackupModalProps> = ({
         </div>
 
         {/* Modal Tabs */}
-        <div className="grid grid-cols-3 gap-1 bg-slate-100 p-1 rounded-2xl my-4 text-xs font-bold">
+        <div className="grid grid-cols-4 gap-1 bg-slate-100 p-1 rounded-2xl my-4 text-xs font-bold">
           <button
             onClick={() => setActiveTab("general")}
-            className={`py-2 px-2 rounded-xl transition text-center ${
+            className={`py-2 px-1 rounded-xl transition text-center ${
               activeTab === "general" ? "bg-white text-blue-600 shadow-sm" : "text-slate-500"
             }`}
           >
-            ⚙️ {isArabic ? "الإعدادات العامة" : "General"}
+            ⚙️ {isArabic ? "العامة" : "General"}
           </button>
           <button
             onClick={() => setActiveTab("ai")}
-            className={`py-2 px-2 rounded-xl transition text-center ${
+            className={`py-2 px-1 rounded-xl transition text-center ${
               activeTab === "ai" ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500"
             }`}
           >
-            🤖 {isArabic ? "تعليمات المادة (AI)" : "AI Prompts"}
+            🤖 {isArabic ? "الذكاء (AI)" : "AI Prompts"}
           </button>
           <button
             onClick={() => setActiveTab("backup")}
-            className={`py-2 px-2 rounded-xl transition text-center ${
+            className={`py-2 px-1 rounded-xl transition text-center ${
               activeTab === "backup" ? "bg-white text-blue-600 shadow-sm" : "text-slate-500"
             }`}
           >
-            💾 {isArabic ? "النسخ الاحتياطي" : "Backup"}
+            💾 {isArabic ? "النسخ" : "Backup"}
+          </button>
+          <button
+            onClick={() => setActiveTab("install")}
+            className={`py-2 px-1 rounded-xl transition text-center ${
+              activeTab === "install" ? "bg-white text-emerald-600 shadow-sm" : "text-slate-500"
+            }`}
+          >
+            📱 {isArabic ? "تثبيت التطبيق" : "Install App"}
           </button>
         </div>
 
@@ -438,6 +462,55 @@ export const SettingsAndBackupModal: React.FC<SettingsAndBackupModalProps> = ({
               {importStatus && (
                 <p className="font-bold text-indigo-700 text-xs mt-2">{importStatus}</p>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* Tab 4: Install App Instructions */}
+        {activeTab === "install" && (
+          <div className="space-y-4 text-xs">
+            <div className="p-4 rounded-2xl bg-gradient-to-r from-slate-900 to-indigo-950 text-white border border-slate-700 space-y-2.5">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-xl bg-slate-950 border border-blue-500/40 p-1.5 shrink-0 flex items-center justify-center">
+                  <img src="/icon-192.svg" alt="App" className="w-full h-full object-contain" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-white text-sm">
+                    {isArabic ? "تطبيق GoStars Assistant على جهازك" : "GoStars Assistant Standalone App"}
+                  </h3>
+                  <p className="text-slate-300 text-[11px]">
+                    {isArabic
+                      ? "يعمل كتطبيق كامل وسريع مع أيقونة خاصة على شاشة هاتفك أو سطح المكتب."
+                      : "Runs as a dedicated native desktop / mobile app with fast access."}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-1.5">
+                <div className="flex items-center gap-2 text-emerald-700 font-bold text-xs">
+                  <Smartphone className="w-4 h-4 text-emerald-600" />
+                  <span>{isArabic ? "📱 طريقة التثبيت على الهاتف (أندرويد / آيفون):" : "Mobile Devices:"}</span>
+                </div>
+                <p className="text-[11.5px] text-slate-600 leading-relaxed">
+                  {isArabic
+                    ? "على أندرويد: افتح القائمة (⋮) ثم اضغط «تثبيت التطبيق» أو «إضافة إلى الشاشة الرئيسية». على آيفون: اضغط زر المشاركة بالأسفل ⎋ ثم «إضافة إلى الشاشة الرئيسية»."
+                    : "On Chrome Android: tap (⋮) then 'Install App'. On Safari iOS: tap share icon ⎋ and 'Add to Home Screen'."}
+                </p>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-1.5">
+                <div className="flex items-center gap-2 text-blue-700 font-bold text-xs">
+                  <Laptop className="w-4 h-4 text-blue-600" />
+                  <span>{isArabic ? "💻 طريقة التثبيت على الكمبيوتر واللابتوب:" : "Desktop & Laptop:"}</span>
+                </div>
+                <p className="text-[11.5px] text-slate-600 leading-relaxed">
+                  {isArabic
+                    ? "في متصفح Chrome أو Edge، اضغط على أيقونة التنزيل (⬇️) في شريط الرابط بالأعلى أو من خيارات المتصفح اختر «تثبيت تطبيق GoStars» ليفتح كنافذة برنامج مستقلة."
+                    : "In Chrome/Edge, click the install icon ⬇️ in the address bar to install as a standalone desktop app."}
+                </p>
+              </div>
             </div>
           </div>
         )}
