@@ -28,6 +28,9 @@ import {
   ChevronUp,
   Paperclip,
   FileUp,
+  FileSpreadsheet,
+  Presentation,
+  File,
   Calculator,
   Layers,
   BookOpen,
@@ -45,7 +48,11 @@ import {
   Star,
   Users,
   Link2,
-  FolderPlus
+  FolderPlus,
+  Eye,
+  EyeOff,
+  HelpCircle,
+  Printer
 } from "lucide-react";
 import {
   Student,
@@ -61,31 +68,60 @@ import {
   GeneratedReport,
   StudentStatus,
   PaymentStatus,
+  BillingType,
   AppSettings,
   ReportAttachment,
   findSubjectAiInstruction,
-  getSubjectSpecificAiInstruction
+  getSubjectSpecificAiInstruction,
+  isMonthlyComprehensiveReport,
+  isDailyPersonalReport,
+  deduplicateReportsList,
+  mergeDirectAndAttendanceReports
 } from "../types";
-import { calculateStudentFinancials, calculateCombinedGroupFinancials } from "../lib/financeUtils";
+import {
+  calculateStudentFinancials,
+  calculateCombinedGroupFinancials,
+  formatHoursHuman,
+  generateStudentStatementWhatsAppMessage
+} from "../lib/financeUtils";
+import { sanitizeStudent, matchesStudentRecord } from "../lib/financeEngine";
+import { getReportTitle } from "../lib/reportTitleUtils";
 import { StudentPersonalReportView } from "./StudentPersonalReportView";
 import { CreateCombinedGroupModal } from "./CreateCombinedGroupModal";
 import { CombinedStudentFileModal } from "./CombinedStudentFileModal";
+import { ComprehensiveMonthlyReportModal } from "./ComprehensiveMonthlyReportModal";
+import { isQuranComprehensiveReportEligible } from "../lib/monthlyQuranReport";
+import {
+  getActiveCycleInfo,
+  isReportInActiveCycle,
+  groupArchivedReports,
+  getReportArchiveGroupName,
+  getNextActiveLessonNumber,
+  isFixedPackageStudent
+} from "../lib/reportArchiveEngine";
+import { SmartStepMemory } from "../lib/smartStepMemory";
+import { ArchiveCycleModal } from "./ArchiveCycleModal";
+import { ArchivedReportsFolderList } from "./ArchivedReportsFolderList";
 
 const COMMON_SUBJECT_SUGGESTIONS = [
+  "Quran, Arabic and Islamic Studies",
+  "قرآن كريم",
+  "القرآن الكريم",
+  "اللغة العربية",
+  "اللغة الإنجليزية",
   "الرياضيات",
   "الفيزياء",
   "الكيمياء",
   "الأحياء",
-  "اللغة العربية",
-  "اللغة الإنجليزية",
   "العلوم",
   "الدراسات",
   "الحاسب الآلي",
-  "القرآن الكريم",
   "الفرنساوي"
 ];
 
 export const COMMON_CURRICULUMS = [
+  { label: "Quran, Arabic and Islamic Studies", flag: "🕌" },
+  { label: "قرآن كريم", flag: "📖" },
   { label: "منهج مصري (عربي)", flag: "🇪🇬" },
   { label: "منهج مصري (لغات / تجريبي)", flag: "🇪🇬" },
   { label: "منهج سعودي", flag: "🇸🇦" },
@@ -125,7 +161,7 @@ interface StudentsViewProps {
   paymentTransactions: PaymentTransaction[];
   reports: GeneratedReport[];
   onAddStudent: (student: Omit<Student, "id" | "createdAt">) => void;
-  onEditStudent?: (studentId: string, student: Partial<Student>) => void;
+  onEditStudent?: (studentId: string, student: Partial<Student>, applyToPrevious?: boolean) => void;
   onDeleteStudent?: (studentId: string) => void;
   onUpdateStudentStatus: (studentId: string, status: StudentStatus) => void;
   onRecordPayment: (
@@ -143,9 +179,23 @@ interface StudentsViewProps {
   onGenerateReportAi: (payload: {
     studentName: string;
     subject: string;
+    date?: string;
+    teacherName?: string;
+    lessonNumber?: number;
+    lessonDuration?: string;
+    includeStudentName?: boolean;
+    includeTeacherName?: boolean;
+    includeLessonNumber?: boolean;
+    includeDuration?: boolean;
+    includeLessonDate?: boolean;
+    preferredLanguage?: "ar" | "en";
+    durationMinutes?: number;
+    attendanceStatus?: string;
+    homeworkStatus?: string;
     teacherNotes?: string;
     classEvents?: string;
     homeworkNotes?: string;
+    overallEvaluation?: string;
     aiInstructions?: string;
     generalAiInstructions?: string;
     subjectAiInstructions?: string;
@@ -159,6 +209,14 @@ interface StudentsViewProps {
   onDeleteCombinedGroup?: (id: string) => void;
   onAddStudentToCombinedGroup?: (groupId: string, studentId: string) => void;
   onRemoveStudentFromCombinedGroup?: (groupId: string, studentId: string) => void;
+  onArchiveEndedCycle?: (params: {
+    studentId: string;
+    archiveGroupName: string;
+    newCycleStartDate: string;
+    newCycleName: string;
+    resetLessonBalance: boolean;
+  }) => void;
+  onRecoverReports?: () => void;
 }
 
 export const StudentsView: React.FC<StudentsViewProps> = ({
@@ -187,7 +245,9 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   onUpdateCombinedGroup,
   onDeleteCombinedGroup,
   onAddStudentToCombinedGroup,
-  onRemoveStudentFromCombinedGroup
+  onRemoveStudentFromCombinedGroup,
+  onArchiveEndedCycle,
+  onRecoverReports
 }) => {
   const isArabic = settings.preferredLanguage === "ar";
   const [filterStatus, setFilterStatus] = useState<"all" | "active" | "stopped">("all");
@@ -196,23 +256,31 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   const [searchQuery, setSearchQuery] = useState("");
   const [viewLayout, setViewLayout] = useState<"grid" | "table">("grid");
 
-  // Selected Student for Profile View
-  const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
-  const [profileTab, setProfileTab] = useState<"finance" | "attendance" | "reports">("reports");
+  // Selected Student for Profile View (resolved against live students array so cycle/archive updates reflect immediately)
+  const [selectedStudentState, setSelectedStudent] = useState<Student | null>(null);
+  const selectedStudent = selectedStudentState
+    ? (students.find(s => s.id === selectedStudentState.id) || selectedStudentState)
+    : null;
+  const [profileTab, setProfileTab] = useState<"daily_reports" | "monthly_reports" | "finance" | "attendance">("daily_reports");
 
   // Selected Student for Standalone Full-Page Personal Report View
-  const [studentForPersonalReport, setStudentForPersonalReport] = useState<Student | null>(null);
+  const [studentForPersonalReportState, setStudentForPersonalReport] = useState<Student | null>(null);
+  const studentForPersonalReport = studentForPersonalReportState
+    ? (students.find(s => s.id === studentForPersonalReportState.id) || studentForPersonalReportState)
+    : null;
 
   // Report Archive Filter State (+6 months auto-archiving)
-  const [reportArchiveFilter, setReportArchiveFilter] = useState<"active" | "archived" | "all">("active");
+  const [reportArchiveFilter, setReportArchiveFilter] = useState<"active" | "archived" | "all">("all");
   const [archiveSearchQuery, setArchiveSearchQuery] = useState("");
   const [archiveSubjectFilter, setArchiveSubjectFilter] = useState("all");
+  const [showArchiveCycleModal, setShowArchiveCycleModal] = useState(false);
 
   // AI Report State inside Student Profile
   const [showCreateReportForm, setShowCreateReportForm] = useState(false);
   const [reportSubject, setReportSubject] = useState("");
   const [reportLessonNumber, setReportLessonNumber] = useState<number>(1);
   const [reportDate, setReportDate] = useState<string>(new Date().toISOString().split("T")[0]);
+  const [reportDurationMinutes, setReportDurationMinutes] = useState<number>(60);
   const [reportAttendance, setReportAttendance] = useState<AttendanceStatus>("present");
   const [reportDeductCost, setReportDeductCost] = useState<boolean>(true);
   const [reportHomeworkStatus, setReportHomeworkStatus] = useState<HomeworkStatus>("done");
@@ -224,6 +292,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   const [newGeneratedReportText, setNewGeneratedReportText] = useState("");
   const [reportAttachment, setReportAttachment] = useState<ReportAttachment | null>(null);
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  const [reportGenerationError, setReportGenerationError] = useState("");
   const [copiedReportId, setCopiedReportId] = useState<string | null>(null);
   const [whatsappSentNotice, setWhatsappSentNotice] = useState("");
   const [expandedReportIds, setExpandedReportIds] = useState<string[]>([]);
@@ -237,6 +306,16 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   const [selectedCombinedGroup, setSelectedCombinedGroup] = useState<CombinedStudentGroup | null>(null);
   const [showCreateCombinedGroupModal, setShowCreateCombinedGroupModal] = useState(false);
   const [initialMergeStudentIds, setInitialMergeStudentIds] = useState<string[]>([]);
+
+  // Comprehensive Monthly Report Modal State (Exclusive to "قرآن كريم" and "Quran, Arabic and Islamic Studies")
+  const [monthlyReportModalTarget, setMonthlyReportModalTarget] = useState<{ student: Student; subject: string } | null>(null);
+
+  // Student Statement Modal State (كشف الحساب المالي وساعات الدراسة)
+  const [statementModalStudent, setStatementModalStudent] = useState<Student | null>(null);
+  const [copiedStatementStudentId, setCopiedStatementStudentId] = useState<string | null>(null);
+
+  // In-App Confirm Report Deletion State
+  const [reportToDeleteId, setReportToDeleteId] = useState<string | null>(null);
 
   // Function to open WhatsApp chooser modal
   const handleOpenWhatsAppChooser = (text: string, st: Student | null = selectedStudent) => {
@@ -333,45 +412,104 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     setTimeout(() => setWhatsappSentNotice(""), 4500);
   };
 
+  const handleCopyStudentStatement = (st: Student) => {
+    const finSummary = calculateStudentFinancials(st, attendanceRecords, paymentTransactions);
+    const text = generateStudentStatementWhatsAppMessage({
+      studentName: st.fullName,
+      subjectName: st.subject,
+      studyTypeLabel: st.studyType === "group" ? (isArabic ? "مجموعة" : "Group") : (isArabic ? "خاص" : "Private"),
+      totalTaughtHours: finSummary.totalTaughtHours,
+      totalAttendedLessons: finSummary.totalAttendedLessons,
+      totalAccruedCost: finSummary.totalAccruedCost,
+      totalPaidAmount: finSummary.totalPaidAmount,
+      amountDue: finSummary.amountDue,
+      creditRemaining: finSummary.creditRemaining,
+      isMonthly: finSummary.isMonthly,
+      billedMonthsCount: finSummary.billedMonthsCount,
+      monthlyCost: finSummary.monthlyCost,
+      subjectsBreakdown: finSummary.subjectsDetails?.map(s => ({
+        subjectName: s.subject,
+        totalTaughtHours: s.totalTaughtHours,
+        attendedCount: s.totalAttendedLessons,
+        accruedCost: s.totalAccruedCost,
+        paidAmount: s.totalPaidAmount,
+        amountDue: s.amountDue
+      })),
+      recentAttendance: attendanceRecords
+        .filter(ar => ar.studentId === st.id && (ar.attendance === "present" || ar.deducted))
+        .slice(0, 10)
+        .map(ar => ({
+          lessonNumber: ar.lessonNumber,
+          date: ar.date,
+          durationMinutes: ar.durationMinutes,
+          subject: ar.subject
+        }))
+    }, isArabic);
+
+    navigator.clipboard.writeText(text);
+    setCopiedStatementStudentId(st.id);
+    setTimeout(() => setCopiedStatementStudentId(null), 2500);
+  };
+
+  const handleShareStudentStatementWhatsApp = (st: Student) => {
+    const finSummary = calculateStudentFinancials(st, attendanceRecords, paymentTransactions);
+    const text = generateStudentStatementWhatsAppMessage({
+      studentName: st.fullName,
+      subjectName: st.subject,
+      studyTypeLabel: st.studyType === "group" ? (isArabic ? "مجموعة" : "Group") : (isArabic ? "خاص" : "Private"),
+      totalTaughtHours: finSummary.totalTaughtHours,
+      totalAttendedLessons: finSummary.totalAttendedLessons,
+      totalAccruedCost: finSummary.totalAccruedCost,
+      totalPaidAmount: finSummary.totalPaidAmount,
+      amountDue: finSummary.amountDue,
+      creditRemaining: finSummary.creditRemaining,
+      isMonthly: finSummary.isMonthly,
+      billedMonthsCount: finSummary.billedMonthsCount,
+      monthlyCost: finSummary.monthlyCost,
+      subjectsBreakdown: finSummary.subjectsDetails?.map(s => ({
+        subjectName: s.subject,
+        totalTaughtHours: s.totalTaughtHours,
+        attendedCount: s.totalAttendedLessons,
+        accruedCost: s.totalAccruedCost,
+        paidAmount: s.totalPaidAmount,
+        amountDue: s.amountDue
+      })),
+      recentAttendance: attendanceRecords
+        .filter(ar => ar.studentId === st.id && (ar.attendance === "present" || ar.deducted))
+        .slice(0, 10)
+        .map(ar => ({
+          lessonNumber: ar.lessonNumber,
+          date: ar.date,
+          durationMinutes: ar.durationMinutes,
+          subject: ar.subject
+        }))
+    }, isArabic);
+
+    handleOpenWhatsAppChooser(text, st);
+  };
+
   // Automatically calculate the next lesson number for a student and subject
+  // Uses smart monthly vs fixed package rules:
+  // - Monthly students start at lesson 1 on every new active monthly cycle
+  // - Fixed package students increment until package count or manual archive
   const calculateNextLessonNumber = (st: Student | null, subj: string): number => {
     if (!st) return 1;
-    const normSubj = (subj || "").trim().toLowerCase();
-
-    const safeReports = Array.isArray(reports) ? reports : [];
-    const safeAttendance = Array.isArray(attendanceRecords) ? attendanceRecords : [];
-
-    // 1. Check existing reports for this student and subject
-    const studentReports = safeReports.filter(
-      r => r && (r.studentId === st.id || r.studentName === st.fullName) &&
-           ((r.subject || "").trim().toLowerCase() === normSubj)
+    return getNextActiveLessonNumber(
+      st,
+      subj,
+      Array.isArray(reports) ? reports : [],
+      Array.isArray(attendanceRecords) ? attendanceRecords : []
     );
-
-    const maxInReports = studentReports.reduce((max, r) => Math.max(max, r?.lessonNumber || 0), 0);
-    if (maxInReports > 0) {
-      return maxInReports + 1;
-    }
-
-    // 2. Check attendance records for this student and subject
-    const studentAttendance = safeAttendance.filter(
-      ar => ar && ar.studentId === st.id &&
-           (!ar.subject || (ar.subject || "").trim().toLowerCase() === normSubj)
-    );
-
-    const maxInAtt = studentAttendance.reduce((max, ar) => Math.max(max, ar?.lessonNumber || 0), 0);
-    if (maxInAtt > 0) {
-      return maxInAtt + 1;
-    }
-
-    // 3. Fallback: total records count + 1
-    const totalCount = Math.max(studentReports.length, studentAttendance.length);
-    return totalCount + 1;
   };
 
   const handleReportSubjectChange = (newSubj: string) => {
     setReportSubject(newSubj);
     if (selectedStudent) {
       setReportLessonNumber(calculateNextLessonNumber(selectedStudent, newSubj));
+      const matchSub = selectedStudent.subjects?.find(s => s.subject === newSubj);
+      if (matchSub?.defaultDurationMinutes) {
+        setReportDurationMinutes(matchSub.defaultDurationMinutes);
+      }
     }
     const subjInst = findSubjectAiInstruction(
       settings.subjectDefaults,
@@ -384,8 +522,10 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   const openNewReportModal = () => {
     if (!selectedStudent) return;
     const initialSubj = selectedStudent.subjects?.[0]?.subject || selectedStudent.subject || (isArabic ? "الرياضيات" : "Mathematics");
+    const initialDur = selectedStudent.subjects?.find(s => s.subject === initialSubj)?.defaultDurationMinutes || selectedStudent.defaultDurationMinutes || 60;
     setReportSubject(initialSubj);
     setReportDate(new Date().toISOString().split("T")[0]);
+    setReportDurationMinutes(initialDur);
     setReportLessonNumber(calculateNextLessonNumber(selectedStudent, initialSubj));
     setReportAttendance("present");
     setReportDeductCost(true);
@@ -406,12 +546,87 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     setShowCreateReportForm(true);
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const [isDraggingFileInProfile, setIsDraggingFileInProfile] = useState<boolean>(false);
+
+  const formatFileSizeProfile = (bytes?: number): string => {
+    if (!bytes || bytes <= 0) return "";
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const getProfileAttachmentMeta = (attachment: ReportAttachment) => {
+    const ext = (attachment.fileExtension || attachment.fileName?.split(".").pop() || "").toLowerCase();
+    const mime = (attachment.mimeType || "").toLowerCase();
+
+    if (mime.startsWith("image/") || ["png", "jpg", "jpeg", "webp", "gif", "heic", "svg"].includes(ext)) {
+      return {
+        type: "image",
+        label: isArabic ? "صورة" : "Image",
+        color: "bg-emerald-50 text-emerald-700 border-emerald-200",
+        badgeColor: "bg-emerald-600 text-white",
+        tag: "IMG"
+      };
+    }
+    if (mime === "application/pdf" || ext === "pdf") {
+      return {
+        type: "pdf",
+        label: isArabic ? "مستند PDF" : "PDF Document",
+        color: "bg-rose-50 text-rose-700 border-rose-200",
+        badgeColor: "bg-rose-600 text-white",
+        tag: "PDF"
+      };
+    }
+    if (["pptx", "ppt"].includes(ext) || mime.includes("presentation") || mime.includes("powerpoint")) {
+      return {
+        type: "presentation",
+        label: isArabic ? "عرض PowerPoint" : "PowerPoint",
+        color: "bg-amber-50 text-amber-800 border-amber-200",
+        badgeColor: "bg-amber-600 text-white",
+        tag: "PPTX"
+      };
+    }
+    if (["xlsx", "xls", "csv", "tsv", "ods"].includes(ext) || mime.includes("spreadsheet") || mime.includes("excel") || mime.includes("csv")) {
+      return {
+        type: "spreadsheet",
+        label: isArabic ? "جدول Excel" : "Excel Sheet",
+        color: "bg-teal-50 text-teal-800 border-teal-200",
+        badgeColor: "bg-teal-700 text-white",
+        tag: "XLSX"
+      };
+    }
+    if (["docx", "doc"].includes(ext) || mime.includes("word") || mime.includes("wordprocessingml")) {
+      return {
+        type: "document",
+        label: isArabic ? "مستند Word" : "Word Document",
+        color: "bg-blue-50 text-blue-800 border-blue-200",
+        badgeColor: "bg-blue-600 text-white",
+        tag: "DOCX"
+      };
+    }
+    if (["txt", "md", "json", "xml", "html", "rtf", "log"].includes(ext) || mime.startsWith("text/")) {
+      return {
+        type: "text",
+        label: isArabic ? "ملف نصي" : "Text File",
+        color: "bg-slate-50 text-slate-800 border-slate-200",
+        badgeColor: "bg-slate-700 text-white",
+        tag: ext.toUpperCase() || "TXT"
+      };
+    }
+    return {
+      type: "generic",
+      label: isArabic ? "ملف مرفق" : "File Attachment",
+      color: "bg-purple-50 text-purple-800 border-purple-200",
+      badgeColor: "bg-purple-600 text-white",
+      tag: ext ? ext.toUpperCase() : "FILE"
+    };
+  };
+
+  const processSelectedFileInProfile = (file: File) => {
     if (!file) return;
 
-    if (file.size > 10 * 1024 * 1024) {
-      alert(isArabic ? "حجم الملف كبير جداً. يرجى اختيار ملف بحجم أقل من 10 ميجابايت." : "File too large. Max 10MB.");
+    if (file.size > 20 * 1024 * 1024) {
+      alert(isArabic ? "حجم الملف كبير جداً. يرجى اختيار ملف بحجم أقل من 20 ميجابايت." : "File is too large. Max 20MB.");
       return;
     }
 
@@ -420,17 +635,28 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       const dataUrl = reader.result as string;
       const parts = dataUrl.split(";base64,");
       if (parts.length === 2) {
-        const mimeType = parts[0].replace("data:", "");
+        const mimeType = parts[0].replace("data:", "") || file.type || "application/octet-stream";
         const base64Data = parts[1];
+        const ext = file.name.split(".").pop()?.toLowerCase() || "";
         setReportAttachment({
           fileName: file.name,
           mimeType,
           data: base64Data,
+          fileSize: file.size,
+          fileExtension: ext,
           previewUrl: mimeType.startsWith("image/") ? dataUrl : undefined
         });
       }
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      processSelectedFileInProfile(file);
+    }
+    e.target.value = "";
   };
 
   const toggleReportExpand = (id: string) => {
@@ -454,12 +680,12 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     id,
     subject: name,
     studyType: "private",
-    billingType: "monthly",
+    billingType: "monthly_elapsed_lessons",
     rateType: "per_lesson",
     lessonCost: 100,
     hourlyCost: 100,
     defaultDurationMinutes: 60,
-    monthlyCost: 400,
+    monthlyCost: 0,
     lessonsPerMonth: 8
   });
 
@@ -499,7 +725,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   const [studentPaymentSingleSubject, setStudentPaymentSingleSubject] = useState<string>("");
 
   const handleOpenStudentPaymentModal = (st: Student) => {
-    const fin = calculateStudentFinancials(st, attendanceRecords);
+    const fin = calculateStudentFinancials(st, attendanceRecords, paymentTransactions);
     if (st.subjects && st.subjects.length > 1) {
       setStudentPaymentAllocMode("per_subject");
       const initMap: Record<string, number> = {};
@@ -542,39 +768,53 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   const [editWhatsappGroupLink, setEditWhatsappGroupLink] = useState("");
   const [editNotes, setEditNotes] = useState("");
   const [editStudentSubjects, setEditStudentSubjects] = useState<StudentSubjectPlan[]>([]);
+  const [editApplyToPrevious, setEditApplyToPrevious] = useState<boolean>(true);
+  const [showApplyConfirmDialog, setShowApplyConfirmDialog] = useState<boolean>(false);
+  const [pendingStudentToSave, setPendingStudentToSave] = useState<Student | null>(null);
 
   const handleOpenEditStudent = (st: Student) => {
-    setEditFullName(st.fullName || "");
-    setEditStudentNumber(st.studentNumber || "");
-    setEditStudentPhone(st.studentPhone || "");
-    setEditAcademicYear(st.academicYear || "");
-    setEditCurriculum(st.curriculum || "");
-    setEditParentContact(st.parentContact || "+20");
-    setEditWhatsappGroupLink(st.whatsappGroupLink || "");
-    setEditNotes(st.notes || "");
+    const sanitized = sanitizeStudent(st);
+    setSelectedStudent(sanitized);
+    setEditFullName(sanitized.fullName || "");
+    setEditStudentNumber(sanitized.studentNumber || "");
+    setEditStudentPhone(sanitized.studentPhone || "");
+    setEditAcademicYear(sanitized.academicYear || "");
+    setEditCurriculum(sanitized.curriculum || "");
+    setEditParentContact(sanitized.parentContact || "+20");
+    setEditWhatsappGroupLink(sanitized.whatsappGroupLink || "");
+    setEditNotes(sanitized.notes || "");
+    setEditApplyToPrevious(true);
+    setShowApplyConfirmDialog(false);
+    setPendingStudentToSave(null);
 
-    if (st.subjects && st.subjects.length > 0) {
+    const effectiveBillingType: BillingType = sanitized.billingType || (sanitized.subjects && sanitized.subjects[0]?.billingType) || "monthly_elapsed_lessons";
+
+    if (sanitized.subjects && sanitized.subjects.length > 0) {
       setEditStudentSubjects(
-        st.subjects.map(s => ({
-          ...s,
-          rateType: s.rateType || "per_lesson",
-          hourlyCost: s.hourlyCost || s.lessonCost || 100,
-          defaultDurationMinutes: s.defaultDurationMinutes || 60
+        sanitized.subjects.map(sub => ({
+          ...sub,
+          billingType: sub.billingType || effectiveBillingType,
+          rateType: sub.rateType || sanitized.rateType || "per_lesson",
+          lessonCost: sub.lessonCost !== undefined ? Number(sub.lessonCost) : (sanitized.lessonCost || 100),
+          hourlyCost: sub.hourlyCost !== undefined ? Number(sub.hourlyCost) : (sanitized.hourlyCost || sub.lessonCost || 100),
+          defaultDurationMinutes: sub.defaultDurationMinutes || sanitized.defaultDurationMinutes || 60,
+          monthlyCost: sub.monthlyCost !== undefined ? Number(sub.monthlyCost) : (sub.billingType === "monthly" ? 400 : 0),
+          lessonsPerMonth: sub.lessonsPerMonth || sanitized.lessonsPerMonth || 8
         }))
       );
     } else {
       setEditStudentSubjects([
         {
           id: `subj_edit_1`,
-          subject: st.subject || "الرياضيات",
-          studyType: st.studyType || "private",
-          billingType: st.billingType || "monthly",
-          rateType: st.rateType || "per_lesson",
-          lessonCost: st.lessonCost || 100,
-          hourlyCost: st.hourlyCost || st.lessonCost || 100,
-          defaultDurationMinutes: st.defaultDurationMinutes || 60,
-          monthlyCost: st.monthlyCost || 400,
-          lessonsPerMonth: st.lessonsPerMonth || 8
+          subject: sanitized.subject || "الرياضيات",
+          studyType: sanitized.studyType || "private",
+          billingType: effectiveBillingType,
+          rateType: sanitized.rateType || "per_lesson",
+          lessonCost: sanitized.lessonCost || 100,
+          hourlyCost: sanitized.hourlyCost || sanitized.lessonCost || 100,
+          defaultDurationMinutes: sanitized.defaultDurationMinutes || 60,
+          monthlyCost: sanitized.monthlyCost !== undefined ? Number(sanitized.monthlyCost) : (effectiveBillingType === "monthly" ? 400 : 0),
+          lessonsPerMonth: sanitized.lessonsPerMonth || 8
         }
       ]);
     }
@@ -604,15 +844,27 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     );
   };
 
-  const handleSaveEditStudent = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedStudent || !editFullName.trim() || editStudentSubjects.length === 0) return;
+  const handleSaveEditStudent = (e?: React.FormEvent) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!selectedStudent) {
+      alert(isArabic ? "لم يتم تحديد طالب للتعديل" : "No student selected for editing");
+      return;
+    }
+    if (!editFullName.trim()) {
+      alert(isArabic ? "يرجى كتابة اسم الطالب بالكامل" : "Please enter student full name");
+      return;
+    }
 
-    const subjectsSummary = editStudentSubjects.map(s => s.subject.trim()).filter(Boolean).join(" + ") || "عام";
-    const primaryStudyType = editStudentSubjects.some(s => s.studyType === "group") ? "group" : "private";
-    const primarySub = editStudentSubjects[0];
+    const effectiveSubjects = editStudentSubjects.length > 0
+      ? editStudentSubjects
+      : [createInitialSubject(`subj_edit_${Date.now()}`, "عام")];
 
-    const updatedData: Partial<Student> = {
+    const subjectsSummary = effectiveSubjects.map(s => s.subject.trim()).filter(Boolean).join(" + ") || "عام";
+    const primaryStudyType = effectiveSubjects.some(s => s.studyType === "group") ? "group" : "private";
+    const primarySub = effectiveSubjects[0];
+
+    const rawUpdated: Student = {
+      ...selectedStudent,
       fullName: editFullName.trim(),
       studentNumber: editStudentNumber.trim() || undefined,
       studentPhone: editStudentPhone.trim() || undefined,
@@ -622,22 +874,37 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       whatsappGroupLink: editWhatsappGroupLink.trim() || undefined,
       studyType: primaryStudyType,
       subject: subjectsSummary,
-      subjects: editStudentSubjects,
-      billingType: primarySub.billingType || "monthly",
+      subjects: effectiveSubjects,
+      billingType: primarySub.billingType || selectedStudent.billingType || "monthly_elapsed_lessons",
       rateType: primarySub.rateType || "per_lesson",
-      lessonCost: primarySub.lessonCost || 100,
-      hourlyCost: primarySub.hourlyCost || primarySub.lessonCost || 100,
+      lessonCost: primarySub.lessonCost !== undefined ? Number(primarySub.lessonCost) : 100,
+      hourlyCost: primarySub.hourlyCost !== undefined ? Number(primarySub.hourlyCost) : (primarySub.lessonCost || 100),
       defaultDurationMinutes: primarySub.defaultDurationMinutes || 60,
-      monthlyCost: primarySub.monthlyCost || 400,
+      monthlyCost: primarySub.monthlyCost !== undefined ? Number(primarySub.monthlyCost) : 0,
       lessonsPerMonth: primarySub.lessonsPerMonth || 8,
       notes: editNotes
     };
 
+    const sanitizedUpdated = sanitizeStudent(rawUpdated);
+    
     if (onEditStudent) {
-      onEditStudent(selectedStudent.id, updatedData);
+      onEditStudent(selectedStudent.id, sanitizedUpdated, editApplyToPrevious);
     }
-    setSelectedStudent({ ...selectedStudent, ...updatedData });
+    setSelectedStudent(sanitizedUpdated);
     setShowEditStudentModal(false);
+    setShowApplyConfirmDialog(false);
+    setPendingStudentToSave(null);
+  };
+
+  const confirmExecuteSaveStudent = (applyToPrevious: boolean) => {
+    if (!pendingStudentToSave || !selectedStudent) return;
+    if (onEditStudent) {
+      onEditStudent(selectedStudent.id, pendingStudentToSave, applyToPrevious);
+    }
+    setSelectedStudent(pendingStudentToSave);
+    setShowApplyConfirmDialog(false);
+    setShowEditStudentModal(false);
+    setPendingStudentToSave(null);
   };
 
   // Delete Student Confirmation Dialog State
@@ -725,12 +992,12 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       status: "active",
       paymentStatus: "unpaid",
       totalPaidAmount: 0,
-      billingType: primarySub.billingType || "monthly",
+      billingType: primarySub.billingType || "monthly_elapsed_lessons",
       rateType: primarySub.rateType || "per_lesson",
-      lessonCost: primarySub.lessonCost || 100,
-      hourlyCost: primarySub.hourlyCost || primarySub.lessonCost || 100,
+      lessonCost: primarySub.lessonCost !== undefined ? Number(primarySub.lessonCost) : 100,
+      hourlyCost: primarySub.hourlyCost !== undefined ? Number(primarySub.hourlyCost) : (primarySub.lessonCost || 100),
       defaultDurationMinutes: primarySub.defaultDurationMinutes || 60,
-      monthlyCost: primarySub.monthlyCost || 400,
+      monthlyCost: primarySub.monthlyCost !== undefined ? Number(primarySub.monthlyCost) : (primarySub.billingType === "monthly" ? 400 : 0),
       lessonsPerMonth: primarySub.lessonsPerMonth || 8,
       remainingLessons: 0,
       remainingBalance: 0,
@@ -825,6 +1092,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
         onAddReport={onAddReport}
         onDeleteReport={onDeleteReport}
         onToggleArchiveReport={onToggleArchiveReport}
+        onArchiveEndedCycle={onArchiveEndedCycle}
         onGenerateReportAi={onGenerateReportAi}
       />
     );
@@ -1005,7 +1273,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
           {/* 1. Combined Student Groups */}
           {filteredCombinedGroups.map(cg => {
             const groupStudents = students.filter(s => (cg.studentIds || []).includes(s.id));
-            const groupFinancials = calculateCombinedGroupFinancials(groupStudents, attendanceRecords);
+            const groupFinancials = calculateCombinedGroupFinancials(groupStudents, attendanceRecords, paymentTransactions, reports);
 
             return (
               <div
@@ -1054,8 +1322,8 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 
                   <div className="mt-2 pt-1.5 border-t border-purple-100/70 grid grid-cols-2 gap-1 text-[9.5px]">
                     <div className="bg-slate-50 p-1 rounded-lg">
-                      <div className="text-[8px] text-slate-400 font-bold">{isArabic ? "إجمالي الحصص" : "Lessons"}</div>
-                      <div className="font-black text-slate-800 font-mono">{groupFinancials.totalAttendedLessons} {isArabic ? "حصة" : "lss"}</div>
+                      <div className="text-[8px] text-slate-400 font-bold">{isArabic ? "الحصص والساعات" : "Lessons & Hours"}</div>
+                      <div className="font-black text-slate-800 font-mono text-[9px]">{groupFinancials.totalAttendedLessons} {isArabic ? "حصة" : "lss"} • {groupFinancials.totalTaughtHours} {isArabic ? "ساعة" : "hrs"}</div>
                     </div>
                     <div className="bg-slate-50 p-1 rounded-lg">
                       <div className="text-[8px] text-slate-400 font-bold">{isArabic ? "المدفوع الكلي" : "Total Paid"}</div>
@@ -1098,7 +1366,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
           {/* 2. Standalone Students */}
           {filteredStudents.map(student => {
             const isStopped = student.status === "stopped";
-            const finSummary = calculateStudentFinancials(student, attendanceRecords);
+            const finSummary = calculateStudentFinancials(student, attendanceRecords, paymentTransactions, reports);
 
             return (
               <div
@@ -1194,9 +1462,9 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                     )}
 
                     <div className="flex items-center justify-between">
-                      <span className="text-slate-400">{isArabic ? "الحصص المنفذة:" : "Attended:"}</span>
+                      <span className="text-slate-400">{isArabic ? "الحصص والساعات:" : "Lessons & Hours:"}</span>
                       <span className="font-bold text-blue-700">
-                        {finSummary.totalAttendedLessons} {isArabic ? "حصة" : "lss"} ({finSummary.totalAccruedCost} ج.م)
+                        {finSummary.totalAttendedLessons} {isArabic ? "حصة" : "lss"} • {finSummary.totalTaughtHours ?? Number(((finSummary.totalAttendedLessons * 60) / 60).toFixed(1))} {isArabic ? "ساعة" : "hrs"} ({finSummary.totalAccruedCost} ج.م)
                       </span>
                     </div>
 
@@ -1282,7 +1550,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                   <th className="py-2.5 px-3">{isArabic ? "الصف والمنهج" : "Grade & Curriculum"}</th>
                   <th className="py-2.5 px-3">{isArabic ? "المواد والنوع" : "Subjects"}</th>
                   <th className="py-2.5 px-3">{isArabic ? "الهواتف والاتصال" : "Contact Numbers"}</th>
-                  <th className="py-2.5 px-3 text-center">{isArabic ? "الحصص المنفذة" : "Attended"}</th>
+                  <th className="py-2.5 px-3 text-center">{isArabic ? "الحصص والساعات" : "Lessons & Hours"}</th>
                   <th className="py-2.5 px-3 text-center">{isArabic ? "الموقف المالي" : "Financial Status"}</th>
                   <th className="py-2.5 px-3 text-center">{isArabic ? "الحالة" : "Status"}</th>
                   <th className="py-2.5 px-3 text-center">{isArabic ? "الإجراءات" : "Actions"}</th>
@@ -1292,7 +1560,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                 {/* 1. Combined Student Groups Rows */}
                 {filteredCombinedGroups.map((cg) => {
                   const groupStudents = students.filter(s => (cg.studentIds || []).includes(s.id));
-                  const groupFinancials = calculateCombinedGroupFinancials(groupStudents, attendanceRecords);
+                  const groupFinancials = calculateCombinedGroupFinancials(groupStudents, attendanceRecords, paymentTransactions);
 
                   return (
                     <tr
@@ -1345,7 +1613,8 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                       </td>
 
                       <td className="py-2.5 px-3 text-center font-bold text-purple-900">
-                        {groupFinancials.totalAttendedLessons} {isArabic ? "حصة" : "lss"}
+                        <div>{groupFinancials.totalAttendedLessons} {isArabic ? "حصة" : "lss"}</div>
+                        <div className="text-[10px] text-indigo-700 font-bold">⏱️ {groupFinancials.totalTaughtHours} {isArabic ? "ساعة" : "hrs"}</div>
                       </td>
 
                       <td className="py-2.5 px-3 text-center">
@@ -1393,7 +1662,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                 {/* 2. Standalone Students Rows */}
                 {filteredStudents.map((student, idx) => {
                   const isStopped = student.status === "stopped";
-                  const finSummary = calculateStudentFinancials(student, attendanceRecords);
+                  const finSummary = calculateStudentFinancials(student, attendanceRecords, paymentTransactions);
 
                   return (
                     <tr
@@ -1472,6 +1741,9 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                         <span className="font-bold text-blue-700">
                           {finSummary.totalAttendedLessons} {isArabic ? "حصة" : "lss"}
                         </span>
+                        <div className="text-[10px] text-indigo-700 font-bold">
+                          ⏱️ {finSummary.totalTaughtHours ?? Number(((finSummary.totalAttendedLessons * 60) / 60).toFixed(1))} {isArabic ? "ساعة" : "hrs"}
+                        </div>
                         <div className="text-[10px] text-slate-400 font-mono">
                           {finSummary.totalAccruedCost} ج.م
                         </div>
@@ -1856,28 +2128,28 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 mb-2">
                           <button
                             type="button"
+                            onClick={() => handleUpdateSubjectField(idx, { billingType: "monthly_elapsed_lessons" })}
+                            className={`p-2 rounded-xl border text-[10.5px] font-bold text-center transition flex flex-col items-center justify-center gap-0.5 ${
+                              (sub.billingType || "monthly_elapsed_lessons") === "monthly_elapsed_lessons"
+                                ? "bg-blue-50 border-blue-500 text-blue-800 shadow-2xs"
+                                : "bg-white border-slate-200 text-slate-600 hover:border-slate-300"
+                            }`}
+                          >
+                            <span>🗓️ {isArabic ? "حساب آخر الشهر (حصص منقضية)" : "Elapsed Month Lessons"}</span>
+                            <span className="text-[9px] opacity-75 font-medium">{isArabic ? "حسب الحصص والساعات الفعلية" : "Based on actual lessons & hours"}</span>
+                          </button>
+
+                          <button
+                            type="button"
                             onClick={() => handleUpdateSubjectField(idx, { billingType: "monthly" })}
                             className={`p-2 rounded-xl border text-[10.5px] font-bold text-center transition flex flex-col items-center justify-center gap-0.5 ${
-                              (sub.billingType || "monthly") === "monthly"
+                              sub.billingType === "monthly"
                                 ? "bg-blue-50 border-blue-500 text-blue-800 shadow-2xs"
                                 : "bg-white border-slate-200 text-slate-600 hover:border-slate-300"
                             }`}
                           >
                             <span>📅 {isArabic ? "الشهر كامل" : "Full Month"}</span>
-                            <span className="text-[9px] opacity-75 font-medium">{isArabic ? "اشتراك شهري ثابت (سعر الشهر)" : "Flat Monthly Subscription"}</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => handleUpdateSubjectField(idx, { billingType: "monthly_elapsed_lessons" })}
-                            className={`p-2 rounded-xl border text-[10.5px] font-bold text-center transition flex flex-col items-center justify-center gap-0.5 ${
-                              sub.billingType === "monthly_elapsed_lessons"
-                                ? "bg-blue-50 border-blue-500 text-blue-800 shadow-2xs"
-                                : "bg-white border-slate-200 text-slate-600 hover:border-slate-300"
-                            }`}
-                          >
-                            <span>🗓️ {isArabic ? "حصص التقويم المنقضية" : "Elapsed Month Lessons"}</span>
-                            <span className="text-[9px] opacity-75 font-medium">{isArabic ? "حسب حصص الشهر بالتقويم" : "Calendar Elapsed"}</span>
+                            <span className="text-[9px] opacity-75 font-medium">{isArabic ? "اشتراك شهري ثابت (سعر محدد)" : "Flat Monthly Subscription"}</span>
                           </button>
 
                           <button
@@ -1897,7 +2169,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                         {/* Cost Inputs matching selected billing mode */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
                           {/* Case 1: Full Month - Monthly Cost with Division Option */}
-                          {(sub.billingType === "monthly" || !sub.billingType) && (
+                          {sub.billingType === "monthly" && (
                             <div className="sm:col-span-2 space-y-2">
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                 <div className="flex items-center gap-2 bg-white px-3 py-2 rounded-xl border border-blue-200/80 shadow-2xs">
@@ -1948,19 +2220,62 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                                 </div>
                               </div>
 
+                              {/* Duration open input for monthly */}
+                              <div className="p-2.5 bg-slate-50/80 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[11px] font-bold text-slate-700 flex items-center gap-1 shrink-0">
+                                    <Clock className="w-3.5 h-3.5 text-blue-600" />
+                                    {isArabic ? "مدة الحصة الافتراضية:" : "Default Duration:"}
+                                  </span>
+                                  <div className="flex items-center gap-1">
+                                    <input
+                                      type="number"
+                                      min="1"
+                                      max="360"
+                                      value={sub.defaultDurationMinutes || ""}
+                                      onChange={e => {
+                                        const val = parseInt(e.target.value, 10);
+                                        const dur = isNaN(val) ? 0 : Math.max(1, val);
+                                        handleUpdateSubjectField(idx, { defaultDurationMinutes: dur });
+                                      }}
+                                      className="w-16 bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-black text-slate-800 focus:outline-none focus:border-blue-500 text-center"
+                                      placeholder="60"
+                                    />
+                                    <span className="text-[10px] font-bold text-slate-500">{isArabic ? "دقيقة" : "min"}</span>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-1 flex-wrap">
+                                  {[10, 15, 20, 25, 30, 45, 60, 75, 90, 120].map(dur => (
+                                    <button
+                                      type="button"
+                                      key={dur}
+                                      onClick={() => handleUpdateSubjectField(idx, { defaultDurationMinutes: dur })}
+                                      className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition ${
+                                        (sub.defaultDurationMinutes || 60) === dur
+                                          ? "bg-blue-600 text-white shadow-2xs"
+                                          : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-100"
+                                      }`}
+                                    >
+                                      {dur === 60 ? (isArabic ? "60د (ساعة)" : "60m (1h)") : dur === 90 ? (isArabic ? "90د (1.5س)" : "90m (1.5h)") : dur === 120 ? (isArabic ? "120د (2س)" : "120m (2h)") : `${dur}${isArabic ? "د" : "m"}`}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+
                               <div className="flex items-center justify-between gap-2 bg-blue-50/70 px-3 py-1.5 rounded-xl border border-blue-200 text-xs">
                                 <span className="font-bold text-slate-700 text-[11px]">
                                   {isArabic ? "➗ قيمة الحصة المحسوبة بالتقسيم:" : "Calculated Lesson Rate:"}
                                 </span>
                                 <span className="font-black text-blue-700 bg-white px-2 py-0.5 rounded-lg border border-blue-200 shadow-2xs text-[11px]">
-                                  = {sub.lessonCost} {isArabic ? "ج.م / حصة" : "EGP / lesson"} ({sub.monthlyCost || 400} ÷ {sub.lessonsPerMonth || 4})
+                                  = {sub.lessonCost} {isArabic ? "ج.م / حصة" : "EGP / lesson"} ({sub.monthlyCost || 400} ÷ {sub.lessonsPerMonth || 4}) | {sub.defaultDurationMinutes || 60} {isArabic ? "دقيقة" : "min"}
                                 </span>
                               </div>
                             </div>
                           )}
 
                           {/* Case 2: Calendar Elapsed Lessons - Lesson / Hourly Cost */}
-                          {sub.billingType === "monthly_elapsed_lessons" && (
+                          {(sub.billingType === "monthly_elapsed_lessons" || (!sub.billingType && sub.billingType !== "monthly_fixed_lessons")) && (
                             <div className="sm:col-span-2 space-y-2">
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                 <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-xl border border-slate-200 shadow-2xs">
@@ -2039,38 +2354,79 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                                 )}
                               </div>
 
-                              {sub.rateType === "per_hour" && (
-                                <div className="flex items-center justify-between gap-2 bg-blue-50/70 px-3 py-1.5 rounded-xl border border-blue-200 text-xs">
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="font-bold text-slate-700 text-[11px]">
-                                      {isArabic ? "مدة الحصة الافتراضية:" : "Default Duration:"}
-                                    </span>
-                                    <select
-                                      value={sub.defaultDurationMinutes || 60}
-                                      onChange={e => {
-                                        const dur = Number(e.target.value);
-                                        const hCost = sub.hourlyCost || sub.lessonCost || 100;
-                                        const lCost = Math.max(0, Number(((hCost * dur) / 60).toFixed(2)));
-                                        handleUpdateSubjectField(idx, {
-                                          defaultDurationMinutes: dur,
-                                          lessonCost: lCost
-                                        });
-                                      }}
-                                      className="bg-white border border-blue-300 rounded-lg px-2 py-0.5 text-xs font-bold text-blue-900 focus:outline-none"
-                                    >
-                                      <option value={30}>30 {isArabic ? "دقيقة (نصف ساعة)" : "min (0.5h)"}</option>
-                                      <option value={45}>45 {isArabic ? "دقيقة" : "min"}</option>
-                                      <option value={60}>60 {isArabic ? "دقيقة (ساعة واحدة)" : "min (1 hour)"}</option>
-                                      <option value={75}>75 {isArabic ? "دقيقة (ساعة وربع)" : "min (1.25h)"}</option>
-                                      <option value={90}>90 {isArabic ? "دقيقة (ساعة ونصف)" : "min (1.5h)"}</option>
-                                      <option value={120}>120 {isArabic ? "دقيقة (ساعتان)" : "min (2 hours)"}</option>
-                                    </select>
-                                  </div>
-                                  <span className="font-black text-blue-700 bg-white px-2 py-0.5 rounded-lg border border-blue-200 shadow-2xs text-[11px]">
-                                    = {sub.lessonCost} {isArabic ? "ج.م لكل حصة" : "EGP / lesson"}
+                              {/* Duration open input for elapsed lessons */}
+                              <div className="p-2.5 bg-slate-50/80 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[11px] font-bold text-slate-700 flex items-center gap-1 shrink-0">
+                                    <Clock className="w-3.5 h-3.5 text-blue-600" />
+                                    {isArabic ? "مدة الحصة الافتراضية:" : "Default Duration:"}
                                   </span>
+                                  <div className="flex items-center gap-1">
+                                    <input
+                                      type="number"
+                                      min="1"
+                                      max="360"
+                                      value={sub.defaultDurationMinutes || ""}
+                                      onChange={e => {
+                                        const val = parseInt(e.target.value, 10);
+                                        const dur = isNaN(val) ? 0 : Math.max(1, val);
+                                        if (sub.rateType === "per_hour") {
+                                          const hCost = sub.hourlyCost || sub.lessonCost || 100;
+                                          const lCost = Math.max(0, Number(((hCost * dur) / 60).toFixed(2)));
+                                          handleUpdateSubjectField(idx, {
+                                            defaultDurationMinutes: dur,
+                                            lessonCost: lCost
+                                          });
+                                        } else {
+                                          handleUpdateSubjectField(idx, { defaultDurationMinutes: dur });
+                                        }
+                                      }}
+                                      className="w-16 bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-black text-slate-800 focus:outline-none focus:border-blue-500 text-center"
+                                      placeholder="60"
+                                    />
+                                    <span className="text-[10px] font-bold text-slate-500">{isArabic ? "دقيقة" : "min"}</span>
+                                  </div>
                                 </div>
-                              )}
+
+                                <div className="flex items-center gap-1 flex-wrap">
+                                  {[10, 15, 20, 25, 30, 45, 60, 75, 90, 120].map(dur => (
+                                    <button
+                                      type="button"
+                                      key={dur}
+                                      onClick={() => {
+                                        if (sub.rateType === "per_hour") {
+                                          const hCost = sub.hourlyCost || sub.lessonCost || 100;
+                                          const lCost = Math.max(0, Number(((hCost * dur) / 60).toFixed(2)));
+                                          handleUpdateSubjectField(idx, {
+                                            defaultDurationMinutes: dur,
+                                            lessonCost: lCost
+                                          });
+                                        } else {
+                                          handleUpdateSubjectField(idx, { defaultDurationMinutes: dur });
+                                        }
+                                      }}
+                                      className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition ${
+                                        (sub.defaultDurationMinutes || 60) === dur
+                                          ? "bg-blue-600 text-white shadow-2xs"
+                                          : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-100"
+                                      }`}
+                                    >
+                                      {dur === 60 ? (isArabic ? "60د (ساعة)" : "60m (1h)") : dur === 90 ? (isArabic ? "90د (1.5س)" : "90m (1.5h)") : dur === 120 ? (isArabic ? "120د (2س)" : "120m (2h)") : `${dur}${isArabic ? "د" : "m"}`}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+
+                              <div className="flex items-center justify-between gap-2 bg-blue-50/70 px-3 py-1.5 rounded-xl border border-blue-200 text-xs">
+                                <span className="font-bold text-slate-700 text-[11px]">
+                                  {sub.rateType === "per_hour" ? (isArabic ? "⏱️ سعر الحصة المحسوب بالساعة:" : "Calculated Lesson Price:") : (isArabic ? "💵 تفاصيل سعر الحصة:" : "Lesson Price Breakdown:")}
+                                </span>
+                                <span className="font-black text-blue-700 bg-white px-2 py-0.5 rounded-lg border border-blue-200 shadow-2xs text-[11px]">
+                                  {sub.rateType === "per_hour"
+                                    ? `= ${sub.lessonCost} ${isArabic ? "ج.م لكل حصة" : "EGP / lesson"} (${sub.hourlyCost || 100} ج.م/س × ${sub.defaultDurationMinutes || 60} دقيقة)`
+                                    : `= ${sub.lessonCost} ${isArabic ? "ج.م لكل حصة" : "EGP / lesson"} (المدة: ${sub.defaultDurationMinutes || 60} دقيقة | مكافئ: ${Number((((sub.lessonCost || 100) / (sub.defaultDurationMinutes || 60)) * 60).toFixed(1))} ج.م/س)`}
+                                </span>
+                              </div>
                             </div>
                           )}
 
@@ -2241,17 +2597,20 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                                 </div>
                               </div>
 
-                              <div className="flex items-center justify-between gap-2 bg-blue-50/70 px-3 py-1.5 rounded-xl border border-blue-200 text-xs">
-                                <div className="flex items-center gap-1.5">
-                                  {sub.rateType === "per_hour" ? (
-                                    <>
-                                      <span className="font-bold text-slate-700 text-[11px]">
-                                        {isArabic ? "مدة الحصة الافتراضية:" : "Default Duration:"}
-                                      </span>
-                                      <select
-                                        value={sub.defaultDurationMinutes || 60}
-                                        onChange={e => {
-                                          const dur = Number(e.target.value);
+                              {/* Duration open input for fixed lessons */}
+                              <div className="p-2.5 bg-slate-50/80 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[11px] font-bold text-slate-700 flex items-center gap-1 shrink-0">
+                                    <Clock className="w-3.5 h-3.5 text-blue-600" />
+                                    {isArabic ? "مدة الحصة الافتراضية:" : "Default Duration:"}
+                                  </span>
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const current = sub.defaultDurationMinutes || 60;
+                                        const dur = Math.max(1, current - 5);
+                                        if (sub.rateType === "per_hour") {
                                           const hCost = sub.hourlyCost || sub.lessonCost || 100;
                                           const lCost = Math.max(0, Number(((hCost * dur) / 60).toFixed(2)));
                                           const count = sub.lessonsPerMonth || 8;
@@ -2260,27 +2619,109 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                                             lessonCost: lCost,
                                             monthlyCost: Number((lCost * count).toFixed(2))
                                           });
-                                        }}
-                                        className="bg-white border border-blue-300 rounded-lg px-2 py-0.5 text-xs font-bold text-blue-900 focus:outline-none"
-                                      >
-                                        <option value={30}>30 {isArabic ? "دقيقة (نصف ساعة)" : "min (0.5h)"}</option>
-                                        <option value={45}>45 {isArabic ? "دقيقة" : "min"}</option>
-                                        <option value={60}>60 {isArabic ? "دقيقة (ساعة واحدة)" : "min (1 hour)"}</option>
-                                        <option value={75}>75 {isArabic ? "دقيقة (ساعة وربع)" : "min (1.25h)"}</option>
-                                        <option value={90}>90 {isArabic ? "دقيقة (ساعة ونصف)" : "min (1.5h)"}</option>
-                                        <option value={120}>120 {isArabic ? "دقيقة (ساعتان)" : "min (2 hours)"}</option>
-                                      </select>
-                                    </>
-                                  ) : (
-                                    <span className="font-bold text-slate-700 text-[11px]">
-                                      {isArabic ? "🎯 تفاصيل الباقة:" : "🎯 Package Breakdown:"}
-                                    </span>
-                                  )}
+                                        } else {
+                                          handleUpdateSubjectField(idx, { defaultDurationMinutes: dur });
+                                        }
+                                      }}
+                                      className="w-6 h-6 rounded-md bg-white border border-slate-200 text-slate-700 font-black text-xs hover:bg-slate-100 flex items-center justify-center transition shrink-0"
+                                      title="-5 min"
+                                    >
+                                      -
+                                    </button>
+                                    <input
+                                      type="number"
+                                      min="1"
+                                      max="360"
+                                      value={sub.defaultDurationMinutes || ""}
+                                      onChange={e => {
+                                        const val = parseInt(e.target.value, 10);
+                                        const dur = isNaN(val) ? 0 : Math.max(1, val);
+                                        if (sub.rateType === "per_hour") {
+                                          const hCost = sub.hourlyCost || sub.lessonCost || 100;
+                                          const lCost = Math.max(0, Number(((hCost * dur) / 60).toFixed(2)));
+                                          const count = sub.lessonsPerMonth || 8;
+                                          handleUpdateSubjectField(idx, {
+                                            defaultDurationMinutes: dur,
+                                            lessonCost: lCost,
+                                            monthlyCost: Number((lCost * count).toFixed(2))
+                                          });
+                                        } else {
+                                          handleUpdateSubjectField(idx, { defaultDurationMinutes: dur });
+                                        }
+                                      }}
+                                      className="w-14 bg-white border border-slate-200 rounded-lg px-1.5 py-1 text-xs font-black text-slate-800 focus:outline-none focus:border-blue-500 text-center"
+                                      placeholder="60"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const current = sub.defaultDurationMinutes || 60;
+                                        const dur = Math.min(360, current + 5);
+                                        if (sub.rateType === "per_hour") {
+                                          const hCost = sub.hourlyCost || sub.lessonCost || 100;
+                                          const lCost = Math.max(0, Number(((hCost * dur) / 60).toFixed(2)));
+                                          const count = sub.lessonsPerMonth || 8;
+                                          handleUpdateSubjectField(idx, {
+                                            defaultDurationMinutes: dur,
+                                            lessonCost: lCost,
+                                            monthlyCost: Number((lCost * count).toFixed(2))
+                                          });
+                                        } else {
+                                          handleUpdateSubjectField(idx, { defaultDurationMinutes: dur });
+                                        }
+                                      }}
+                                      className="w-6 h-6 rounded-md bg-white border border-slate-200 text-slate-700 font-black text-xs hover:bg-slate-100 flex items-center justify-center transition shrink-0"
+                                      title="+5 min"
+                                    >
+                                      +
+                                    </button>
+                                    <span className="text-[10px] font-bold text-slate-500">{isArabic ? "دقيقة" : "min"}</span>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-1 flex-wrap">
+                                  {[5, 10, 15, 20, 25, 30, 40, 45, 50, 60, 75, 90, 120].map(dur => (
+                                    <button
+                                      type="button"
+                                      key={dur}
+                                      onClick={() => {
+                                        if (sub.rateType === "per_hour") {
+                                          const hCost = sub.hourlyCost || sub.lessonCost || 100;
+                                          const lCost = Math.max(0, Number(((hCost * dur) / 60).toFixed(2)));
+                                          const count = sub.lessonsPerMonth || 8;
+                                          handleUpdateSubjectField(idx, {
+                                            defaultDurationMinutes: dur,
+                                            lessonCost: lCost,
+                                            monthlyCost: Number((lCost * count).toFixed(2))
+                                          });
+                                        } else {
+                                          handleUpdateSubjectField(idx, { defaultDurationMinutes: dur });
+                                        }
+                                      }}
+                                      className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition ${
+                                        (sub.defaultDurationMinutes || 60) === dur
+                                          ? "bg-blue-600 text-white shadow-2xs"
+                                          : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-100"
+                                      }`}
+                                    >
+                                      {dur === 60 ? (isArabic ? "60د (ساعة)" : "60m (1h)") : dur === 90 ? (isArabic ? "90د (1.5س)" : "90m (1.5h)") : dur === 120 ? (isArabic ? "120د (2س)" : "120m (2h)") : `${dur}${isArabic ? "د" : "m"}`}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+
+                              <div className="flex items-center justify-between gap-2 bg-blue-50/70 px-3 py-1.5 rounded-xl border border-blue-200 text-xs">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-bold text-slate-700 text-[11px]">
+                                    {isArabic ? "🎯 تفاصيل الباقة:" : "🎯 Package Breakdown:"}
+                                  </span>
                                 </div>
                                 <span className="font-black text-blue-700 bg-white px-2 py-0.5 rounded-lg border border-blue-200 shadow-2xs text-[11px]">
-                                  {sub.rateType === "per_lesson"
-                                    ? `= ${sub.lessonCost} ${isArabic ? "ج.م/حصة" : "EGP/lesson"} (${isArabic ? "إجمالي الشهر:" : "Total:"} ${sub.monthlyCost || (sub.lessonCost * (sub.lessonsPerMonth || 8))} ${isArabic ? "ج.م/شهر" : "EGP/mo"})`
-                                    : `= ${sub.lessonCost} ${isArabic ? "ج.م/حصة" : "EGP/lesson"} (${isArabic ? "من تقسيم" : "from"} ${sub.monthlyCost || 800} ÷ ${sub.lessonsPerMonth || 8} ${isArabic ? "حصة" : "lessons"})`}
+                                  {sub.rateType === "per_hour"
+                                    ? `= ${sub.lessonCost} ${isArabic ? "ج.م/حصة" : "EGP/lesson"} (${sub.hourlyCost || 100} ج.م/س × ${sub.defaultDurationMinutes || 60} د) | ${isArabic ? "الشهر:" : "Month:"} ${sub.monthlyCost || (sub.lessonCost * (sub.lessonsPerMonth || 8))} ج.م`
+                                    : sub.rateType === "per_lesson"
+                                    ? `= ${sub.lessonCost} ${isArabic ? "ج.م/حصة" : "EGP/lesson"} (${isArabic ? "إجمالي الشهر:" : "Total:"} ${sub.monthlyCost || (sub.lessonCost * (sub.lessonsPerMonth || 8))} ${isArabic ? "ج.م/شهر" : "EGP/mo"}) | ${sub.defaultDurationMinutes || 60} د`
+                                    : `= ${sub.lessonCost} ${isArabic ? "ج.م/حصة" : "EGP/lesson"} (${isArabic ? "من تقسيم" : "from"} ${sub.monthlyCost || 800} ÷ ${sub.lessonsPerMonth || 8} ${isArabic ? "حصة" : "lessons"}) | ${sub.defaultDurationMinutes || 60} د`}
                                 </span>
                               </div>
                             </div>
@@ -2459,46 +2900,96 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
             </div>
 
             {/* Profile Tabs */}
-            <div className="flex border-b border-slate-200">
-              <button
-                onClick={() => setProfileTab("reports")}
-                className={`px-4 py-2 font-bold text-xs border-b-2 transition flex items-center gap-1.5 ${
-                  profileTab === "reports"
-                    ? "border-purple-600 text-purple-700 bg-purple-50/50"
-                    : "border-transparent text-slate-500 hover:text-slate-800"
-                }`}
-              >
-                <Sparkles className="w-3.5 h-3.5 text-purple-600" />
-                <span>{isArabic ? "التقارير السابقة والذكاء الاصطناعي" : "Previous Reports & AI"}</span>
-              </button>
-              <button
-                onClick={() => setProfileTab("finance")}
-                className={`px-4 py-2 font-bold text-xs border-b-2 transition ${
-                  profileTab === "finance"
-                    ? "border-blue-600 text-blue-600 bg-blue-50/50"
-                    : "border-transparent text-slate-500 hover:text-slate-800"
-                }`}
-              >
-                💰 {isArabic ? "الحساب المالي والحصص" : "Financial Balance"}
-              </button>
-              <button
-                onClick={() => setProfileTab("attendance")}
-                className={`px-4 py-2 font-bold text-xs border-b-2 transition ${
-                  profileTab === "attendance"
-                    ? "border-blue-600 text-blue-600 bg-blue-50/50"
-                    : "border-transparent text-slate-500 hover:text-slate-800"
-                }`}
-              >
-                📅 {isArabic ? "سجل الحضور والخصم" : "Attendance History"}
-              </button>
-            </div>
+            {(() => {
+              const selId = String(selectedStudent.id || "").trim();
+              const selName = (selectedStudent.fullName || "").trim().toLowerCase();
+              const rawStudentAllReps = reports.filter(r => r && (
+                (r.studentId && String(r.studentId).trim() === selId) ||
+                (r.studentName && r.studentName.trim().toLowerCase() === selName)
+              ));
+              const studentAllReps = deduplicateReportsList(rawStudentAllReps);
+              const dailyCount = studentAllReps.filter(isDailyPersonalReport).length;
+              const monthlyCount = studentAllReps.filter(isMonthlyComprehensiveReport).length;
+
+              return (
+                <div className="flex border-b border-slate-200 overflow-x-auto">
+                  {/* Tab: Daily Personal Reports */}
+                  <button
+                    type="button"
+                    onClick={() => setProfileTab("daily_reports")}
+                    className={`px-4 py-2.5 font-bold text-xs border-b-2 transition flex items-center gap-1.5 shrink-0 ${
+                      profileTab === "daily_reports"
+                        ? "border-purple-600 text-purple-700 bg-purple-50/50"
+                        : "border-transparent text-slate-500 hover:text-slate-800"
+                    }`}
+                  >
+                    <FileText className="w-3.5 h-3.5 text-purple-600" />
+                    <span>{isArabic ? "التقارير الشخصية اليومية" : "Personal Daily Reports"}</span>
+                    {dailyCount > 0 && (
+                      <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
+                        profileTab === "daily_reports" ? "bg-purple-600 text-white" : "bg-purple-100 text-purple-700"
+                      }`}>
+                        {dailyCount}
+                      </span>
+                    )}
+                  </button>
+
+                  {/* Tab: Comprehensive Monthly Reports */}
+                  <button
+                    type="button"
+                    onClick={() => setProfileTab("monthly_reports")}
+                    className={`px-4 py-2.5 font-bold text-xs border-b-2 transition flex items-center gap-1.5 shrink-0 ${
+                      profileTab === "monthly_reports"
+                        ? "border-teal-600 text-teal-700 bg-teal-50/50"
+                        : "border-transparent text-slate-500 hover:text-slate-800"
+                    }`}
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-teal-600" />
+                    <span>{isArabic ? "التقارير الشهرية الشاملة" : "Comprehensive Monthly Reports"}</span>
+                    {monthlyCount > 0 && (
+                      <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
+                        profileTab === "monthly_reports" ? "bg-teal-600 text-white" : "bg-teal-100 text-teal-700"
+                      }`}>
+                        {monthlyCount}
+                      </span>
+                    )}
+                  </button>
+
+                  {/* Tab: Financial Balance */}
+                  <button
+                    type="button"
+                    onClick={() => setProfileTab("finance")}
+                    className={`px-4 py-2.5 font-bold text-xs border-b-2 transition flex items-center gap-1.5 shrink-0 ${
+                      profileTab === "finance"
+                        ? "border-blue-600 text-blue-600 bg-blue-50/50"
+                        : "border-transparent text-slate-500 hover:text-slate-800"
+                    }`}
+                  >
+                    <span>💰 {isArabic ? "الحساب المالي والحصص" : "Financial Balance"}</span>
+                  </button>
+
+                  {/* Tab: Attendance History */}
+                  <button
+                    type="button"
+                    onClick={() => setProfileTab("attendance")}
+                    className={`px-4 py-2.5 font-bold text-xs border-b-2 transition flex items-center gap-1.5 shrink-0 ${
+                      profileTab === "attendance"
+                        ? "border-indigo-600 text-indigo-600 bg-indigo-50/50"
+                        : "border-transparent text-slate-500 hover:text-slate-800"
+                    }`}
+                  >
+                    <span>📅 {isArabic ? "سجل الحضور والخصم" : "Attendance History"}</span>
+                  </button>
+                </div>
+              );
+            })()}
 
             {/* Tab 1: Financial Balance & Payments */}
             {profileTab === "finance" && (
               <div className="space-y-4">
                 {/* Unified Financial Summary Card */}
                 {(() => {
-                  const finSummary = calculateStudentFinancials(selectedStudent, attendanceRecords);
+                  const finSummary = calculateStudentFinancials(selectedStudent, attendanceRecords, paymentTransactions, reports);
                   return (
                     <>
                       <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-50/80 via-slate-50 to-indigo-50/80 border border-blue-100 flex flex-wrap items-center justify-between gap-3 text-xs">
@@ -2523,6 +3014,105 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                         </div>
                       </div>
 
+                      {/* DEDICATED STUDENT FINANCIAL STATEMENT BANNER WITH HOURS STUDIED */}
+                      <div className="p-4 rounded-2xl bg-gradient-to-r from-sky-50 via-blue-50/80 to-indigo-50/60 border border-sky-200/90 shadow-2xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-2xl bg-sky-600 text-white flex items-center justify-center font-bold text-base shrink-0 shadow-xs">
+                            <Clock className="w-5 h-5 text-white" />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h4 className="font-black text-slate-900 text-xs sm:text-sm">
+                                {isArabic ? "كشف الحساب المالي وساعات الدراسة:" : "Student Statement & Study Hours:"}
+                              </h4>
+                              <span className="px-2.5 py-0.5 rounded-lg bg-sky-600 text-white font-black text-xs shadow-2xs">
+                                ⏱️ {finSummary.totalTaughtHours} {isArabic ? "ساعة درسها" : "hours studied"}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-600 font-medium mt-0.5">
+                              {isArabic
+                                ? `درس الطالب ما مجموعه (${formatHoursHuman(finSummary.totalTaughtHours, true)}) بما يعادل ${Math.round((finSummary.totalTaughtHours || 0) * 60)} دقيقة موزعة على ${finSummary.totalAttendedLessons} حصة حضور فعلية.`
+                                : `The student completed (${formatHoursHuman(finSummary.totalTaughtHours, false)}) totaling ${Math.round((finSummary.totalTaughtHours || 0) * 60)} minutes across ${finSummary.totalAttendedLessons} attended lessons.`}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 self-end sm:self-auto shrink-0 flex-wrap">
+                          <button
+                            type="button"
+                            onClick={() => handleCopyStudentStatement(selectedStudent)}
+                            className="px-3 py-1.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 text-xs font-bold transition flex items-center gap-1.5 shadow-2xs"
+                            title={isArabic ? "نسخ كشف الحساب المالي متضمناً عدد الساعات" : "Copy Statement"}
+                          >
+                            {copiedStatementStudentId === selectedStudent.id ? (
+                              <>
+                                <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                <span className="text-emerald-700">{isArabic ? "تم النسخ" : "Copied"}</span>
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="w-3.5 h-3.5 text-slate-500" />
+                                <span>{isArabic ? "نسخ الكشف" : "Copy"}</span>
+                              </>
+                            )}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleShareStudentStatementWhatsApp(selectedStudent)}
+                            className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-2xs"
+                            title={isArabic ? "إرسال كشف الحساب مع ساعات الدراسة لواتساب ولي الأمر" : "Share via WhatsApp"}
+                          >
+                            <Share2 className="w-3.5 h-3.5" />
+                            <span>{isArabic ? "إرسال واتساب" : "WhatsApp"}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setStatementModalStudent(selectedStudent)}
+                            className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-2xs"
+                            title={isArabic ? "فتح كشف الحساب المالي الشامل" : "Open Full Statement"}
+                          >
+                            <FileText className="w-3.5 h-3.5" />
+                            <span>{isArabic ? "عرض كشف الحساب" : "Statement"}</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Active Billing Plan Banner in Student Profile */}
+                      <div className="p-3.5 rounded-2xl bg-white border border-slate-200/90 flex flex-wrap items-center justify-between gap-3 text-xs shadow-2xs">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center font-bold text-base shrink-0 border border-blue-100">
+                            {finSummary.billingType === "monthly" ? "📅" : finSummary.billingType === "monthly_fixed_lessons" ? "🎯" : "🗓️"}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-bold text-slate-800 text-xs">
+                                {finSummary.billingType === "monthly"
+                                  ? (isArabic ? "نظام المحاسبة: اشتراك شهري ثابت (الشهر كامل)" : "Billing: Flat Monthly Subscription")
+                                  : finSummary.billingType === "monthly_fixed_lessons"
+                                  ? (isArabic ? "نظام المحاسبة: باقة حصص محددة شهرياً" : "Billing: Fixed Monthly Package")
+                                  : (isArabic ? "نظام المحاسبة: حصص التقويم المنقضية (حساب آخر الشهر)" : "Billing: Elapsed Lessons (Month-End)")}
+                              </span>
+                              <span className="text-[10px] px-2 py-0.5 rounded-md font-bold bg-blue-50 text-blue-700 border border-blue-100">
+                                {finSummary.billingType === "monthly"
+                                  ? (isArabic ? "مبلغ شهري محدد" : "Flat Month")
+                                  : finSummary.billingType === "monthly_fixed_lessons"
+                                  ? (isArabic ? "باقة حصص" : "Package")
+                                  : (isArabic ? "حسب الحصص والساعات الفعلية" : "Actual Elapsed")}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-500 mt-0.5">
+                              {finSummary.billingType === "monthly"
+                                ? (isArabic ? `سعر الشهر الكامل: ${selectedStudent.monthlyCost || 400} ج.م مقسم على ${selectedStudent.lessonsPerMonth || 4} حصص (${finSummary.lessonCost} ج.م / حصة)` : `Full Month: ${selectedStudent.monthlyCost || 400} EGP`)
+                                : finSummary.billingType === "monthly_fixed_lessons"
+                                ? (isArabic ? `باقة ${selectedStudent.lessonsPerMonth || 8} حصص شهرياً بمعدل ${finSummary.lessonCost} ج.م للحصة` : `Package of ${selectedStudent.lessonsPerMonth || 8} lessons`)
+                                : (isArabic ? `تُحسب التكلفة بنهاية الشهر وفقاً لعدد الساعات والحصص المنفذة فعلياً (${finSummary.lessonCost} ج.م للحصة${finSummary.hourlyCost && finSummary.hourlyCost !== finSummary.lessonCost ? ` / ${finSummary.hourlyCost} ج.م للساعة` : ""}) دون فرض سعر شهر ثابت مسبقاً.` : `Calculated at month-end based on actual attended lessons and hours.`)}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
                       <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-5 grid grid-cols-2 sm:grid-cols-5 gap-3 text-center">
                         <div className="bg-white p-3 rounded-xl border border-slate-100">
                           <p className="text-[11px] font-bold text-slate-500">{isArabic ? "سعر الحصة / الساعة" : "Lesson / Hourly Rate"}</p>
@@ -2538,9 +3128,14 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 
                         <div className="bg-white p-3 rounded-xl border border-slate-100">
                           <p className="text-[11px] font-bold text-slate-500">{isArabic ? "الحصص المنفذة" : "Attended Lessons"}</p>
-                          <p className="text-sm font-black text-blue-700 mt-1">
-                            {finSummary.totalAttendedLessons} {isArabic ? "حصة" : "lessons"}
-                          </p>
+                          <div className="flex items-center justify-center gap-1 mt-1 flex-wrap">
+                            <span className="text-sm font-black text-blue-700">
+                              {finSummary.totalAttendedLessons} {isArabic ? "حصة" : "lessons"}
+                            </span>
+                            <span className="text-[11px] font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100">
+                              ⏱️ {finSummary.totalTaughtHours ?? Number(((finSummary.totalAttendedLessons * 60) / 60).toFixed(1))} {isArabic ? "ساعة" : "hrs"}
+                            </span>
+                          </div>
                           <p className="text-[9.5px] text-slate-400 font-bold mt-0.5">
                             ({finSummary.totalAccruedCost} ج.م)
                           </p>
@@ -2640,7 +3235,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 
                 <div className="space-y-2">
                   {paymentTransactions
-                    .filter(pt => pt.studentId === selectedStudent.id)
+                    .filter(pt => matchesStudentRecord(pt, selectedStudent))
                     .map(pt => (
                       <div
                         key={pt.id}
@@ -2666,13 +3261,13 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                   {isArabic ? "سجل الحضور وتاريخ الخصم التلقائي" : "Attendance & Deductions History"}
                 </h3>
 
-                {attendanceRecords.filter(ar => ar.studentId === selectedStudent.id).length === 0 ? (
+                {attendanceRecords.filter(ar => matchesStudentRecord(ar, selectedStudent)).length === 0 ? (
                   <p className="text-xs text-slate-400 py-6 text-center">
                     {isArabic ? "لا توجد سجلات حضور سابقة لهذا الطالب." : "No attendance records found."}
                   </p>
                 ) : (
                   attendanceRecords
-                    .filter(ar => ar.studentId === selectedStudent.id)
+                    .filter(ar => matchesStudentRecord(ar, selectedStudent))
                     .map(ar => (
                       <div
                         key={ar.id}
@@ -2719,33 +3314,70 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
               </div>
             )}
 
-            {/* Tab 3: Previous Reports & AI Refinement */}
-            {profileTab === "reports" && (
+            {/* Tab: Daily Personal Reports */}
+            {profileTab === "daily_reports" && (
               <div className="space-y-4">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
                   <div>
                     <h3 className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
-                      <Sparkles className="w-4 h-4 text-purple-600" />
-                      <span>{isArabic ? "سجل التقارير وملاحظات الحصص" : "Reports History & Lesson Logs"}</span>
+                      <FileText className="w-4 h-4 text-purple-600" />
+                      <span>{isArabic ? "سجل التقارير الشخصية اليومية وملاحظات الحصص" : "Personal Daily Reports & Lesson Logs"}</span>
                     </h3>
                     <p className="text-[11px] text-slate-500 font-medium mt-0.5">
                       {isArabic
-                        ? `التقارير اليومية وسجل الحضور والغياب مع الصياغة بالذكاء الاصطناعي لـ (${selectedStudent.fullName}).`
-                        : `Lesson reports, attendance, and AI refinement for (${selectedStudent.fullName}).`}
+                        ? `التقارير اليومية لكل حصة وسجل الحضور والواجبات وصياغة الذكاء الاصطناعي لـ (${selectedStudent.fullName}).`
+                        : `Daily lesson reports, attendance, and AI refinement for (${selectedStudent.fullName}).`}
                     </p>
                   </div>
 
-                  <button
-                    onClick={() => {
-                      const st = selectedStudent;
-                      setSelectedStudent(null);
-                      setStudentForPersonalReport(st);
-                    }}
-                    className="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 shrink-0 transition"
-                  >
-                    <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                    <span>{isArabic ? "فتح صفحة التقرير الشخصي" : "Open Personal Report"}</span>
-                  </button>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {/* زر إنشاء تقرير شهري شامل: مفعّل فقط إذا كان الطالب في "قرآن كريم" أو "Quran, Arabic and Islamic Studies" */}
+                    {(() => {
+                      const isEligible =
+                        isQuranComprehensiveReportEligible(reportSubject) ||
+                        (selectedStudent.subjects && selectedStudent.subjects.some(s => isQuranComprehensiveReportEligible(s.subject))) ||
+                        isQuranComprehensiveReportEligible(selectedStudent.subject);
+
+                      if (!isEligible) return null;
+
+                      const targetSubj = isQuranComprehensiveReportEligible(reportSubject)
+                        ? reportSubject
+                        : (selectedStudent.subjects?.find(s => isQuranComprehensiveReportEligible(s.subject))?.subject || selectedStudent.subject || "قرآن كريم");
+
+                      return (
+                        <button
+                          type="button"
+                          id="btn-open-monthly-quran-report-profile"
+                          onClick={() => setMonthlyReportModalTarget({ student: selectedStudent, subject: targetSubj })}
+                          className="px-3.5 py-1.5 rounded-xl bg-linear-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white font-black text-xs shadow-xs flex items-center gap-1.5 shrink-0 transition active:scale-95 animate-in fade-in"
+                        >
+                          <Sparkles className="w-3.5 h-3.5 text-emerald-200" />
+                          <span>{isArabic ? "إنشاء تقرير شهري شامل" : "Create Comprehensive Monthly Report"}</span>
+                        </button>
+                      );
+                    })()}
+
+                    <button
+                      type="button"
+                      onClick={openNewReportModal}
+                      className="px-3.5 py-1.5 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 font-bold text-xs shadow-2xs flex items-center gap-1.5 shrink-0 transition"
+                    >
+                      <Plus className="w-3.5 h-3.5 text-purple-600" />
+                      <span>{isArabic ? "كتابة تقرير هنا" : "Write Report Here"}</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        const st = selectedStudent;
+                        setSelectedStudent(null);
+                        setStudentForPersonalReport(st);
+                      }}
+                      className="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 shrink-0 transition"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                      <span>{isArabic ? "فتح صفحة التقرير الشخصي" : "Open Personal Report"}</span>
+                    </button>
+                  </div>
                 </div>
 
                 {whatsappSentNotice && (
@@ -2759,7 +3391,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                 {showCreateReportForm && (
                   <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-b from-purple-50/90 to-indigo-50/80 border-2 border-purple-200/90 shadow-md space-y-4 text-xs animate-in fade-in">
                     {/* Header */}
-                    <div className="flex items-center justify-between pb-3 border-b border-purple-200/70">
+                    <div className="flex items-center justify-between pb-3 border-b border-purple-200/70 gap-2 flex-wrap">
                       <div className="flex items-center gap-2">
                         <div className="w-8 h-8 rounded-xl bg-purple-600 text-white flex items-center justify-center font-bold shadow-xs">
                           <FileText className="w-4 h-4" />
@@ -2769,7 +3401,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                             {isArabic ? `إضافة تقرير جديد لـ ${selectedStudent.fullName}` : `Add New Report: ${selectedStudent.fullName}`}
                           </h4>
                           <p className="text-[10px] text-purple-700 font-medium">
-                            {isArabic ? "اختر المادة، حدد رقم وتاريخ الحصة، وحالة الحضور" : "Select subject, lesson number & date, and attendance"}
+                            {isArabic ? "اختر المادة، حدد رقم وتاريخ الحصة، مدة الحصة بحرية، وحالة الحضور" : "Select subject, lesson number, date, duration, and attendance"}
                           </p>
                         </div>
                       </div>
@@ -2834,8 +3466,8 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                       </div>
                     </div>
 
-                    {/* FIELDS 2 & 3: رقم الحصة + تاريخ الحصة */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                    {/* FIELDS 2 & 3 & Duration: رقم الحصة + تاريخ الحصة + مدة الحصة */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
                       {/* FIELD 2: 2- رقم الحصة */}
                       <div className="space-y-1.5">
                         <label className="block font-black text-slate-800 text-xs flex items-center justify-between">
@@ -2844,7 +3476,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                             <span>{isArabic ? "رقم الحصة *" : "Lesson Number *"}</span>
                           </span>
                           <span className="text-[10px] font-bold text-purple-700 bg-purple-100/80 px-2 py-0.5 rounded-full">
-                            {isArabic ? "تلقائي وقابل للتعديل" : "Auto-filled & editable"}
+                            {isArabic ? "تلقائي" : "Auto"}
                           </span>
                         </label>
 
@@ -2889,7 +3521,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                             <span>{isArabic ? "تاريخ الحصة *" : "Lesson Date *"}</span>
                           </span>
                           <span className="text-[10px] font-bold text-purple-700 bg-purple-100/80 px-2 py-0.5 rounded-full">
-                            {isArabic ? "تلقائي حسب اليوم (قابل للتعديل)" : "Today (editable)"}
+                            {isArabic ? "اليوم" : "Today"}
                           </span>
                         </label>
 
@@ -2903,6 +3535,74 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                           />
                         </div>
                       </div>
+
+                      {/* FIELD: مدة الحصة (حرية كاملة - أي مدة أقل أو أكثر من 30د) */}
+                      <div className="space-y-1.5">
+                        <label className="block font-black text-slate-800 text-xs flex items-center justify-between">
+                          <span className="flex items-center gap-1.5">
+                            <Clock className="w-4 h-4 text-purple-600" />
+                            <span>{isArabic ? "مدة الحصة (حرية كاملة) *" : "Duration (Flexible) *"}</span>
+                          </span>
+                          <span className="text-[10px] font-bold text-purple-700 bg-purple-100/80 px-2 py-0.5 rounded-full">
+                            {reportDurationMinutes} {isArabic ? "دقيقة" : "min"}
+                          </span>
+                        </label>
+
+                        <div className="flex items-center gap-1 bg-white border border-purple-200 rounded-xl p-1 shadow-2xs">
+                          <button
+                            type="button"
+                            onClick={() => setReportDurationMinutes(prev => Math.max(1, (prev || 60) - 5))}
+                            className="w-7 h-7 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-800 font-black text-xs flex items-center justify-center transition"
+                            title="-5 min"
+                          >
+                            -
+                          </button>
+                          <input
+                            type="number"
+                            min="1"
+                            max="480"
+                            value={reportDurationMinutes || ""}
+                            placeholder="60"
+                            onChange={e => {
+                              const val = parseInt(e.target.value, 10);
+                              setReportDurationMinutes(isNaN(val) ? 0 : Math.max(1, val));
+                            }}
+                            className="flex-1 bg-transparent text-center font-black text-slate-900 text-xs focus:outline-none"
+                            title={isArabic ? "اكتب أي عدد دقائق تريده (مثلاً: 10, 15, 20, 25, 30, 45, 60...)" : "Duration in minutes"}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setReportDurationMinutes(prev => Math.min(480, (prev || 60) + 5))}
+                            className="w-7 h-7 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-800 font-black text-xs flex items-center justify-center transition"
+                            title="+5 min"
+                          >
+                            +
+                          </button>
+                          <span className="text-[10px] font-bold text-slate-500 pr-1 shrink-0">{isArabic ? "د" : "m"}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Quick Duration Buttons Strip */}
+                    <div className="flex items-center gap-1.5 flex-wrap bg-white/70 p-1.5 rounded-xl border border-purple-100">
+                      <span className="text-[10px] font-bold text-purple-800 flex items-center gap-1 shrink-0">
+                        <Clock className="w-3 h-3 text-purple-600" />
+                        {isArabic ? "اختيارات سريعة للمدة:" : "Quick Durations:"}
+                      </span>
+                      {[10, 15, 20, 25, 30, 40, 45, 50, 60, 75, 90, 120].map(dur => (
+                        <button
+                          key={dur}
+                          type="button"
+                          onClick={() => setReportDurationMinutes(dur)}
+                          className={`px-1.5 py-0.5 rounded-lg text-[10px] font-bold transition ${
+                            reportDurationMinutes === dur
+                              ? "bg-purple-600 text-white shadow-2xs font-black"
+                              : "bg-purple-50 text-purple-900 hover:bg-purple-100 border border-purple-200/50"
+                          }`}
+                        >
+                          {dur}{isArabic ? "د" : "m"}
+                        </button>
+                      ))}
                     </div>
 
                     {/* FIELD 4: 4- خانة بها حاضر وغائب */}
@@ -3135,7 +3835,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                         {/* Split Teacher Inputs: What happened in class & Homework */}
                         <div className="space-y-3">
                           <div>
-                            <label className="block font-bold text-slate-700 mb-1 text-xs">
+                            <label className="block font-bold text-slate-700 text-xs mb-1">
                               {isArabic ? "ما حدث داخل الحصة (الشرح والتفاعل والملاحظات):" : "What happened in class:"}
                             </label>
                             <textarea
@@ -3152,7 +3852,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                           </div>
 
                           <div>
-                            <label className="block font-bold text-slate-700 mb-1 text-xs">
+                            <label className="block font-bold text-slate-700 text-xs mb-1">
                               {isArabic ? "الواجب المنزلي والتكليفات القادمة:" : "Homework & Assignments:"}
                             </label>
                             <textarea
@@ -3268,68 +3968,120 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                           />
                         </div>
 
-                        {/* File Attachment */}
+                        {/* Universal File Attachment */}
                         <div className="space-y-1.5">
-                          <label className="block font-bold text-slate-700 text-xs flex items-center justify-between">
-                            <span className="flex items-center gap-1.5">
+                          <div className="flex items-center justify-between">
+                            <label className="font-bold text-slate-700 text-xs flex items-center gap-1.5">
                               <Paperclip className="w-4 h-4 text-purple-600" />
-                              <span>{isArabic ? "إرفاق صورة أو ملف (ورقة عمل / اختبار / صفحة كتاب):" : "Attach Image or File:"}</span>
-                            </span>
-                            <span className="text-[10px] font-medium text-purple-700 bg-purple-100/80 px-2 py-0.5 rounded-full">
+                              <span>{isArabic ? "إرفاق ملف أو صورة (أي نوع: PDF, PowerPoint, Excel, Word وغيرها):" : "Attach File or Image (PDF, PPTX, Excel, Word, etc.):"}</span>
+                            </label>
+                            <span className="text-[10px] font-bold text-purple-700 bg-purple-100/80 px-2 py-0.5 rounded-full">
                               {isArabic ? "اختياري" : "Optional"}
                             </span>
-                          </label>
+                          </div>
 
                           {!reportAttachment ? (
-                            <label className="border-2 border-dashed border-purple-200 hover:border-purple-400 bg-white hover:bg-purple-50/50 rounded-xl p-3 flex flex-col items-center justify-center cursor-pointer transition text-center group">
+                            <div
+                              onDragOver={(e) => {
+                                e.preventDefault();
+                                setIsDraggingFileInProfile(true);
+                              }}
+                              onDragLeave={() => setIsDraggingFileInProfile(false)}
+                              onDrop={(e) => {
+                                e.preventDefault();
+                                setIsDraggingFileInProfile(false);
+                                const file = e.dataTransfer.files?.[0];
+                                if (file) processSelectedFileInProfile(file);
+                              }}
+                              className={`border-2 border-dashed rounded-xl p-3 flex flex-col items-center justify-center gap-1.5 transition text-center cursor-pointer select-none ${
+                                isDraggingFileInProfile
+                                  ? "border-purple-600 bg-purple-100/70 scale-101"
+                                  : "border-purple-200 hover:border-purple-400 bg-white hover:bg-purple-50/50"
+                              }`}
+                              onClick={() => {
+                                document.getElementById("profile-universal-file-input")?.click();
+                              }}
+                            >
                               <input
+                                id="profile-universal-file-input"
                                 type="file"
-                                accept="image/*,.pdf,.txt,.doc,.docx"
+                                accept="*/*"
                                 onChange={handleFileChange}
                                 className="hidden"
                               />
                               <div className="flex items-center gap-2 text-purple-700 font-bold text-xs">
-                                <FileUp className="w-4 h-4 text-purple-600 group-hover:scale-110 transition" />
-                                <span>{isArabic ? "اضغط هنا لإرفاق صورة أو مستند لتحليله بالذكاء الاصطناعي" : "Click to attach image or document"}</span>
+                                <FileUp className="w-4 h-4 text-purple-600 animate-bounce" />
+                                <span>{isArabic ? "اضغط لاختيار ملف أو اسحبه إلى هنا (يدعم كافة أنواع الملفات)" : "Click or drag & drop any file (All types supported)"}</span>
                               </div>
-                              <p className="text-[10px] text-slate-400 mt-1">
-                                {isArabic
-                                  ? "يدعم الصور (PNG, JPG)، ملفات الـ PDF أو أوراق العمل والملاحظات اليدوية"
-                                  : "Supports images, PDFs, worksheets, or handwritten notes"}
-                              </p>
-                            </label>
-                          ) : (
-                            <div className="p-3 bg-white border border-purple-200 rounded-xl flex items-center justify-between gap-3 shadow-2xs">
-                              <div className="flex items-center gap-3 overflow-hidden">
-                                {reportAttachment.previewUrl ? (
-                                  <img
-                                    src={reportAttachment.previewUrl}
-                                    alt="Attachment Preview"
-                                    className="w-11 h-11 object-cover rounded-lg border border-purple-100 shrink-0"
-                                  />
-                                ) : (
-                                  <div className="w-10 h-10 rounded-lg bg-purple-100 text-purple-700 flex items-center justify-center shrink-0 font-bold text-xs">
-                                    <FileText className="w-5 h-5" />
-                                  </div>
-                                )}
-                                <div className="min-w-0">
-                                  <p className="font-bold text-slate-800 text-xs truncate">{reportAttachment.fileName || "ملف مرفق"}</p>
-                                  <p className="text-[10px] text-purple-600 font-semibold flex items-center gap-1 mt-0.5">
-                                    <Sparkles className="w-3 h-3 text-amber-500" />
-                                    <span>{isArabic ? "جاهز لتحليل الذكاء الاصطناعي" : "Ready for AI context"}</span>
-                                  </p>
-                                </div>
+                              <div className="flex items-center justify-center gap-1.5 flex-wrap text-[10px] font-bold text-slate-500 mt-1">
+                                <span className="px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200">PDF</span>
+                                <span className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200">PowerPoint</span>
+                                <span className="px-1.5 py-0.5 rounded bg-teal-50 text-teal-800 border border-teal-200">Excel</span>
+                                <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200">Word</span>
+                                <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">صور JPG/PNG</span>
+                                <span className="px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200">وأي ملف آخر</span>
                               </div>
-
-                              <button
-                                type="button"
-                                onClick={() => setReportAttachment(null)}
-                                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition shrink-0"
-                                title={isArabic ? "إزالة المرفق" : "Remove attachment"}
-                              >
-                                <X className="w-4 h-4" />
-                              </button>
                             </div>
+                          ) : (
+                            (() => {
+                              const meta = getProfileAttachmentMeta(reportAttachment);
+                              return (
+                                <div className="p-2.5 bg-white border border-purple-200 rounded-xl flex items-center justify-between gap-3 shadow-2xs">
+                                  <div className="flex items-center gap-3 overflow-hidden">
+                                    {reportAttachment.previewUrl ? (
+                                      <img
+                                        src={reportAttachment.previewUrl}
+                                        alt="Attachment Preview"
+                                        className="w-11 h-11 object-cover rounded-lg border border-purple-100 shrink-0"
+                                      />
+                                    ) : (
+                                      <div className="w-11 h-11 rounded-lg flex flex-col items-center justify-center shrink-0 border relative overflow-hidden bg-gradient-to-br from-slate-50 to-purple-50 border-purple-200">
+                                        {meta.type === "presentation" ? (
+                                          <Presentation className="w-5 h-5 text-amber-600" />
+                                        ) : meta.type === "spreadsheet" ? (
+                                          <FileSpreadsheet className="w-5 h-5 text-teal-700" />
+                                        ) : meta.type === "pdf" ? (
+                                          <FileText className="w-5 h-5 text-rose-600" />
+                                        ) : (
+                                          <File className="w-5 h-5 text-purple-600" />
+                                        )}
+                                        <span className={`text-[8px] font-black uppercase px-1 rounded-t-sm absolute bottom-0 inset-x-0 text-center ${meta.badgeColor}`}>
+                                          {meta.tag}
+                                        </span>
+                                      </div>
+                                    )}
+                                    <div className="min-w-0">
+                                      <div className="flex items-center gap-1.5">
+                                        <span className={`text-[9px] font-black px-1.5 py-0.2 rounded border ${meta.color}`}>
+                                          {meta.label}
+                                        </span>
+                                        {reportAttachment.fileSize && (
+                                          <span className="text-[10px] text-slate-400 font-bold">
+                                            ({formatFileSizeProfile(reportAttachment.fileSize)})
+                                          </span>
+                                        )}
+                                      </div>
+                                      <p className="font-bold text-slate-800 text-xs truncate max-w-[240px] sm:max-w-xs mt-0.5">
+                                        {reportAttachment.fileName || "ملف مرفق"}
+                                      </p>
+                                      <p className="text-[10px] text-emerald-700 font-bold flex items-center gap-1 mt-0.5">
+                                        <Sparkles className="w-3 h-3 text-amber-500" />
+                                        <span>{isArabic ? "جاهز للتحليل بالذكاء الاصطناعي" : "Ready for AI analysis"}</span>
+                                      </p>
+                                    </div>
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => setReportAttachment(null)}
+                                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition shrink-0"
+                                    title={isArabic ? "إزالة المرفق" : "Remove attachment"}
+                                  >
+                                    <X className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              );
+                            })()
                           )}
                         </div>
 
@@ -3339,6 +4091,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                           disabled={isGeneratingReport}
                           onClick={async () => {
                             setIsGeneratingReport(true);
+                            setReportGenerationError("");
                             try {
                               const subjSpecificInst = getSubjectSpecificAiInstruction(settings.subjectDefaults, reportSubject);
                               const generalInst = settings.generalAiInstructions || "";
@@ -3347,10 +4100,22 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                               const res = await onGenerateReportAi({
                                 studentName: selectedStudent.fullName,
                                 subject: reportSubject,
+                                date: reportDate,
+                                teacherName: settings.teacherName || undefined,
+                                lessonNumber: reportLessonNumber,
+                                lessonDuration: `${reportDurationMinutes} دقيقة`,
+                                includeStudentName: true,
+                                includeTeacherName: Boolean(settings.teacherName),
+                                includeLessonNumber: true,
+                                includeDuration: true,
+                                includeLessonDate: true,
+                                durationMinutes: reportDurationMinutes,
+                                attendanceStatus: "حاضر",
+                                homeworkStatus: reportHomeworkStatus,
                                 classEvents: classEvents.trim() || undefined,
                                 homeworkNotes: homeworkNotes.trim() || undefined,
                                 overallEvaluation: overallEvaluation.trim() || undefined,
-                                teacherNotes: `الحصة #${reportLessonNumber} (${reportDate})\nحالة الواجب: ${
+                                teacherNotes: `الحصة #${reportLessonNumber} (${reportDate}) - مدة الحصة: ${reportDurationMinutes} دقيقة\nما تم في الحصة: ${classEvents.trim() || "تم شرح الدرس ومتابعة التطبيق العملي."}\nالواجب: ${homeworkNotes.trim() || (reportHomeworkStatus === "no_homework" ? "لم يكن هناك واجب" : "حسب المعتاد")}\nحالة الواجب: ${
                                   reportHomeworkStatus === "no_homework"
                                     ? "لم يكن هناك واجب (لا تذكر أي بند أو سطر أو إشارة عن الواجب في التقرير نهائياً)"
                                     : reportHomeworkStatus === "done"
@@ -3366,9 +4131,12 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                               });
                               if (res) {
                                 setNewGeneratedReportText(res);
+                                setReportGenerationError("");
                               }
-                            } catch (err) {
-                              console.error("Failed to generate report:", err);
+                            } catch (err: any) {
+                              const errorMsg = err?.message || String(err);
+                              console.error("Failed to generate report:", errorMsg);
+                              setReportGenerationError(errorMsg);
                             } finally {
                               setIsGeneratingReport(false);
                             }
@@ -3382,6 +4150,17 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                               : (isArabic ? "✨ صياغة وتحليل التقرير بالذكاء الاصطناعي" : "Format & Analyze with AI")}
                           </span>
                         </button>
+
+                        {/* Error Alert if AI fails */}
+                        {reportGenerationError && (
+                          <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-start gap-2">
+                            <span className="text-sm">⚠️</span>
+                            <div>
+                              <div className="font-bold">{isArabic ? "تعذر إنشاء التقرير بالذكاء الاصطناعي:" : "AI generation failed:"}</div>
+                              <div className="text-[11px] text-rose-700 font-mono mt-0.5">{reportGenerationError}</div>
+                            </div>
+                          </div>
+                        )}
 
                         {/* AI Report Editor & Save / Share Actions */}
                         {newGeneratedReportText ? (
@@ -3411,9 +4190,11 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                                   onAddReport({
                                     studentId: selectedStudent.id,
                                     studentName: selectedStudent.fullName,
-                                    subject: reportSubject,
+                                    subject: reportSubject.trim() || selectedStudent.subject || selectedStudent.subjects?.[0]?.subject || "عام",
                                     lessonNumber: reportLessonNumber,
                                     date: reportDate,
+                                    durationMinutes: reportDurationMinutes,
+                                    lessonDuration: reportDurationMinutes ? `${reportDurationMinutes} دقيقة` : undefined,
                                     attendance: "present",
                                     deductCost: true,
                                     homeworkStatus: reportHomeworkStatus,
@@ -3489,9 +4270,11 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                                 onAddReport({
                                   studentId: selectedStudent.id,
                                   studentName: selectedStudent.fullName,
-                                  subject: reportSubject,
+                                  subject: reportSubject.trim() || selectedStudent.subject || selectedStudent.subjects?.[0]?.subject || "عام",
                                   lessonNumber: reportLessonNumber,
                                   date: reportDate,
+                                  durationMinutes: reportDurationMinutes,
+                                  lessonDuration: reportDurationMinutes ? `${reportDurationMinutes} دقيقة` : undefined,
                                   attendance: "present",
                                   deductCost: true,
                                   homeworkStatus: reportHomeworkStatus,
@@ -3532,13 +4315,23 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                     return rDate < sixMonthsAgo;
                   };
 
-                  const studentReports = reports.filter(
-                    r => r.studentId === selectedStudent.id || r.studentName === selectedStudent.fullName
+                  const selIdStr = String(selectedStudent.id || "").trim();
+                  const selNameNorm = (selectedStudent.fullName || "").trim().toLowerCase();
+
+                  const rawStudentReports = reports.filter(
+                    r => r && (
+                      (r.studentId && String(r.studentId).trim() === selIdStr) ||
+                      (r.studentName && r.studentName.trim().toLowerCase() === selNameNorm)
+                    )
                   );
+                  const studentReports = deduplicateReportsList(rawStudentReports);
 
                   // Also gather attendance records with reports
                   const studentAttendanceReports = attendanceRecords
-                    .filter(ar => ar.studentId === selectedStudent.id && (ar.generatedReportText || ar.teacherNotes))
+                    .filter(ar => ar && (
+                      (ar.studentId && String(ar.studentId).trim() === selIdStr) ||
+                      (ar.studentName && ar.studentName.trim().toLowerCase() === selNameNorm)
+                    ) && (ar.generatedReportText || ar.teacherNotes))
                     .map(ar => ({
                       id: ar.id,
                       studentId: ar.studentId,
@@ -3552,22 +4345,25 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                       aiInstructions: ar.aiInstructions || "",
                       reportText: ar.generatedReportText || ar.teacherNotes || "",
                       generatedText: ar.generatedReportText || ar.teacherNotes || "",
-                      archived: undefined as boolean | undefined,
+                      archived: (ar as any).archived === true,
+                      archiveGroup: (ar as any).archiveGroup,
+                      archivedAt: (ar as any).archivedAt,
+                      manuallyUnarchived: (ar as any).manuallyUnarchived === true,
                       createdAt: ar.date
                     }));
 
-                  // Merge and deduplicate
-                  const allPastReports = [...studentReports];
-                  studentAttendanceReports.forEach(arRep => {
-                    if (!allPastReports.some(r => r.id === arRep.id || (r.date === arRep.date && r.reportText === arRep.reportText))) {
-                      allPastReports.push(arRep);
-                    }
-                  });
+                  // Merge and deduplicate (strictly daily personal reports)
+                  const allPastReports = mergeDirectAndAttendanceReports(
+                    studentReports.filter(isDailyPersonalReport),
+                    studentAttendanceReports
+                  );
 
-                  // Classify reports as Active or Archived (Only manual archive by teacher, NO auto-hiding or deleting)
+                  const activeCycle = getActiveCycleInfo(selectedStudent);
+
+                  // Classify reports as Active or Archived (New month/package reports remain in active, archived stay in archive)
                   const classifiedReports = allPastReports.map(rep => {
-                    const isArchived = rep.archived === true;
-                    const archiveReason: "manual" | null = isArchived ? "manual" : null;
+                    const isArchived = rep.archived === true || !isReportInActiveCycle(rep, selectedStudent, activeCycle);
+                    const archiveReason: "manual" | "auto_6_months" | null = isArchived ? "manual" : null;
 
                     return {
                       ...rep,
@@ -3678,11 +4474,35 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                               </button>
                             </div>
 
-                            {/* Data permanence badge */}
-                            <span className="text-[10.5px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200/70 rounded-xl px-2.5 py-1 flex items-center gap-1.5">
-                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                              <span>{isArabic ? "الحفظ الدائم مفعل (لا يتم مسح أي بيانات إلا يدويًا)" : "Permanent storage active (manual delete only)"}</span>
-                            </span>
+                            <div className="flex items-center gap-2">
+                              {/* Action to Archive current cycle */}
+                              <button
+                                type="button"
+                                onClick={() => setShowArchiveCycleModal(true)}
+                                className="px-3 py-1.5 rounded-xl bg-purple-700 hover:bg-purple-800 text-white font-black text-xs flex items-center gap-1.5 shadow-xs transition active:scale-95"
+                              >
+                                <FolderArchive className="w-3.5 h-3.5 text-amber-300" />
+                                <span>{isArabic ? "أرشفة الشهر / الباقة المنتهية" : "Archive Ended Cycle"}</span>
+                              </button>
+
+                              {onRecoverReports && (
+                                <button
+                                  type="button"
+                                  onClick={onRecoverReports}
+                                  className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-black text-xs flex items-center gap-1.5 shadow-xs transition active:scale-95"
+                                  title={isArabic ? "استعادة التقارير المفقودة" : "Restore Missing Reports"}
+                                >
+                                  <Sparkles className="w-3.5 h-3.5 text-amber-200" />
+                                  <span>{isArabic ? "استعادة التقارير المفقودة" : "Restore Reports"}</span>
+                                </button>
+                              )}
+
+                              {/* Data permanence badge */}
+                              <span className="text-[10.5px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200/70 rounded-xl px-2.5 py-1 flex items-center gap-1.5">
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                <span>{isArabic ? "الحفظ الدائم مفعل" : "Permanent storage active"}</span>
+                              </span>
+                            </div>
                           </div>
 
                           {/* Sub-tools for Archived Tab (Search & Subject Filter) */}
@@ -3719,8 +4539,32 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                         </div>
                       )}
 
-                      {/* Active Reports List or Archive List */}
-                      {totalCount === 0 ? (
+                      {/* Content: Folders for Archive vs Cards for Active */}
+                      {reportArchiveFilter === "archived" ? (
+                        <ArchivedReportsFolderList
+                          groups={groupArchivedReports(classifiedReports.filter(r => r.isArchived), !isArabic)}
+                          isArabic={isArabic}
+                          onToggleArchiveReport={onToggleArchiveReport ? (repId) => {
+                            onToggleArchiveReport(repId);
+                            setWhatsappSentNotice(isArabic ? "تم استعادة التقرير إلى قائمة التقارير الحالية النشطة!" : "Report restored to active reports!");
+                            setTimeout(() => setWhatsappSentNotice(""), 3000);
+                          } : undefined}
+                          onDeleteReport={(id) => onDeleteReport(id)}
+                          onCopyReport={(r) => {
+                            const text = r.generatedText || r.reportText || r.teacherNotes || "";
+                            if (text && navigator?.clipboard) {
+                              navigator.clipboard.writeText(text);
+                            }
+                          }}
+                          onShareWhatsApp={(r) => {
+                            const text = r.generatedText || r.reportText || r.teacherNotes || "";
+                            if (text) {
+                              handleOpenWhatsAppChooser(text, selectedStudent);
+                            }
+                          }}
+                          searchActive={Boolean(archiveSearchQuery.trim())}
+                        />
+                      ) : totalCount === 0 ? (
                         <div className="p-8 text-center bg-slate-50 border border-slate-200/80 rounded-2xl text-slate-400 text-xs">
                           <FileText className="w-8 h-8 mx-auto text-slate-300 mb-2" />
                           <p className="font-bold text-slate-600">
@@ -3734,11 +4578,9 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                         <div className="p-8 text-center bg-slate-50 border border-slate-200/80 rounded-2xl text-slate-400 text-xs">
                           <FolderArchive className="w-8 h-8 mx-auto text-slate-300 mb-2" />
                           <p className="font-bold text-slate-600">
-                            {reportArchiveFilter === "archived"
-                              ? isArabic ? "لا توجد تقارير مؤرشفة تطابق معايير البحث." : "No archived reports match your search."
-                              : isArabic ? "لا توجد تقارير نشطة حالياً (جميع التقارير أقدم من 6 أشهر وموجودة في الأرشيف)." : "No active reports currently (all older reports are in Archive)."}
+                            {isArabic ? "لا توجد تقارير نشطة حالياً للشهر أو الباقة الحالية." : "No active reports currently for this cycle."}
                           </p>
-                          {reportArchiveFilter === "active" && archivedCount > 0 && (
+                          {archivedCount > 0 && (
                             <button
                               type="button"
                               onClick={() => setReportArchiveFilter("archived")}
@@ -3751,11 +4593,43 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                         </div>
                       ) : (
                         <div className="space-y-3">
+                          {filteredDisplayReports.length > 0 && (
+                            <div className="flex items-center justify-between pb-1 px-1">
+                              <span className="text-xs font-bold text-slate-500">
+                                {isArabic ? `إجمالي التقارير المعروضة: (${filteredDisplayReports.length})` : `Reports shown: (${filteredDisplayReports.length})`}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (expandedReportIds.length === filteredDisplayReports.length) {
+                                    setExpandedReportIds([]);
+                                  } else {
+                                    setExpandedReportIds(filteredDisplayReports.map(r => r.id));
+                                  }
+                                }}
+                                className="px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs flex items-center gap-1.5 transition"
+                              >
+                                {expandedReportIds.length === filteredDisplayReports.length ? (
+                                  <>
+                                    <EyeOff className="w-3.5 h-3.5 text-slate-600" />
+                                    <span>{isArabic ? "طي كل التقارير" : "Collapse All"}</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Eye className="w-3.5 h-3.5 text-purple-600" />
+                                    <span>{isArabic ? "إظهار كل التقارير" : "Expand All"}</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          )}
+
                           {filteredDisplayReports.map((rep, idx) => {
                             const finalReportContent = rep.generatedText || rep.reportText || rep.teacherNotes;
                             const isExpanded = expandedReportIds.includes(rep.id);
                             const lessonNum = rep.lessonNumber || (totalCount - idx);
                             const isAbsent = rep.attendance === "absent";
+                            const repTitle = getReportTitle(rep, isArabic);
 
                             return (
                               <div
@@ -3763,73 +4637,168 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                                 className={`rounded-2xl border overflow-hidden bg-white shadow-2xs transition ${
                                   rep.isArchived
                                     ? "border-slate-200/90 bg-slate-50/50 opacity-95"
+                                    : isExpanded
+                                    ? "border-purple-300 ring-1 ring-purple-100"
                                     : isAbsent
-                                    ? "border-rose-200/80"
-                                    : "border-slate-200"
+                                    ? "border-rose-200/80 hover:border-rose-300"
+                                    : "border-slate-200 hover:border-slate-300"
                                 }`}
                               >
-                                {/* Header - Click to toggle expansion */}
+                                {/* Header - Shows ONLY Title and summary badges by default; click to toggle */}
                                 <div
                                   onClick={() => toggleReportExpand(rep.id)}
-                                  className={`p-3.5 cursor-pointer transition flex items-center justify-between gap-2 select-none ${
-                                    rep.isArchived ? "bg-slate-50/70 hover:bg-slate-100/70" : "bg-white hover:bg-slate-50/80"
+                                  className={`p-3.5 cursor-pointer transition select-none flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                                    isExpanded
+                                      ? "bg-purple-50/40 border-b border-purple-100"
+                                      : rep.isArchived
+                                      ? "bg-slate-50/70 hover:bg-slate-100/70"
+                                      : "bg-white hover:bg-slate-50/80"
                                   }`}
                                 >
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    <span className={`px-2.5 py-1 rounded-xl text-white font-black text-xs shrink-0 shadow-2xs ${
-                                      rep.isArchived
-                                        ? "bg-slate-700"
-                                        : isAbsent
-                                        ? "bg-rose-600"
-                                        : "bg-purple-600"
-                                    }`}>
-                                      {isArabic ? `الحصة #${lessonNum}` : `Lesson #${lessonNum}`}
-                                    </span>
-
-                                    <span className="font-bold text-slate-800 text-xs">{rep.date}</span>
-
-                                    <span className="px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200/60 text-[10px] font-bold">
-                                      {rep.subject || selectedStudent.subject}
-                                    </span>
-
-                                    {/* Attendance Status Badge */}
-                                    {isAbsent ? (
-                                      <span className="px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-bold flex items-center gap-1">
-                                        <span>🔴 {isArabic ? "غائب" : "Absent"}</span>
-                                        <span>({rep.deductCost ? (isArabic ? "تم الخصم" : "Deducted") : (isArabic ? "بدون خصم" : "Excused")})</span>
+                                  <div className="space-y-1.5 flex-1 min-w-0">
+                                    {/* Report Title */}
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <span className={`px-2.5 py-0.5 rounded-lg text-white font-black text-xs shrink-0 shadow-2xs ${
+                                        rep.reportType === "monthly_comprehensive" || rep.evaluationMonth
+                                          ? "bg-indigo-600"
+                                          : rep.isArchived
+                                          ? "bg-slate-700"
+                                          : isAbsent
+                                          ? "bg-rose-600"
+                                          : "bg-purple-600"
+                                      }`}>
+                                        {rep.reportType === "monthly_comprehensive" || rep.evaluationMonth
+                                          ? (isArabic ? "📊 تقرير شهري شامل" : "📊 Monthly Report")
+                                          : (isArabic ? `الحصة #${lessonNum}` : `Lesson #${lessonNum}`)}
                                       </span>
-                                    ) : (
-                                      <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold flex items-center gap-1">
-                                        <span>🟢 {isArabic ? "حاضر" : "Present"}</span>
-                                      </span>
-                                    )}
 
-                                    {/* Archive Badge */}
-                                    {rep.isArchived && (
-                                      <span className="px-2 py-0.5 rounded-full bg-slate-200/80 text-slate-700 border border-slate-300 text-[10px] font-bold flex items-center gap-1">
-                                        <Archive className="w-3 h-3 text-slate-500" />
-                                        <span>
-                                          {rep.archiveReason === "auto_6_months"
-                                            ? isArabic ? "مؤرشف تلقائياً (+6 أشهر)" : "Auto-Archived (+6m)"
-                                            : isArabic ? "مؤرشف" : "Archived"}
+                                      <h4 className="font-black text-sm text-slate-900 truncate">
+                                        {repTitle}
+                                      </h4>
+                                    </div>
+
+                                    {/* Badges */}
+                                    <div className="flex items-center gap-1.5 flex-wrap text-xs">
+                                      <span className="font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded-md text-[11px]">
+                                        📚 {rep.subject || selectedStudent.subject}
+                                      </span>
+
+                                      <span className="text-[11px] text-slate-500 font-medium bg-slate-50 px-2 py-0.5 rounded-md border border-slate-200/60">
+                                        📅 {rep.date}
+                                      </span>
+
+                                      {/* Attendance Status Badge */}
+                                      {isAbsent ? (
+                                        <span className="px-2 py-0.5 rounded-md bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-bold flex items-center gap-1">
+                                          <span>🔴 {isArabic ? "غائب" : "Absent"}</span>
+                                          <span>({rep.deductCost ? (isArabic ? "تم الخصم" : "Deducted") : (isArabic ? "بدون خصم" : "Excused")})</span>
                                         </span>
-                                      </span>
-                                    )}
+                                      ) : (
+                                        <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold flex items-center gap-1">
+                                          <span>🟢 {isArabic ? "حاضر" : "Present"}</span>
+                                        </span>
+                                      )}
+
+                                      {/* Archive Badge */}
+                                      {rep.isArchived && (
+                                        <span className="px-2 py-0.5 rounded-md bg-slate-200/80 text-slate-700 border border-slate-300 text-[10px] font-bold flex items-center gap-1">
+                                          <Archive className="w-3 h-3 text-slate-500" />
+                                          <span>
+                                            {(rep.archiveReason as string) === "auto_6_months"
+                                              ? isArabic ? "مؤرشف تلقائياً (+6 أشهر)" : "Auto-Archived (+6m)"
+                                              : isArabic ? "مؤرشف" : "Archived"}
+                                          </span>
+                                        </span>
+                                      )}
+                                    </div>
                                   </div>
 
-                                  <div className="flex items-center gap-2 shrink-0">
-                                    <span className="text-[11px] font-bold text-purple-600 hidden sm:inline">
-                                      {isExpanded ? (isArabic ? "إخفاء التفاصيل" : "Collapse") : (isArabic ? "عرض التقرير" : "Expand")}
-                                    </span>
-                                    <div className="p-1 rounded-lg bg-slate-100 text-slate-600 transition">
-                                      {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                                    </div>
+                                  {/* Toggle Button for Full Report & Actions */}
+                                  <div className="flex items-center gap-1.5 self-end sm:self-center shrink-0 flex-wrap" onClick={e => e.stopPropagation()}>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        toggleReportExpand(rep.id);
+                                      }}
+                                      className={`px-3 py-1.5 rounded-xl font-black text-xs transition flex items-center gap-1.5 shadow-2xs ${
+                                        isExpanded
+                                          ? "bg-slate-200 hover:bg-slate-300 text-slate-800"
+                                          : "bg-purple-600 hover:bg-purple-700 text-white shadow-purple-600/20"
+                                      }`}
+                                    >
+                                      {isExpanded ? (
+                                        <>
+                                          <EyeOff className="w-3.5 h-3.5" />
+                                          <span>{isArabic ? "إخفاء التقرير" : "Hide Report"}</span>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <Eye className="w-3.5 h-3.5 text-amber-300" />
+                                          <span>{isArabic ? "إظهار التقرير كامل" : "Show Full Report"}</span>
+                                        </>
+                                      )}
+                                    </button>
+
+                                    {onToggleArchiveReport && (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          onToggleArchiveReport(rep.id);
+                                          setWhatsappSentNotice(
+                                            rep.isArchived
+                                              ? (isArabic ? "تم استعادة التقرير إلى قائمة التقارير الحالية النشطة!" : "Report restored to active!")
+                                              : (isArabic ? "تم نقل التقرير إلى قسم الأرشيف بنجاح!" : "Report archived!")
+                                          );
+                                          setTimeout(() => setWhatsappSentNotice(""), 3000);
+                                        }}
+                                        className={`px-2.5 py-1.5 rounded-xl font-bold text-xs transition flex items-center gap-1 border shadow-2xs ${
+                                          rep.isArchived
+                                            ? "bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200"
+                                            : "bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-200"
+                                        }`}
+                                        title={rep.isArchived ? (isArabic ? "استعادة للتقارير الحالية النشطة" : "Restore to Active") : (isArabic ? "نقل التقرير للأرشيف يدوياً" : "Archive Report")}
+                                      >
+                                        {rep.isArchived ? (
+                                          <>
+                                            <ArchiveRestore className="w-3.5 h-3.5 text-purple-600" />
+                                            <span>{isArabic ? "استعادة" : "Restore"}</span>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <Archive className="w-3.5 h-3.5 text-amber-600" />
+                                            <span>{isArabic ? "أرشفة" : "Archive"}</span>
+                                          </>
+                                        )}
+                                      </button>
+                                    )}
+
+                                    {onDeleteReport && (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setReportToDeleteId(rep.id);
+                                        }}
+                                        className="p-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 transition"
+                                        title={isArabic ? "حذف التقرير" : "Delete Report"}
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    )}
                                   </div>
                                 </div>
 
                                 {/* Collapsible Content */}
                                 {isExpanded && (
                                   <div className="p-4 bg-slate-50 border-t border-slate-100 space-y-3 text-xs animate-in fade-in">
+                                    <div className="flex items-center justify-between text-xs text-slate-500 font-bold border-b border-slate-200/80 pb-2">
+                                      <span>{isArabic ? "نص التقرير الكامل:" : "Full Report Content:"}</span>
+                                      <span className="text-[11px] text-purple-700 bg-purple-50 px-2 py-0.5 rounded-full border border-purple-100">
+                                        {isArabic ? "مكتمل ومسجل بالنظام" : "Recorded"}
+                                      </span>
+                                    </div>
                                     <div className={`p-3.5 rounded-xl border space-y-1.5 shadow-inner leading-relaxed whitespace-pre-wrap font-sans text-xs ${
                                       isAbsent
                                         ? "bg-rose-950 text-rose-50 border-rose-900"
@@ -3876,14 +4845,22 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                                         </button>
 
                                         {/* Toggle Archive / Unarchive Button */}
-                                        {onToggleArchiveReport && rep.id.startsWith("rep_") && (
+                                        {onToggleArchiveReport && (
                                           <button
                                             type="button"
-                                            onClick={() => onToggleArchiveReport(rep.id)}
+                                            onClick={() => {
+                                              onToggleArchiveReport(rep.id);
+                                              setWhatsappSentNotice(
+                                                rep.isArchived
+                                                  ? (isArabic ? "تم استعادة التقرير إلى قائمة التقارير الحالية النشطة!" : "Report restored to active!")
+                                                  : (isArabic ? "تم نقل التقرير إلى قسم الأرشيف بنجاح!" : "Report archived!")
+                                              );
+                                              setTimeout(() => setWhatsappSentNotice(""), 3000);
+                                            }}
                                             className={`px-2.5 py-1.5 rounded-xl font-bold text-[11px] transition flex items-center gap-1 shadow-2xs border ${
                                               rep.isArchived
                                                 ? "bg-purple-50 hover:bg-purple-100 border-purple-200 text-purple-700"
-                                                : "bg-slate-100 hover:bg-slate-200 border-slate-200 text-slate-700"
+                                                : "bg-amber-50 hover:bg-amber-100 border-amber-200 text-amber-800"
                                             }`}
                                           >
                                             {rep.isArchived ? (
@@ -3893,7 +4870,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                                               </>
                                             ) : (
                                               <>
-                                                <Archive className="w-3.5 h-3.5 text-slate-500" />
+                                                <Archive className="w-3.5 h-3.5 text-amber-600" />
                                                 <span>{isArabic ? "أرشفة التقرير" : "Archive"}</span>
                                               </>
                                             )}
@@ -3902,14 +4879,15 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                                       </div>
 
                                       {/* Delete Report Button */}
-                                      {rep.id.startsWith("rep_") && (
+                                      {onDeleteReport && (
                                         <button
                                           type="button"
-                                          onClick={() => onDeleteReport(rep.id)}
-                                          className="p-1.5 text-slate-400 hover:text-rose-600 transition"
+                                          onClick={() => setReportToDeleteId(rep.id)}
+                                          className="px-2.5 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-[11px] transition flex items-center gap-1"
                                           title={isArabic ? "حذف التقرير" : "Delete"}
                                         >
-                                          <Trash2 className="w-4 h-4" />
+                                          <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                                          <span>{isArabic ? "حذف التقرير" : "Delete"}</span>
                                         </button>
                                       )}
                                     </div>
@@ -3952,6 +4930,239 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                           )}
                         </div>
                       )}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
+            {/* Tab: Comprehensive Monthly Reports (معزولة تماماً في خانة وتبويب مستقل) */}
+            {profileTab === "monthly_reports" && (
+              <div className="space-y-4 animate-in fade-in">
+                {/* Header Card */}
+                <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-teal-50/90 via-emerald-50/70 to-cyan-50/80 border border-teal-200/90 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div>
+                    <h3 className="font-black text-slate-900 text-sm flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-teal-600" />
+                      <span>{isArabic ? "تقارير الأداء الشهرية الشاملة" : "Comprehensive Monthly Reports"}</span>
+                    </h3>
+                    <p className="text-xs text-slate-600 font-medium mt-1">
+                      {isArabic
+                        ? `سجل التقييمات الشهرية الرسمية الشاملة لـ (${selectedStudent.fullName}) مع إحصائيات الحصص وساعات الحضور ومؤشرات الإتقان.`
+                        : `Official monthly evaluation reports for (${selectedStudent.fullName}) including attendance, hours, and mastery metrics.`}
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    id="btn-create-monthly-report-profile"
+                    onClick={() => {
+                      const targetSubj = selectedStudent.subjects && selectedStudent.subjects.length > 0
+                        ? selectedStudent.subjects[0].subject
+                        : (selectedStudent.subject || "قرآن كريم");
+                      setMonthlyReportModalTarget({ student: selectedStudent, subject: targetSubj });
+                    }}
+                    className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 text-white font-black text-xs shadow-sm flex items-center gap-2 transition active:scale-95 shrink-0"
+                  >
+                    <Sparkles className="w-4 h-4 text-amber-300" />
+                    <span>{isArabic ? "✨ إنشاء تقرير شهري شامل" : "✨ Create Monthly Report"}</span>
+                  </button>
+                </div>
+
+                {/* List of Saved Monthly Reports */}
+                {(() => {
+                  const selId = String(selectedStudent.id || "").trim();
+                  const selName = (selectedStudent.fullName || "").trim().toLowerCase();
+                  const monthlyReports = deduplicateReportsList(
+                    reports.filter(
+                      r =>
+                        r &&
+                        ((r.studentId && String(r.studentId).trim() === selId) ||
+                         (r.studentName && r.studentName.trim().toLowerCase() === selName)) &&
+                        isMonthlyComprehensiveReport(r)
+                    )
+                  ).sort((a, b) => new Date(b.date || b.createdAt || 0).getTime() - new Date(a.date || a.createdAt || 0).getTime());
+
+                  if (monthlyReports.length === 0) {
+                    return (
+                      <div className="p-8 text-center bg-slate-50 border border-slate-200/80 rounded-2xl text-slate-500 text-xs space-y-3">
+                        <div className="w-12 h-12 rounded-2xl bg-teal-50 border border-teal-200 text-teal-600 flex items-center justify-center mx-auto shadow-2xs">
+                          <BookOpen className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <p className="font-black text-slate-800 text-sm">
+                            {isArabic ? "لا توجد تقارير شهرية شاملة محفوظة لهذا الطالب بعد" : "No monthly reports saved yet for this student"}
+                          </p>
+                          <p className="text-slate-500 text-xs mt-1 max-w-md mx-auto">
+                            {isArabic
+                              ? "التقارير الشهرية الشاملة معزولة تماماً في هذا التبويب، وتجمع إحصائيات الشهر وساعات الحضور ومؤشرات الإتقان في وثيقة رسمية متكاملة."
+                              : "Comprehensive monthly reports are completely isolated in this tab, aggregating hours, lessons, and performance into a formal evaluation."}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const targetSubj = selectedStudent.subjects && selectedStudent.subjects.length > 0
+                              ? selectedStudent.subjects[0].subject
+                              : (selectedStudent.subject || "قرآن كريم");
+                            setMonthlyReportModalTarget({ student: selectedStudent, subject: targetSubj });
+                          }}
+                          className="px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-black text-xs shadow-xs inline-flex items-center gap-2 transition active:scale-95"
+                        >
+                          <Sparkles className="w-4 h-4 text-teal-200" />
+                          <span>{isArabic ? "إنشاء التقرير الشهري الأول للطالب" : "Create First Monthly Report"}</span>
+                        </button>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between px-1 text-xs font-bold text-slate-500">
+                        <span>
+                          {isArabic ? `التقارير الشهرية الشاملة المحفوظة (${monthlyReports.length})` : `Saved Monthly Reports (${monthlyReports.length})`}
+                        </span>
+                      </div>
+
+                      {monthlyReports.map((rep) => {
+                        const content = rep.reportText || rep.generatedText || rep.teacherNotes || "";
+                        const isExpanded = expandedReportIds.includes(rep.id);
+
+                        return (
+                          <div
+                            key={rep.id}
+                            className="p-4 rounded-2xl bg-white border border-teal-200/80 hover:border-teal-300 shadow-2xs space-y-3 transition"
+                          >
+                            {/* Card Header */}
+                            <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-slate-100">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="px-2.5 py-1 rounded-xl bg-teal-50 border border-teal-200 text-teal-800 font-black text-xs flex items-center gap-1.5">
+                                  <Calendar className="w-3.5 h-3.5 text-teal-600" />
+                                  <span>{rep.evaluationMonth || (isArabic ? "تقرير شهري شامل" : "Monthly Report")}</span>
+                                </span>
+
+                                <span className="px-2.5 py-1 rounded-xl bg-slate-100 border border-slate-200 text-slate-700 font-bold text-xs flex items-center gap-1">
+                                  <BookOpen className="w-3.5 h-3.5 text-slate-500" />
+                                  <span>{rep.subject || selectedStudent.subject}</span>
+                                </span>
+
+                                {rep.date && (
+                                  <span className="text-[11px] font-medium text-slate-400">
+                                    {rep.date}
+                                  </span>
+                                )}
+                              </div>
+
+                              {/* Stats pills */}
+                              <div className="flex items-center gap-1.5 text-[11px] font-bold">
+                                {rep.lessonNumber !== undefined && rep.lessonNumber > 0 && (
+                                  <span className="px-2 py-0.5 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200/70">
+                                    {rep.lessonNumber} {isArabic ? "حصة" : "lessons"}
+                                  </span>
+                                )}
+                                {rep.durationMinutes !== undefined && rep.durationMinutes > 0 && (
+                                  <span className="px-2 py-0.5 rounded-lg bg-blue-50 text-blue-700 border border-blue-200/70">
+                                    {Math.round((rep.durationMinutes / 60) * 10) / 10} {isArabic ? "ساعة" : "hrs"}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Content preview or full */}
+                            <div className={`text-xs text-slate-800 font-medium leading-relaxed whitespace-pre-wrap rounded-xl p-3.5 border ${
+                              isExpanded ? "bg-slate-50/80 border-slate-200" : "bg-slate-50/50 border-slate-100 max-h-36 overflow-hidden relative"
+                            }`}>
+                              {content}
+                              {!isExpanded && (
+                                <div className="absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-slate-50 to-transparent flex items-end justify-center pb-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => setExpandedReportIds(prev => [...prev, rep.id])}
+                                    className="px-3 py-1 rounded-lg bg-white/90 border border-slate-200 text-teal-700 font-bold text-[11px] shadow-2xs hover:bg-white transition flex items-center gap-1"
+                                  >
+                                    <Eye className="w-3 h-3 text-teal-600" />
+                                    <span>{isArabic ? "عرض التقرير كاملاً" : "Read More"}</span>
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Actions toolbar */}
+                            <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-100">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {/* Toggle Expand/Collapse */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setExpandedReportIds(prev =>
+                                      prev.includes(rep.id) ? prev.filter(id => id !== rep.id) : [...prev, rep.id]
+                                    );
+                                  }}
+                                  className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[11px] transition flex items-center gap-1"
+                                >
+                                  {isExpanded ? (
+                                    <>
+                                      <EyeOff className="w-3.5 h-3.5 text-slate-500" />
+                                      <span>{isArabic ? "طي التقرير" : "Collapse"}</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Eye className="w-3.5 h-3.5 text-teal-600" />
+                                      <span>{isArabic ? "عرض كامل" : "Expand"}</span>
+                                    </>
+                                  )}
+                                </button>
+
+                                {/* Copy Report */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(content);
+                                    setCopiedReportId(rep.id);
+                                    setTimeout(() => setCopiedReportId(null), 2000);
+                                  }}
+                                  className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-bold text-[11px] transition flex items-center gap-1 shadow-2xs"
+                                >
+                                  {copiedReportId === rep.id ? (
+                                    <>
+                                      <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                      <span className="text-emerald-700">{isArabic ? "تم النسخ" : "Copied"}</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Copy className="w-3.5 h-3.5" />
+                                      <span>{isArabic ? "نسخ النص" : "Copy"}</span>
+                                    </>
+                                  )}
+                                </button>
+
+                                {/* WhatsApp Share */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenWhatsAppChooser(content, selectedStudent)}
+                                  className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] transition flex items-center gap-1 shadow-2xs"
+                                >
+                                  <Share2 className="w-3.5 h-3.5" />
+                                  <span>{isArabic ? "مشاركة عبر واتساب" : "WhatsApp"}</span>
+                                </button>
+                              </div>
+
+                              {/* Delete Report */}
+                              {onDeleteReport && (
+                                <button
+                                  type="button"
+                                  onClick={() => setReportToDeleteId(rep.id)}
+                                  className="px-2.5 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-[11px] transition flex items-center gap-1"
+                                  title={isArabic ? "حذف التقرير الشهري" : "Delete Monthly Report"}
+                                >
+                                  <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                                  <span>{isArabic ? "حذف" : "Delete"}</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   );
                 })()}
@@ -4292,11 +5503,10 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 
                   <div>
                     <label className="block font-bold text-slate-700 mb-1 text-[11px]">
-                      {isArabic ? "رقم ولي الأمر (واتساب) *" : "Parent Phone (WhatsApp) *"}
+                      {isArabic ? "رقم ولي الأمر (واتساب)" : "Parent Phone (WhatsApp)"}
                     </label>
                     <input
                       type="tel"
-                      required
                       value={editParentContact}
                       onChange={e => setEditParentContact(e.target.value)}
                       className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 font-mono font-bold dir-ltr text-right focus:outline-none focus:border-blue-500"
@@ -4532,28 +5742,28 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 mb-2">
                           <button
                             type="button"
+                            onClick={() => handleUpdateEditSubjectField(idx, { billingType: "monthly_elapsed_lessons" })}
+                            className={`p-2 rounded-xl border text-[10.5px] font-bold text-center transition flex flex-col items-center justify-center gap-0.5 ${
+                              (sub.billingType || "monthly_elapsed_lessons") === "monthly_elapsed_lessons"
+                                ? "bg-blue-50 border-blue-500 text-blue-800 shadow-2xs"
+                                : "bg-white border-slate-200 text-slate-600 hover:border-slate-300"
+                            }`}
+                          >
+                            <span>🗓️ {isArabic ? "حساب آخر الشهر (حصص منقضية)" : "Elapsed Month Lessons"}</span>
+                            <span className="text-[9px] opacity-75 font-medium">{isArabic ? "حسب الحصص والساعات الفعلية" : "Based on actual lessons & hours"}</span>
+                          </button>
+
+                          <button
+                            type="button"
                             onClick={() => handleUpdateEditSubjectField(idx, { billingType: "monthly" })}
                             className={`p-2 rounded-xl border text-[10.5px] font-bold text-center transition flex flex-col items-center justify-center gap-0.5 ${
-                              (sub.billingType || "monthly") === "monthly"
+                              sub.billingType === "monthly"
                                 ? "bg-blue-50 border-blue-500 text-blue-800 shadow-2xs"
                                 : "bg-white border-slate-200 text-slate-600 hover:border-slate-300"
                             }`}
                           >
                             <span>📅 {isArabic ? "الشهر كامل" : "Full Month"}</span>
-                            <span className="text-[9px] opacity-75 font-medium">{isArabic ? "اشتراك شهري ثابت (سعر الشهر)" : "Flat Monthly Subscription"}</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => handleUpdateEditSubjectField(idx, { billingType: "monthly_elapsed_lessons" })}
-                            className={`p-2 rounded-xl border text-[10.5px] font-bold text-center transition flex flex-col items-center justify-center gap-0.5 ${
-                              sub.billingType === "monthly_elapsed_lessons"
-                                ? "bg-blue-50 border-blue-500 text-blue-800 shadow-2xs"
-                                : "bg-white border-slate-200 text-slate-600 hover:border-slate-300"
-                            }`}
-                          >
-                            <span>🗓️ {isArabic ? "حصص التقويم المنقضية" : "Elapsed Month Lessons"}</span>
-                            <span className="text-[9px] opacity-75 font-medium">{isArabic ? "حسب حصص الشهر بالتقويم" : "Calendar Elapsed"}</span>
+                            <span className="text-[9px] opacity-75 font-medium">{isArabic ? "اشتراك شهري ثابت (سعر محدد)" : "Flat Monthly Subscription"}</span>
                           </button>
 
                           <button
@@ -4573,7 +5783,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                         {/* Cost Inputs matching selected billing mode */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
                           {/* Case 1: Full Month - Monthly Cost with Division on Lessons Tool */}
-                          {(sub.billingType === "monthly" || !sub.billingType) && (
+                          {sub.billingType === "monthly" && (
                             <div className="sm:col-span-2 space-y-2">
                               <div className="flex items-center gap-2 bg-white px-3 py-2 rounded-xl border border-purple-200/80 shadow-2xs">
                                 <span className="text-xs font-bold text-slate-700 shrink-0">
@@ -4584,7 +5794,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                                   min="0"
                                   step="any"
                                   required
-                                  value={sub.monthlyCost || 400}
+                                  value={sub.monthlyCost !== undefined ? sub.monthlyCost : 400}
                                   onChange={e => {
                                     const val = parseFloat(e.target.value) || 0;
                                     const lessonsCount = sub.lessonsPerMonth || 4;
@@ -4599,7 +5809,49 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                                 <span className="text-xs font-bold text-purple-600 shrink-0">{isArabic ? "ج.م / شهر" : "EGP / month"}</span>
                               </div>
 
-                              {/* Monthly Division Helper */}
+                              {/* Duration open input for monthly */}
+                              <div className="p-2.5 bg-slate-50/80 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[11px] font-bold text-slate-700 flex items-center gap-1 shrink-0">
+                                    <Clock className="w-3.5 h-3.5 text-blue-600" />
+                                    {isArabic ? "مدة الحصة الافتراضية:" : "Default Duration:"}
+                                  </span>
+                                  <div className="flex items-center gap-1">
+                                    <input
+                                      type="number"
+                                      min="1"
+                                      max="360"
+                                      value={sub.defaultDurationMinutes || ""}
+                                      onChange={e => {
+                                        const val = parseInt(e.target.value, 10);
+                                        const dur = isNaN(val) ? 0 : Math.max(1, val);
+                                        handleUpdateEditSubjectField(idx, { defaultDurationMinutes: dur });
+                                      }}
+                                      className="w-16 bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-black text-slate-800 focus:outline-none focus:border-blue-500 text-center"
+                                      placeholder="60"
+                                    />
+                                    <span className="text-[10px] font-bold text-slate-500">{isArabic ? "دقيقة" : "min"}</span>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-1 flex-wrap">
+                                  {[10, 15, 20, 25, 30, 45, 60, 75, 90, 120].map(dur => (
+                                    <button
+                                      type="button"
+                                      key={dur}
+                                      onClick={() => handleUpdateEditSubjectField(idx, { defaultDurationMinutes: dur })}
+                                      className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition ${
+                                        (sub.defaultDurationMinutes || 60) === dur
+                                          ? "bg-blue-600 text-white shadow-2xs"
+                                          : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-100"
+                                      }`}
+                                    >
+                                      {dur === 60 ? (isArabic ? "60د (ساعة)" : "60m (1h)") : dur === 90 ? (isArabic ? "90د (1.5س)" : "90m (1.5h)") : dur === 120 ? (isArabic ? "120د (2س)" : "120m (2h)") : `${dur}${isArabic ? "د" : "m"}`}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+
                               <div className="p-2.5 rounded-xl bg-purple-50/70 border border-purple-100 flex flex-wrap items-center justify-between gap-2 text-xs">
                                 <div className="flex items-center gap-1.5">
                                   <span className="text-[11px] font-bold text-purple-900">
@@ -4653,7 +5905,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                           )}
 
                           {/* Case 2: Calendar Elapsed Lessons - Lesson / Hourly Cost */}
-                          {sub.billingType === "monthly_elapsed_lessons" && (
+                          {(sub.billingType === "monthly_elapsed_lessons" || (!sub.billingType && sub.billingType !== "monthly_fixed_lessons")) && (
                             <div className="sm:col-span-2 space-y-2">
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                 <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-xl border border-slate-200 shadow-2xs">
@@ -4732,38 +5984,79 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                                 )}
                               </div>
 
-                              {sub.rateType === "per_hour" && (
-                                <div className="flex items-center justify-between gap-2 bg-blue-50/70 px-3 py-1.5 rounded-xl border border-blue-200 text-xs">
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="font-bold text-slate-700 text-[11px]">
-                                      {isArabic ? "مدة الحصة الافتراضية:" : "Default Duration:"}
-                                    </span>
-                                    <select
-                                      value={sub.defaultDurationMinutes || 60}
-                                      onChange={e => {
-                                        const dur = Number(e.target.value);
-                                        const hCost = sub.hourlyCost || sub.lessonCost || 100;
-                                        const lCost = Math.max(0, Number(((hCost * dur) / 60).toFixed(2)));
-                                        handleUpdateEditSubjectField(idx, {
-                                          defaultDurationMinutes: dur,
-                                          lessonCost: lCost
-                                        });
-                                      }}
-                                      className="bg-white border border-blue-300 rounded-lg px-2 py-0.5 text-xs font-bold text-blue-900 focus:outline-none"
-                                    >
-                                      <option value={30}>30 {isArabic ? "دقيقة (نصف ساعة)" : "min (0.5h)"}</option>
-                                      <option value={45}>45 {isArabic ? "دقيقة" : "min"}</option>
-                                      <option value={60}>60 {isArabic ? "دقيقة (ساعة واحدة)" : "min (1 hour)"}</option>
-                                      <option value={75}>75 {isArabic ? "دقيقة (ساعة وربع)" : "min (1.25h)"}</option>
-                                      <option value={90}>90 {isArabic ? "دقيقة (ساعة ونصف)" : "min (1.5h)"}</option>
-                                      <option value={120}>120 {isArabic ? "دقيقة (ساعتان)" : "min (2 hours)"}</option>
-                                    </select>
-                                  </div>
-                                  <span className="font-black text-blue-700 bg-white px-2 py-0.5 rounded-lg border border-blue-200 shadow-2xs text-[11px]">
-                                    = {sub.lessonCost} {isArabic ? "ج.م لكل حصة" : "EGP / lesson"}
+                              {/* Duration open input for elapsed lessons */}
+                              <div className="p-2.5 bg-slate-50/80 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[11px] font-bold text-slate-700 flex items-center gap-1 shrink-0">
+                                    <Clock className="w-3.5 h-3.5 text-blue-600" />
+                                    {isArabic ? "مدة الحصة الافتراضية:" : "Default Duration:"}
                                   </span>
+                                  <div className="flex items-center gap-1">
+                                    <input
+                                      type="number"
+                                      min="1"
+                                      max="360"
+                                      value={sub.defaultDurationMinutes || ""}
+                                      onChange={e => {
+                                        const val = parseInt(e.target.value, 10);
+                                        const dur = isNaN(val) ? 0 : Math.max(1, val);
+                                        if (sub.rateType === "per_hour") {
+                                          const hCost = sub.hourlyCost || sub.lessonCost || 100;
+                                          const lCost = Math.max(0, Number(((hCost * dur) / 60).toFixed(2)));
+                                          handleUpdateEditSubjectField(idx, {
+                                            defaultDurationMinutes: dur,
+                                            lessonCost: lCost
+                                          });
+                                        } else {
+                                          handleUpdateEditSubjectField(idx, { defaultDurationMinutes: dur });
+                                        }
+                                      }}
+                                      className="w-16 bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-black text-slate-800 focus:outline-none focus:border-blue-500 text-center"
+                                      placeholder="60"
+                                    />
+                                    <span className="text-[10px] font-bold text-slate-500">{isArabic ? "دقيقة" : "min"}</span>
+                                  </div>
                                 </div>
-                              )}
+
+                                <div className="flex items-center gap-1 flex-wrap">
+                                  {[10, 15, 20, 25, 30, 45, 60, 75, 90, 120].map(dur => (
+                                    <button
+                                      type="button"
+                                      key={dur}
+                                      onClick={() => {
+                                        if (sub.rateType === "per_hour") {
+                                          const hCost = sub.hourlyCost || sub.lessonCost || 100;
+                                          const lCost = Math.max(0, Number(((hCost * dur) / 60).toFixed(2)));
+                                          handleUpdateEditSubjectField(idx, {
+                                            defaultDurationMinutes: dur,
+                                            lessonCost: lCost
+                                          });
+                                        } else {
+                                          handleUpdateEditSubjectField(idx, { defaultDurationMinutes: dur });
+                                        }
+                                      }}
+                                      className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition ${
+                                        (sub.defaultDurationMinutes || 60) === dur
+                                          ? "bg-blue-600 text-white shadow-2xs"
+                                          : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-100"
+                                      }`}
+                                    >
+                                      {dur === 60 ? (isArabic ? "60د (ساعة)" : "60m (1h)") : dur === 90 ? (isArabic ? "90د (1.5س)" : "90m (1.5h)") : dur === 120 ? (isArabic ? "120د (2س)" : "120m (2h)") : `${dur}${isArabic ? "د" : "m"}`}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+
+                              <div className="flex items-center justify-between gap-2 bg-blue-50/70 px-3 py-1.5 rounded-xl border border-blue-200 text-xs">
+                                <span className="font-bold text-slate-700 text-[11px]">
+                                  {sub.rateType === "per_hour" ? (isArabic ? "⏱️ سعر الحصة المحسوب بالساعة:" : "Calculated Lesson Price:") : (isArabic ? "💵 تفاصيل سعر الحصة:" : "Lesson Price Breakdown:")}
+                                </span>
+                                <span className="font-black text-blue-700 bg-white px-2 py-0.5 rounded-lg border border-blue-200 shadow-2xs text-[11px]">
+                                  {sub.rateType === "per_hour"
+                                    ? `= ${sub.lessonCost} ${isArabic ? "ج.م لكل حصة" : "EGP / lesson"} (${sub.hourlyCost || 100} ج.م/س × ${sub.defaultDurationMinutes || 60} دقيقة)`
+                                    : `= ${sub.lessonCost} ${isArabic ? "ج.م لكل حصة" : "EGP / lesson"} (المدة: ${sub.defaultDurationMinutes || 60} دقيقة | مكافئ: ${Number((((sub.lessonCost || 100) / (sub.defaultDurationMinutes || 60)) * 60).toFixed(1))} ج.م/س)`}
+                                </span>
+                              </div>
                             </div>
                           )}
 
@@ -4872,39 +6165,87 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                                 </div>
                               </div>
 
-                              {sub.rateType === "per_hour" && (
-                                <div className="flex items-center justify-between gap-2 bg-blue-50/70 px-3 py-1.5 rounded-xl border border-blue-200 text-xs">
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="font-bold text-slate-700 text-[11px]">
-                                      {isArabic ? "مدة الحصة الافتراضية:" : "Default Duration:"}
-                                    </span>
-                                    <select
-                                      value={sub.defaultDurationMinutes || 60}
+                              {/* Duration open input for fixed lessons */}
+                              <div className="p-2.5 bg-slate-50/80 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[11px] font-bold text-slate-700 flex items-center gap-1 shrink-0">
+                                    <Clock className="w-3.5 h-3.5 text-blue-600" />
+                                    {isArabic ? "مدة الحصة الافتراضية:" : "Default Duration:"}
+                                  </span>
+                                  <div className="flex items-center gap-1">
+                                    <input
+                                      type="number"
+                                      min="1"
+                                      max="360"
+                                      value={sub.defaultDurationMinutes || ""}
                                       onChange={e => {
-                                        const dur = Number(e.target.value);
-                                        const hCost = sub.hourlyCost || sub.lessonCost || 100;
-                                        const lCost = Math.max(1, Math.round((hCost * dur) / 60));
-                                        handleUpdateEditSubjectField(idx, {
-                                          defaultDurationMinutes: dur,
-                                          lessonCost: lCost,
-                                          monthlyCost: lCost * (sub.lessonsPerMonth || 8)
-                                        });
+                                        const val = parseInt(e.target.value, 10);
+                                        const dur = isNaN(val) ? 0 : Math.max(1, val);
+                                        if (sub.rateType === "per_hour") {
+                                          const hCost = sub.hourlyCost || sub.lessonCost || 100;
+                                          const lCost = Math.max(0, Number(((hCost * dur) / 60).toFixed(2)));
+                                          const count = sub.lessonsPerMonth || 8;
+                                          handleUpdateEditSubjectField(idx, {
+                                            defaultDurationMinutes: dur,
+                                            lessonCost: lCost,
+                                            monthlyCost: Number((lCost * count).toFixed(2))
+                                          });
+                                        } else {
+                                          handleUpdateEditSubjectField(idx, { defaultDurationMinutes: dur });
+                                        }
                                       }}
-                                      className="bg-white border border-blue-300 rounded-lg px-2 py-0.5 text-xs font-bold text-blue-900 focus:outline-none"
-                                    >
-                                      <option value={30}>30 {isArabic ? "دقيقة (نصف ساعة)" : "min (0.5h)"}</option>
-                                      <option value={45}>45 {isArabic ? "دقيقة" : "min"}</option>
-                                      <option value={60}>60 {isArabic ? "دقيقة (ساعة واحدة)" : "min (1 hour)"}</option>
-                                      <option value={75}>75 {isArabic ? "دقيقة (ساعة وربع)" : "min (1.25h)"}</option>
-                                      <option value={90}>90 {isArabic ? "دقيقة (ساعة ونصف)" : "min (1.5h)"}</option>
-                                      <option value={120}>120 {isArabic ? "دقيقة (ساعتان)" : "min (2 hours)"}</option>
-                                    </select>
+                                      className="w-16 bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-black text-slate-800 focus:outline-none focus:border-blue-500 text-center"
+                                      placeholder="60"
+                                    />
+                                    <span className="text-[10px] font-bold text-slate-500">{isArabic ? "دقيقة" : "min"}</span>
                                   </div>
-                                  <span className="font-black text-blue-700 bg-white px-2 py-0.5 rounded-lg border border-blue-200 shadow-2xs text-[11px]">
-                                    = {sub.lessonCost} {isArabic ? "ج.م/حصة" : "EGP/lesson"} (الإجمالي: {sub.monthlyCost || (sub.lessonCost * 8)} ج.م/شهر)
+                                </div>
+
+                                <div className="flex items-center gap-1 flex-wrap">
+                                  {[10, 15, 20, 25, 30, 45, 60, 75, 90, 120].map(dur => (
+                                    <button
+                                      type="button"
+                                      key={dur}
+                                      onClick={() => {
+                                        if (sub.rateType === "per_hour") {
+                                          const hCost = sub.hourlyCost || sub.lessonCost || 100;
+                                          const lCost = Math.max(0, Number(((hCost * dur) / 60).toFixed(2)));
+                                          const count = sub.lessonsPerMonth || 8;
+                                          handleUpdateEditSubjectField(idx, {
+                                            defaultDurationMinutes: dur,
+                                            lessonCost: lCost,
+                                            monthlyCost: Number((lCost * count).toFixed(2))
+                                          });
+                                        } else {
+                                          handleUpdateEditSubjectField(idx, { defaultDurationMinutes: dur });
+                                        }
+                                      }}
+                                      className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition ${
+                                        (sub.defaultDurationMinutes || 60) === dur
+                                          ? "bg-blue-600 text-white shadow-2xs"
+                                          : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-100"
+                                      }`}
+                                    >
+                                      {dur === 60 ? (isArabic ? "60د (ساعة)" : "60m (1h)") : dur === 90 ? (isArabic ? "90د (1.5س)" : "90m (1.5h)") : dur === 120 ? (isArabic ? "120د (2س)" : "120m (2h)") : `${dur}${isArabic ? "د" : "m"}`}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+
+                              <div className="flex items-center justify-between gap-2 bg-blue-50/70 px-3 py-1.5 rounded-xl border border-blue-200 text-xs">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-bold text-slate-700 text-[11px]">
+                                    {isArabic ? "🎯 تفاصيل الباقة:" : "🎯 Package Breakdown:"}
                                   </span>
                                 </div>
-                              )}
+                                <span className="font-black text-blue-700 bg-white px-2 py-0.5 rounded-lg border border-blue-200 shadow-2xs text-[11px]">
+                                  {sub.rateType === "per_hour"
+                                    ? `= ${sub.lessonCost} ${isArabic ? "ج.م/حصة" : "EGP/lesson"} (${sub.hourlyCost || 100} ج.م/س × ${sub.defaultDurationMinutes || 60} د) | ${isArabic ? "الشهر:" : "Month:"} ${sub.monthlyCost || (sub.lessonCost * (sub.lessonsPerMonth || 8))} ج.م`
+                                    : sub.rateType === "per_lesson"
+                                    ? `= ${sub.lessonCost} ${isArabic ? "ج.م/حصة" : "EGP/lesson"} (${isArabic ? "إجمالي الشهر:" : "Total:"} ${sub.monthlyCost || (sub.lessonCost * (sub.lessonsPerMonth || 8))} ${isArabic ? "ج.م/شهر" : "EGP/mo"}) | ${sub.defaultDurationMinutes || 60} د`
+                                    : `= ${sub.lessonCost} ${isArabic ? "ج.م/حصة" : "EGP/lesson"} (${isArabic ? "من تقسيم" : "from"} ${sub.monthlyCost || 800} ÷ ${sub.lessonsPerMonth || 8} ${isArabic ? "حصة" : "lessons"}) | ${sub.defaultDurationMinutes || 60} د`}
+                                </span>
+                              </div>
                             </div>
                           )}
                         </div>
@@ -4935,6 +6276,64 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                 />
               </div>
 
+              {/* Scope of Changes: Apply to Previous vs Future Lessons Only */}
+              <div className="p-3.5 rounded-2xl bg-amber-50/70 border border-amber-200/90 space-y-2">
+                <div className="flex items-center gap-2 text-amber-950 font-black text-xs">
+                  <HelpCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>{isArabic ? "نطاق تطبيق التعديلات (تطبيقه على السابق أم لا):" : "Scope of Changes (Past vs Future Lessons):"}</span>
+                </div>
+                <p className="text-[11px] text-amber-800 font-medium">
+                  {isArabic
+                    ? "اختر هل ترغب في تطبيق هذه التعديلات والأسعار على الحصص السابقة بأثر رجعي، أم قصرها على الحصص القادمة فقط:"
+                    : "Choose whether changes apply retroactively to past lessons, or start fresh for future lessons only:"}
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                  <label
+                    className={`p-3 rounded-xl border-2 cursor-pointer transition flex items-start gap-2.5 select-none ${
+                      editApplyToPrevious
+                        ? "border-emerald-500 bg-emerald-50/90 text-emerald-950 shadow-xs"
+                        : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="editApplyToPreviousRadio"
+                      checked={editApplyToPrevious}
+                      onChange={() => setEditApplyToPrevious(true)}
+                      className="mt-0.5 accent-emerald-600"
+                    />
+                    <div className="text-right">
+                      <p className="text-xs font-black">{isArabic ? "نعم، تطبيق على السابق والقادم" : "Yes, apply to past & future"}</p>
+                      <p className="text-[10.5px] text-slate-500 mt-0.5 leading-relaxed">
+                        {isArabic ? "تحديث أسعار وحسابات الحصص السابقة وسجلات الحضور والاسم لتطابق التعديل الجديد بأثر رجعي." : "Updates past lessons and attendance records with new rates."}
+                      </p>
+                    </div>
+                  </label>
+
+                  <label
+                    className={`p-3 rounded-xl border-2 cursor-pointer transition flex items-start gap-2.5 select-none ${
+                      !editApplyToPrevious
+                        ? "border-blue-500 bg-blue-50/90 text-blue-950 shadow-xs"
+                        : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="editApplyToPreviousRadio"
+                      checked={!editApplyToPrevious}
+                      onChange={() => setEditApplyToPrevious(false)}
+                      className="mt-0.5 accent-blue-600"
+                    />
+                    <div className="text-right">
+                      <p className="text-xs font-black">{isArabic ? "لا، التطبيق على القادم فقط" : "No, future lessons only"}</p>
+                      <p className="text-[10.5px] text-slate-500 mt-0.5 leading-relaxed">
+                        {isArabic ? "تثبيت وتجميد أسعار وحسابات الحصص السابقة كما هي دون المساس بها، وبدء التسعير الجديد للحصص القادمة." : "Locks and preserves past lesson calculations as they were."}
+                      </p>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
               <div className="pt-2 flex items-center justify-between gap-2 border-t border-slate-100">
                 <button
                   type="button"
@@ -4959,13 +6358,101 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                   </button>
                   <button
                     type="submit"
-                    className="px-4 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md shadow-blue-600/30"
+                    onClick={e => {
+                      e.preventDefault();
+                      handleSaveEditStudent();
+                    }}
+                    className="px-4 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md shadow-blue-600/30 cursor-pointer"
                   >
                     {isArabic ? "حفظ التعديلات والمواد" : "Save Changes & Subjects"}
                   </button>
                 </div>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Dialog: Apply Changes to Previous or Not? */}
+      {showApplyConfirmDialog && pendingStudentToSave && (
+        <div className="fixed inset-0 z-[100] bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white rounded-3xl p-5 sm:p-6 max-w-md w-full shadow-2xl border border-slate-200 text-right space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0 border border-amber-200">
+                <HelpCircle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-black text-slate-900 text-sm">
+                  {isArabic ? "تأكيد نطاق تطبيق التعديلات" : "Confirm Changes Scope"}
+                </h3>
+                <p className="text-xs text-slate-500 font-semibold mt-0.5">
+                  {isArabic
+                    ? `هل ترغب في تطبيق تعديلات (${pendingStudentToSave.fullName}) على الحصص والسجلات السابقة؟`
+                    : `Apply changes for (${pendingStudentToSave.fullName}) to previous records?`}
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed bg-slate-50 p-3 rounded-2xl border border-slate-200/80">
+              {isArabic
+                ? "يمكنك اختيار تحديث الحصص والماليات السابقة بأثر رجعي، أو تجميد السجلات السابقة وتطبيق التعديل على الحصص القادمة فقط."
+                : "Choose whether to update past lessons retroactively or lock past records and apply new rates only to future lessons."}
+            </p>
+
+            <div className="space-y-2.5">
+              <button
+                type="button"
+                onClick={() => confirmExecuteSaveStudent(true)}
+                className="w-full text-right p-3.5 rounded-2xl border-2 border-emerald-500 bg-emerald-50/70 hover:bg-emerald-100 transition flex items-start gap-3 group"
+              >
+                <span className="w-5 h-5 rounded-full border-2 border-emerald-600 flex items-center justify-center mt-0.5 shrink-0 bg-white group-hover:scale-105 transition-transform">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-600" />
+                </span>
+                <div>
+                  <p className="text-xs font-black text-emerald-950">
+                    {isArabic ? "نعم، تطبيق على السابق والقادم (أثر رجعي)" : "Yes, apply to past & future"}
+                  </p>
+                  <p className="text-[11px] text-emerald-800 mt-0.5 leading-relaxed">
+                    {isArabic
+                      ? "تحديث أسعار وحسابات الحصص السابقة وسجلات الحضور والاسم لتطابق التعديل الجديد بأثر رجعي."
+                      : "Recalculates past lessons with new rates and updates historical records."}
+                  </p>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => confirmExecuteSaveStudent(false)}
+                className="w-full text-right p-3.5 rounded-2xl border-2 border-blue-400 bg-blue-50/70 hover:bg-blue-100 transition flex items-start gap-3 group"
+              >
+                <span className="w-5 h-5 rounded-full border-2 border-blue-500 flex items-center justify-center mt-0.5 shrink-0 bg-white group-hover:scale-105 transition-transform">
+                  <span className="w-2.5 h-2.5 rounded-full bg-blue-600" />
+                </span>
+                <div>
+                  <p className="text-xs font-black text-blue-950">
+                    {isArabic ? "لا، التطبيق على القادم فقط (تجميد السابق)" : "No, future lessons only"}
+                  </p>
+                  <p className="text-[11px] text-blue-800 mt-0.5 leading-relaxed">
+                    {isArabic
+                      ? "الاحتفاظ بحسابات وأسعار الحصص السابقة كما هي دون تعديل، والبدء بالحسابات الجديدة للحصص المستقبلية."
+                      : "Preserves past lesson rates and calculations as they were, applying new rates to future lessons."}
+                  </p>
+                </div>
+              </button>
+            </div>
+
+            <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowApplyConfirmDialog(false);
+                  setPendingStudentToSave(null);
+                }}
+                className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition"
+              >
+                {isArabic ? "الرجوع للتعديل" : "Back to Edit"}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -5215,6 +6702,59 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Modal: In-App Confirmation Dialog for Permanently Deleting Report */}
+      {reportToDeleteId && (
+        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white border border-slate-200 rounded-3xl p-5 max-w-md w-full shadow-2xl animate-in fade-in zoom-in-95 space-y-4">
+            <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+
+            <div className="text-center">
+              <h3 className="font-black text-slate-900 text-base">
+                {isArabic ? "تأكيد حذف التقرير والخصم المالي" : "Confirm Delete Report & Reversal"}
+              </h3>
+              <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
+                {isArabic
+                  ? "هل أنت متأكد من رغبتك في حذف هذا التقرير نهائياً؟"
+                  : "Are you sure you want to permanently delete this report?"}
+              </p>
+              <div className="mt-2.5 p-2.5 rounded-xl bg-amber-50 border border-amber-200/80 text-[11px] font-bold text-amber-900 text-right leading-relaxed flex items-center gap-2">
+                <span className="shrink-0 text-base">ℹ️</span>
+                <span>
+                  {isArabic
+                    ? "عند الحذف، سيتم إلغاء احتساب هذه الحصة تلقائياً وخصم سعرها ووقتها من الحساب المالي وسجل ساعات الطالب."
+                    : "Upon deletion, this lesson will no longer be counted, and its cost and time will be deducted from the student's financial balance and hours."}
+                </span>
+              </div>
+            </div>
+
+            <div className="pt-2 flex items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={() => setReportToDeleteId(null)}
+                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition"
+              >
+                {isArabic ? "إلغاء التراجع" : "Cancel"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onDeleteReport) {
+                    onDeleteReport(reportToDeleteId);
+                  }
+                  setReportToDeleteId(null);
+                }}
+                className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs transition shadow-md shadow-rose-600/30 flex items-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isArabic ? "تأكيد الحذف النهائي" : "Confirm Delete"}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Modal: Create Combined Student Group */}
       {showCreateCombinedGroupModal && (
         <CreateCombinedGroupModal
@@ -5293,10 +6833,648 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
           onAddReport={onAddReport}
           onDeleteReport={onDeleteReport}
           onToggleArchiveReport={onToggleArchiveReport}
+          onArchiveEndedCycle={onArchiveEndedCycle}
           onGenerateReportAi={onGenerateReportAi}
+          onOpenMonthlyQuranReport={(student, subject) => setMonthlyReportModalTarget({ student, subject })}
           availableUnbundledStudents={students.filter(s => !bundledStudentIdSet.has(s.id))}
         />
       )}
+
+      {/* نافذة نظام التقارير الشهري الشامل (متاحة حصرياً للقرآن الكريم والدراسات الإسلامية) */}
+      {monthlyReportModalTarget && (
+        <ComprehensiveMonthlyReportModal
+          isOpen={Boolean(monthlyReportModalTarget)}
+          onClose={() => setMonthlyReportModalTarget(null)}
+          student={monthlyReportModalTarget.student}
+          subject={monthlyReportModalTarget.subject}
+          settings={settings}
+          attendanceRecords={attendanceRecords}
+          reports={reports}
+          onSaveReport={async (reportData) => {
+            onAddReport({
+              studentId: monthlyReportModalTarget.student.id,
+              studentName: monthlyReportModalTarget.student.fullName,
+              teacherName: reportData.teacherName || settings.teacherName,
+              subject: monthlyReportModalTarget.subject,
+              reportType: "monthly_comprehensive",
+              evaluationMonth: reportData.evaluationMonth,
+              date: reportData.date || new Date().toISOString().split("T")[0],
+              attendance: "present",
+              deductCost: false,
+              teacherNotes: reportData.teacherNotes || `تقرير الأداء الشهري للقرآن الكريم والدراسات الإسلامية`,
+              reportText: reportData.reportText,
+              generatedText: reportData.generatedText,
+              aiInstructions: ""
+            });
+            setWhatsappSentNotice(isArabic ? "تم حفظ التقرير الشهري الشامل في سجل تقارير الطالب بنجاح!" : "Monthly report saved successfully!");
+            setTimeout(() => setWhatsappSentNotice(""), 4000);
+          }}
+          onOpenWhatsAppChooser={(text) => {
+            handleOpenWhatsAppChooser(text, monthlyReportModalTarget.student);
+          }}
+        />
+      )}
+
+      {/* Modal: أرشفة الشهر أو الباقة المنتهية للطالب */}
+      {showArchiveCycleModal && selectedStudent && (
+        <ArchiveCycleModal
+          isOpen={showArchiveCycleModal}
+          onClose={() => setShowArchiveCycleModal(false)}
+          student={selectedStudent}
+          allReports={reports}
+          allAttendance={attendanceRecords}
+          isArabic={isArabic}
+          onConfirmArchive={(params) => {
+            if (onArchiveEndedCycle) {
+              onArchiveEndedCycle({
+                studentId: selectedStudent.id,
+                archiveGroupName: params.archiveGroupName,
+                newCycleStartDate: params.newCycleStartDate,
+                newCycleName: params.newCycleName,
+                resetLessonBalance: params.resetLessonBalance
+              });
+              setReportArchiveFilter("active");
+              setReportLessonNumber(1);
+              setWhatsappSentNotice(
+                isArabic
+                  ? `تم أرشفة تقارير الدورة المنتهية في (${params.archiveGroupName}) وبدء الدورة الجديدة من الحصة رقم 1 بنجاح!`
+                  : `Archived ended cycle into (${params.archiveGroupName}) and started new cycle!`
+              );
+              setTimeout(() => setWhatsappSentNotice(""), 4500);
+            }
+          }}
+        />
+      )}
+
+      {/* Modal: كشف الحساب المالي وساعات الدراسة للطالب */}
+      {statementModalStudent && (() => {
+        const fin = calculateStudentFinancials(statementModalStudent, attendanceRecords, paymentTransactions);
+        const studentAttendance = attendanceRecords.filter(
+          ar => ar.studentId === statementModalStudent.id && (ar.attendance === "present" || ar.deducted)
+        );
+        const studentPayments = paymentTransactions.filter(
+          pt => pt.studentId === statementModalStudent.id
+        );
+
+        return (
+          <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+            <div className="bg-white border border-slate-200 rounded-3xl max-w-lg w-full shadow-2xl animate-in fade-in my-6 overflow-hidden">
+              {/* Modal Header */}
+              <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/60">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-2xl bg-blue-100 text-blue-700 font-black flex items-center justify-center text-sm shadow-2xs">
+                    {statementModalStudent.fullName ? statementModalStudent.fullName.charAt(0) : "ط"}
+                  </div>
+                  <div>
+                    <h3 className="font-black text-slate-900 text-sm sm:text-base">
+                      {isArabic ? `كشف حساب: ${statementModalStudent.fullName}` : `Statement: ${statementModalStudent.fullName}`}
+                    </h3>
+                    <p className="text-[11px] text-slate-500 font-medium">
+                      {statementModalStudent.subject} • {statementModalStudent.studyType === "group" ? (isArabic ? "مجموعة" : "Group") : (isArabic ? "خاص" : "Private")}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => handleCopyStudentStatement(statementModalStudent)}
+                    className="p-2 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 transition shadow-2xs flex items-center gap-1 text-xs font-bold"
+                    title={isArabic ? "نسخ كشف الحساب" : "Copy Statement"}
+                  >
+                    {copiedStatementStudentId === statementModalStudent.id ? (
+                      <Check className="w-4 h-4 text-emerald-600" />
+                    ) : (
+                      <Copy className="w-4 h-4 text-slate-500" />
+                    )}
+                    <span className="hidden sm:inline">
+                      {copiedStatementStudentId === statementModalStudent.id ? (isArabic ? "تم النسخ" : "Copied") : (isArabic ? "نسخ" : "Copy")}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => window.print()}
+                    className="p-2 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 transition shadow-2xs flex items-center gap-1 text-xs font-bold"
+                    title={isArabic ? "طباعة كشف الحساب / حفظ PDF" : "Print Statement"}
+                  >
+                    <Printer className="w-4 h-4 text-slate-600" />
+                    <span className="hidden sm:inline">{isArabic ? "طباعة" : "Print"}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleShareStudentStatementWhatsApp(statementModalStudent)}
+                    className="p-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white transition shadow-2xs flex items-center gap-1 text-xs font-bold"
+                    title={isArabic ? "إرسال كشف الحساب لواتساب ولي الأمر" : "Share Statement via WhatsApp"}
+                  >
+                    <Share2 className="w-4 h-4" />
+                    <span className="hidden sm:inline">{isArabic ? "واتساب" : "WhatsApp"}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setStatementModalStudent(null)}
+                    className="text-slate-400 hover:text-slate-700 p-1.5 rounded-xl hover:bg-slate-200/60 transition"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Modal Body */}
+              <div className="p-4 sm:p-5 space-y-4 max-h-[70vh] overflow-y-auto">
+                {/* Summary Stats Grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-slate-50 p-3 rounded-2xl border border-slate-200/80 text-center">
+                  <div className="bg-white p-2.5 rounded-xl border border-slate-100 flex flex-col justify-between">
+                    <span className="text-[10px] font-bold text-slate-400 block">
+                      {fin.isMonthly ? (isArabic ? "الشهور المحتسبة" : "Billed Months") : (isArabic ? "الحصص المنفذة" : "Attended")}
+                    </span>
+                    <span className="text-sm font-black text-blue-700 my-0.5">
+                      {fin.isMonthly ? `${fin.billedMonthsCount} شهر` : `${fin.totalAttendedLessons} حصة`}
+                    </span>
+                    <span className="text-[9.5px] text-slate-400 block">({fin.totalAccruedCost} ج.م)</span>
+                  </div>
+
+                  {/* FEATURE: عدد الساعات التي درسها */}
+                  <div className="bg-gradient-to-b from-sky-50/60 to-white p-2.5 rounded-xl border border-sky-200/80 flex flex-col justify-between shadow-2xs">
+                    <span className="text-[10px] font-black text-sky-800 flex items-center justify-center gap-1">
+                      <Clock className="w-3 h-3 text-sky-600" />
+                      <span>{isArabic ? "عدد الساعات التي درسها" : "Hours Studied"}</span>
+                    </span>
+                    <span className="text-sm font-black text-sky-700 my-0.5">
+                      {fin.totalTaughtHours} {isArabic ? "ساعة" : "hrs"}
+                    </span>
+                    <span className="text-[9px] font-bold text-slate-500 block truncate" title={formatHoursHuman(fin.totalTaughtHours, isArabic)}>
+                      {formatHoursHuman(fin.totalTaughtHours, isArabic)}
+                    </span>
+                  </div>
+
+                  <div className="bg-white p-2.5 rounded-xl border border-slate-100 flex flex-col justify-between">
+                    <span className="text-[10px] font-bold text-slate-400 block">{isArabic ? "إجمالي المدفوع" : "Paid"}</span>
+                    <span className="text-sm font-black text-emerald-600 my-0.5">{fin.totalPaidAmount} ج.م</span>
+                    <span className="text-[9.5px] text-slate-400 block">{studentPayments.length} {isArabic ? "دفعات" : "payments"}</span>
+                  </div>
+
+                  <div className="bg-white p-2.5 rounded-xl border border-slate-100 flex flex-col justify-between">
+                    <span className="text-[10px] font-bold text-slate-400 block">
+                      {fin.amountDue > 0 ? (isArabic ? "المستحق للسداد" : "Due") : (isArabic ? "الرصيد المتبقي" : "Credit")}
+                    </span>
+                    <span
+                      className={`text-sm font-black my-0.5 ${
+                        fin.amountDue > 0 ? "text-rose-600" : "text-emerald-600"
+                      }`}
+                    >
+                      {fin.amountDue > 0 ? `${fin.amountDue} ج.م` : `+${fin.creditRemaining} ج.م`}
+                    </span>
+                    <span className="text-[9.5px] text-slate-400 block">
+                      {fin.amountDue > 0 ? (isArabic ? "مطلوب سداده" : "Due balance") : (isArabic ? "رصيد دائن" : "Surplus")}
+                    </span>
+                  </div>
+                </div>
+
+                {/* DEDICATED STUDY HOURS SUMMARY BANNER */}
+                <div className="p-3 rounded-2xl bg-gradient-to-r from-sky-50 via-blue-50/70 to-indigo-50/50 border border-sky-200/90 shadow-2xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-2xl bg-sky-600 text-white flex items-center justify-center font-bold shrink-0 shadow-xs">
+                      <Clock className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-black text-slate-900 text-xs">
+                          {isArabic ? "ساعات التدريس الفعلي للطالب:" : "Actual Study Hours Completed:"}
+                        </span>
+                        <span className="px-2 py-0.5 rounded-lg bg-sky-600 text-white font-black text-xs shadow-2xs">
+                          ⏱️ {fin.totalTaughtHours} {isArabic ? "ساعة درسها" : "hours studied"}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-600 font-medium mt-0.5">
+                        {isArabic
+                          ? `درس الطالب ما مجموعه (${formatHoursHuman(fin.totalTaughtHours, true)}) بما يعادل ${Math.round((fin.totalTaughtHours || 0) * 60)} دقيقة موزعة على ${fin.totalAttendedLessons} حصة حضور فعلية.`
+                          : `The student completed (${formatHoursHuman(fin.totalTaughtHours, false)}) totaling ${Math.round((fin.totalTaughtHours || 0) * 60)} minutes across ${fin.totalAttendedLessons} attended lessons.`}
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleShareStudentStatementWhatsApp(statementModalStudent)}
+                    className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold shadow-2xs flex items-center gap-1.5 self-end sm:self-auto shrink-0 transition"
+                    title={isArabic ? "إرسال كشف الحساب وتفاصيل الساعات عبر واتساب" : "Share via WhatsApp"}
+                  >
+                    <Share2 className="w-3.5 h-3.5" />
+                    <span>{isArabic ? "إرسال بالواتساب" : "Send WhatsApp"}</span>
+                  </button>
+                </div>
+
+                {/* Status Explanation */}
+                <div className="p-3 rounded-2xl bg-blue-50/70 border border-blue-100 text-slate-800 text-xs font-semibold">
+                  {isArabic ? fin.detailsExplanationAr : fin.detailsExplanationEn}
+                </div>
+
+                {/* Subject Breakdown if student is enrolled in multiple subjects */}
+                {fin.subjectsDetails && fin.subjectsDetails.length > 1 && (
+                  <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
+                    <h4 className="font-black text-slate-900 text-xs flex items-center gap-1.5">
+                      <Layers className="w-3.5 h-3.5 text-blue-600" />
+                      <span>{isArabic ? "تفصيل الحساب المالي وساعات الدراسة لكل مادة:" : "Financial & Hours Breakdown by Subject:"}</span>
+                    </h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {fin.subjectsDetails.map((sub, sIdx) => (
+                        <div
+                          key={sub.id || sIdx}
+                          className="bg-white p-2.5 rounded-xl border border-slate-200/80 space-y-1.5 text-xs shadow-2xs"
+                        >
+                          <div className="flex items-center justify-between font-black">
+                            <span className="text-slate-900">{sub.subject}</span>
+                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-blue-50 text-blue-700">
+                              {sub.studyType === "group" ? "مجموعة" : "خاص"}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center justify-between text-[11px] font-bold text-sky-800 bg-sky-50/80 px-2 py-1 rounded-lg border border-sky-100">
+                            <span className="flex items-center gap-1">
+                              <Clock className="w-3 h-3 text-sky-600" />
+                              <span>{isArabic ? "عدد الساعات التي درسها:" : "Hours Studied:"}</span>
+                            </span>
+                            <span className="font-black text-sky-900">
+                              {sub.totalTaughtHours} {isArabic ? "ساعة" : "hrs"} ({sub.totalAttendedLessons} {isArabic ? "حصة" : "lss"})
+                            </span>
+                          </div>
+
+                          <div className="flex items-center justify-between text-[11px] text-slate-500">
+                            <span>{isArabic ? "المحسوب:" : "Accrued:"} {sub.totalAccruedCost} ج.م</span>
+                            <span>{isArabic ? "المسدد:" : "Paid:"} {sub.totalPaidAmount} ج.م</span>
+                          </div>
+                          <div className="pt-1 border-t border-slate-100 flex items-center justify-between font-bold text-[11px]">
+                            <span className="text-slate-600">{isArabic ? "الحالة:" : "Status:"}</span>
+                            <span className={sub.amountDue > 0 ? "text-rose-600 font-black" : "text-emerald-600 font-black"}>
+                              {sub.amountDue > 0 ? `${sub.amountDue} ج.م مستحق` : (isArabic ? "مسدد بالكامل" : "Paid")}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 1. سجل المدفوعات */}
+                <div className="space-y-2">
+                  <h4 className="font-black text-slate-900 text-xs flex items-center gap-1.5">
+                    <DollarSign className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>{isArabic ? "سجل الدفعات المسددة:" : "Payment History:"}</span>
+                  </h4>
+
+                  {studentPayments.length === 0 ? (
+                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-center text-xs text-slate-400 font-medium">
+                      {isArabic ? "لم تسجل أي دفعات بعد." : "No payments recorded."}
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                      {studentPayments.map(pt => (
+                        <div
+                          key={pt.id}
+                          className="p-2.5 rounded-xl bg-emerald-50/40 border border-emerald-100 flex items-center justify-between text-xs"
+                        >
+                          <div>
+                            <span className="font-black text-emerald-700">+{pt.amount} {isArabic ? "ج.م" : "EGP"}</span>
+                            {pt.notes && <p className="text-[10px] text-slate-500">{pt.notes}</p>}
+                          </div>
+                          <span className="text-[10px] font-bold text-slate-400">{pt.date}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* 2. سجل الحصص المنفذة وساعات التدريس */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-black text-slate-900 text-xs flex items-center gap-1.5">
+                      <Layers className="w-3.5 h-3.5 text-blue-600" />
+                      <span>
+                        {fin.isMonthly
+                          ? (isArabic ? "سجل الحضور التربوي والأكاديمي:" : "Attendance History (Educational):")
+                          : (isArabic ? "سجل الحصص المنفذة وساعات التدريس:" : "Attended Lessons & Hours History:")}
+                      </span>
+                    </h4>
+                    <span className="text-[10px] font-black text-sky-800 bg-sky-50 px-2 py-0.5 rounded-lg border border-sky-200/70">
+                      ⏱️ {fin.totalTaughtHours} {isArabic ? "ساعة درسها" : "hours studied"}
+                    </span>
+                  </div>
+
+                  {studentAttendance.length === 0 ? (
+                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-center text-xs text-slate-400 font-medium">
+                      {isArabic ? "لا توجد حصص مسجلة بالحضور حتى الآن." : "No attended lessons recorded."}
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                      {studentAttendance.map((ar, aIdx) => {
+                        let arDur = ar.durationMinutes;
+                        if (!arDur && ar.lessonDuration) {
+                          const m = ar.lessonDuration.match(/(\d+)/);
+                          if (m) arDur = parseInt(m[1], 10);
+                        }
+                        if (!arDur) arDur = fin.defaultDurationMinutes || 60;
+
+                        return (
+                          <div
+                            key={ar.id || aIdx}
+                            className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between text-xs"
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-black text-[10px]">
+                                #{ar.lessonNumber || (aIdx + 1)}
+                              </span>
+                              <div>
+                                <p className="font-bold text-slate-800">{ar.subject || statementModalStudent.subject}</p>
+                                <p className="text-[10px] text-slate-400">{ar.teacherNotes || (ar.attendance === "present" ? "حضور مؤكد" : "غياب مع احتساب الحصة")}</p>
+                              </div>
+                            </div>
+                            <div className="text-left">
+                              <span className="font-bold text-slate-900 block">
+                                {fin.isMonthly ? (isArabic ? "حضور" : "Attended") : `${fin.lessonCost} ج.م`}
+                              </span>
+                              <span className="text-[10px] text-sky-700 font-bold block">
+                                ⏱️ {arDur} دقيقة ({formatHoursHuman(arDur / 60, isArabic)})
+                              </span>
+                              <span className="text-[9.5px] text-slate-400 block">{ar.date}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Modal Footer */}
+              <div className="p-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 bg-slate-50/60">
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setStatementModalStudent(null)}
+                    className="px-3.5 py-2 rounded-xl bg-slate-200 text-slate-700 font-bold text-xs hover:bg-slate-300 transition"
+                  >
+                    {isArabic ? "إغلاق" : "Close"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleCopyStudentStatement(statementModalStudent)}
+                    className="px-3 py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-bold text-xs transition flex items-center gap-1.5 shadow-2xs"
+                  >
+                    {copiedStatementStudentId === statementModalStudent.id ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-600" />
+                        <span className="text-emerald-700">{isArabic ? "تم النسخ" : "Copied"}</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5 text-slate-500" />
+                        <span>{isArabic ? "نسخ الكشف" : "Copy"}</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => window.print()}
+                    className="px-3 py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-bold text-xs transition flex items-center gap-1.5 shadow-2xs"
+                    title={isArabic ? "طباعة كشف الحساب / حفظ PDF" : "Print Statement"}
+                  >
+                    <Printer className="w-3.5 h-3.5 text-slate-600" />
+                    <span>{isArabic ? "طباعة الكشف" : "Print"}</span>
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => handleShareStudentStatementWhatsApp(statementModalStudent)}
+                    className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md shadow-emerald-600/30 flex items-center gap-1.5 transition"
+                  >
+                    <Share2 className="w-3.5 h-3.5" />
+                    <span>{isArabic ? "مشاركة عبر واتساب" : "Share via WhatsApp"}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Official Printable Statement Voucher for @media print */}
+              <div id="student-statement-printable" className="hidden print:block text-slate-900 bg-white font-sans text-xs p-6" dir={isArabic ? "rtl" : "ltr"}>
+                {/* Printable Header */}
+                <div className="border-b-2 border-slate-900 pb-3 mb-4 flex items-center justify-between">
+                  <div>
+                    <h1 className="text-xl font-black text-slate-900 tracking-tight">
+                      {settings.teacherName || (isArabic ? "المنصة التعليمية اليومية" : "Educational Platform")}
+                    </h1>
+                    <h2 className="text-sm font-bold text-slate-700 mt-0.5">
+                      {isArabic ? "كشف الحساب المالي وساعات الدراسة المعتمد للطالب" : "Official Student Financial Statement & Hours"}
+                    </h2>
+                  </div>
+                  <div className="text-left font-mono text-[10px] text-slate-500">
+                    <p>{isArabic ? "تاريخ الإصدار:" : "Issue Date:"} {new Date().toLocaleDateString(isArabic ? "ar-EG" : "en-US", { year: "numeric", month: "long", day: "numeric" })}</p>
+                    <p className="font-bold text-slate-700 mt-0.5">IFRS Accounting Standard</p>
+                  </div>
+                </div>
+
+                {/* Student Details Card */}
+                <div className="grid grid-cols-3 gap-2 p-3 bg-slate-50 border border-slate-300 rounded-xl mb-3 text-xs">
+                  <div>
+                    <span className="text-[10px] text-slate-500 font-bold block">{isArabic ? "اسم الطالب:" : "Student Name:"}</span>
+                    <span className="font-black text-sm text-slate-900">{statementModalStudent.fullName}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-500 font-bold block">{isArabic ? "المادة الدراسية:" : "Subject:"}</span>
+                    <span className="font-bold text-slate-800">{statementModalStudent.subject} ({statementModalStudent.studyType === "group" ? (isArabic ? "مجموعة" : "Group") : (isArabic ? "خاص" : "Private")})</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-500 font-bold block">{isArabic ? "حالة الحساب:" : "Account Status:"}</span>
+                    <span className={`font-black ${fin.amountDue > 0 ? "text-rose-700" : "text-emerald-700"}`}>
+                      {fin.amountDue > 0 ? `${fin.amountDue} ج.م مستحق` : (isArabic ? "مسدد بالكامل" : "Paid")}
+                    </span>
+                  </div>
+                </div>
+
+                {/* STUDY HOURS HIGHLIGHT BANNER */}
+                <div className="p-3.5 rounded-xl bg-sky-50 border-2 border-sky-600 mb-3.5 flex items-center justify-between">
+                  <div>
+                    <span className="text-[11px] font-black text-sky-950 block">
+                      {isArabic ? "⏱️ إجمالي عدد الساعات التي درسها الطالب:" : "⏱️ Actual Study Hours Completed:"}
+                    </span>
+                    <p className="text-[10.5px] text-slate-700 font-medium mt-0.5">
+                      {isArabic
+                        ? `أتم الطالب ما مجموعه (${formatHoursHuman(fin.totalTaughtHours, true)}) بما يعادل ${Math.round((fin.totalTaughtHours || 0) * 60)} دقيقة تدريس فعلي موزعة على ${fin.totalAttendedLessons} حصة حضور مسجلة.`
+                        : `The student completed (${formatHoursHuman(fin.totalTaughtHours, false)}) totaling ${Math.round((fin.totalTaughtHours || 0) * 60)} minutes across ${fin.totalAttendedLessons} attended lessons.`}
+                    </p>
+                  </div>
+                  <div className="text-left font-black text-xl text-sky-900 bg-white px-3 py-1.5 rounded-lg border border-sky-300 shrink-0">
+                    {fin.totalTaughtHours} {isArabic ? "ساعة" : "hrs"}
+                  </div>
+                </div>
+
+                {/* Summary Stats Grid */}
+                <div className="grid grid-cols-4 gap-2 mb-3.5 text-center text-xs">
+                  <div className="p-2.5 bg-slate-50 border border-slate-300 rounded-xl">
+                    <span className="text-[10px] font-bold text-slate-500 block">
+                      {fin.isMonthly ? (isArabic ? "الشهور المحتسبة" : "Billed Months") : (isArabic ? "الحصص المنفذة" : "Attended")}
+                    </span>
+                    <span className="text-sm font-black text-blue-900 block mt-0.5">
+                      {fin.isMonthly ? `${fin.billedMonthsCount} شهر` : `${fin.totalAttendedLessons} حصة`}
+                    </span>
+                  </div>
+                  <div className="p-2.5 bg-slate-50 border border-slate-300 rounded-xl">
+                    <span className="text-[10px] font-bold text-slate-500 block">{isArabic ? "إجمالي التكلفة" : "Accrued Cost"}</span>
+                    <span className="text-sm font-black text-slate-900 block mt-0.5">{fin.totalAccruedCost} ج.م</span>
+                  </div>
+                  <div className="p-2.5 bg-slate-50 border border-slate-300 rounded-xl">
+                    <span className="text-[10px] font-bold text-slate-500 block">{isArabic ? "إجمالي المسدد" : "Total Paid"}</span>
+                    <span className="text-sm font-black text-emerald-800 block mt-0.5">{fin.totalPaidAmount} ج.م</span>
+                  </div>
+                  <div className="p-2.5 bg-slate-50 border border-slate-300 rounded-xl">
+                    <span className="text-[10px] font-bold text-slate-500 block">
+                      {fin.amountDue > 0 ? (isArabic ? "المستحق للسداد" : "Due Balance") : (isArabic ? "الرصيد الفائض" : "Credit Balance")}
+                    </span>
+                    <span className={`text-sm font-black block mt-0.5 ${fin.amountDue > 0 ? "text-rose-700" : "text-emerald-800"}`}>
+                      {fin.amountDue > 0 ? `${fin.amountDue} ج.م` : `+${fin.creditRemaining} ج.م`}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Multi-Subject Breakdown Table if exists */}
+                {fin.subjectsDetails && fin.subjectsDetails.length > 1 && (
+                  <div className="mb-3.5">
+                    <h3 className="font-black text-xs text-slate-900 mb-1.5">{isArabic ? "تفصيل الساعات والحساب لكل مادة دراسية:" : "Subject Breakdown:"}</h3>
+                    <table className="w-full text-right border-collapse border border-slate-300 text-[11px]">
+                      <thead>
+                        <tr className="bg-slate-100 text-slate-800 font-bold border-b border-slate-300">
+                          <th className="p-1.5 border-r border-slate-300">المادة الدراسية</th>
+                          <th className="p-1.5 border-r border-slate-300 text-center">ساعات الدراسة</th>
+                          <th className="p-1.5 border-r border-slate-300 text-center">عدد الحصص</th>
+                          <th className="p-1.5 border-r border-slate-300 text-center">المحسوب</th>
+                          <th className="p-1.5 border-r border-slate-300 text-center">المسدد</th>
+                          <th className="p-1.5 text-center">الموقف المالي</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {fin.subjectsDetails.map((s, idx) => (
+                          <tr key={idx} className="border-b border-slate-200">
+                            <td className="p-1.5 border-r border-slate-300 font-bold">{s.subject} ({s.studyType === "group" ? (isArabic ? "مجموعة" : "Group") : (isArabic ? "خاص" : "Private")})</td>
+                            <td className="p-1.5 border-r border-slate-300 text-center font-black text-sky-900">⏱️ {s.totalTaughtHours} ساعة</td>
+                            <td className="p-1.5 border-r border-slate-300 text-center">{s.totalAttendedLessons} حصة</td>
+                            <td className="p-1.5 border-r border-slate-300 text-center font-mono">{s.totalAccruedCost} ج.م</td>
+                            <td className="p-1.5 border-r border-slate-300 text-center font-mono text-emerald-800">{s.totalPaidAmount} ج.م</td>
+                            <td className="p-1.5 text-center font-bold">
+                              {s.amountDue > 0 ? <span className="text-rose-700 font-black">{s.amountDue} ج.م مستحق</span> : <span className="text-emerald-700">مسدد بالكامل</span>}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* Attended Lessons History Table */}
+                <div className="mb-3.5">
+                  <h3 className="font-black text-xs text-slate-900 mb-1.5">
+                    {isArabic ? `سجل الحصص المنفذة وساعات التدريس الفعلي (${fin.totalAttendedLessons} حصة • ${fin.totalTaughtHours} ساعة):` : `Attended Lessons & Hours Log:`}
+                  </h3>
+                  <table className="w-full text-right border-collapse border border-slate-300 text-[10.5px]">
+                    <thead>
+                      <tr className="bg-slate-100 text-slate-800 font-bold border-b border-slate-300">
+                        <th className="p-1.5 border-r border-slate-300 w-8 text-center">#</th>
+                        <th className="p-1.5 border-r border-slate-300">التاريخ</th>
+                        <th className="p-1.5 border-r border-slate-300">المادة</th>
+                        <th className="p-1.5 border-r border-slate-300 text-center">مدة الحصة والساعات</th>
+                        <th className="p-1.5 border-r border-slate-300 text-center">التكلفة</th>
+                        <th className="p-1.5">الملاحظات</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {studentAttendance.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="p-2 text-center text-slate-400">لا توجد حصص مسجلة بالحضور بعد.</td>
+                        </tr>
+                      ) : (
+                        studentAttendance.map((ar, idx) => {
+                          let dur = ar.durationMinutes;
+                          if (!dur && ar.lessonDuration) {
+                            const m = ar.lessonDuration.match(/(\d+)/);
+                            if (m) dur = parseInt(m[1], 10);
+                          }
+                          if (!dur) dur = fin.defaultDurationMinutes || 60;
+
+                          const itemDeduction = fin.rateType === "per_hour"
+                            ? Number(((fin.hourlyCost * dur) / 60).toFixed(2))
+                            : fin.lessonCost;
+
+                          return (
+                            <tr key={idx} className="border-b border-slate-200">
+                              <td className="p-1.5 border-r border-slate-300 text-center font-bold">{ar.lessonNumber || (idx + 1)}</td>
+                              <td className="p-1.5 border-r border-slate-300 font-mono">{ar.date}</td>
+                              <td className="p-1.5 border-r border-slate-300 font-bold">{ar.subject || statementModalStudent.subject}</td>
+                              <td className="p-1.5 border-r border-slate-300 text-center font-black text-sky-900">
+                                ⏱️ {dur} دقيقة ({formatHoursHuman(dur / 60, isArabic)})
+                              </td>
+                              <td className="p-1.5 border-r border-slate-300 text-center font-mono">
+                                {fin.isMonthly ? "حضور" : `${itemDeduction} ج.م`}
+                              </td>
+                              <td className="p-1.5 text-slate-600">{ar.teacherNotes || (ar.attendance === "present" ? "حضور مؤكد" : "غياب مع الاحتساب")}</td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Payment History Table */}
+                <div className="mb-4">
+                  <h3 className="font-black text-xs text-slate-900 mb-1.5">{isArabic ? "سجل الدفعات المسددة:" : "Payment History:"}</h3>
+                  <table className="w-full text-right border-collapse border border-slate-300 text-[10.5px]">
+                    <thead>
+                      <tr className="bg-slate-100 text-slate-800 font-bold border-b border-slate-300">
+                        <th className="p-1.5 border-r border-slate-300 w-8 text-center">#</th>
+                        <th className="p-1.5 border-r border-slate-300">التاريخ</th>
+                        <th className="p-1.5 border-r border-slate-300 text-center">المبلغ المسدد</th>
+                        <th className="p-1.5">ملاحظات التحصيل</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {studentPayments.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="p-2 text-center text-slate-400">لم تسجل دفعات بعد.</td>
+                        </tr>
+                      ) : (
+                        studentPayments.map((pt, idx) => (
+                          <tr key={idx} className="border-b border-slate-200">
+                            <td className="p-1.5 border-r border-slate-300 text-center font-bold">{idx + 1}</td>
+                            <td className="p-1.5 border-r border-slate-300 font-mono">{pt.date}</td>
+                            <td className="p-1.5 border-r border-slate-300 text-center font-black text-emerald-800 font-mono">+{pt.amount} ج.م</td>
+                            <td className="p-1.5 text-slate-600">{pt.notes || "سداد نقدي معتمد"}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Printable Footer & Signature */}
+                <div className="pt-3 border-t-2 border-slate-900 flex items-center justify-between text-xs font-bold text-slate-700">
+                  <div>
+                    <p>تم استخراج هذا الكشف وتدقيقه محاسبياً وأكاديمياً.</p>
+                    <p className="text-[10px] text-slate-500 font-normal mt-0.5">صادر عن منظومة إدارة المعلم الإسلامي والتعليمي اليومية</p>
+                  </div>
+                  <div className="text-center min-w-[150px]">
+                    <p className="border-b border-slate-400 pb-4 mb-1">توقيع المعلم / الإدارة</p>
+                    <span className="text-[10px] text-slate-500">معتمد</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

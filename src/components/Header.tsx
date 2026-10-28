@@ -19,14 +19,19 @@ import {
   Globe,
   Trash2,
   RotateCcw,
-  Download
+  Download,
+  RefreshCw,
+  FileText,
+  Cloud,
+  CloudOff,
+  ShieldAlert
 } from "lucide-react";
-import { AppSettings, Student, AppNotification } from "../types";
+import { AppSettings, Student, AppNotification, NavTab } from "../types";
 import { sanitizeTeacherName } from "../lib/storage";
 import { User as FirebaseUser } from "../lib/firebase";
 import { InstallAppModal } from "./InstallAppModal";
 
-export type NavTab = "home" | "groups" | "students" | "schedule" | "finance";
+export type { NavTab };
 
 interface HeaderProps {
   settings: AppSettings;
@@ -44,6 +49,14 @@ interface HeaderProps {
   onDismissNotification?: (id: string) => void;
   onDismissAllNotifications?: (ids: string[]) => void;
   onRestoreNotifications?: () => void;
+  onForceSync?: () => Promise<void> | void;
+  isSyncing?: boolean;
+  lastSyncTime?: string | null;
+  syncMessage?: { text: string; type: "success" | "info" | "error" } | null;
+  cloudSyncStatus?: "synced" | "syncing" | "error" | "offline";
+  cloudSyncError?: string | null;
+  onOpenRulesModal?: () => void;
+  onOpenAIChat?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -61,7 +74,15 @@ export const Header: React.FC<HeaderProps> = ({
   dismissedNotificationIds = [],
   onDismissNotification,
   onDismissAllNotifications,
-  onRestoreNotifications
+  onRestoreNotifications,
+  onForceSync,
+  isSyncing = false,
+  lastSyncTime,
+  syncMessage,
+  cloudSyncStatus = "synced",
+  cloudSyncError,
+  onOpenRulesModal,
+  onOpenAIChat
 }) => {
   const [showNotifications, setShowNotifications] = useState(false);
   const [showMobileSearch, setShowMobileSearch] = useState(false);
@@ -91,6 +112,7 @@ export const Header: React.FC<HeaderProps> = ({
     { id: "home" as NavTab, label: isArabic ? "الرئيسية" : "Home", icon: Home },
     { id: "groups" as NavTab, label: isArabic ? "المجموعات" : "Groups", icon: Users },
     { id: "students" as NavTab, label: isArabic ? "الطلاب" : "Students", icon: GraduationCap },
+    { id: "monthly_report" as NavTab, label: isArabic ? "التقرير الشهري الشامل" : "Monthly Report", icon: FileText },
     { id: "schedule" as NavTab, label: isArabic ? "الجدول" : "Schedule", icon: Calendar },
     { id: "finance" as NavTab, label: isArabic ? "المالية" : "Finance", icon: DollarSign }
   ];
@@ -240,6 +262,55 @@ export const Header: React.FC<HeaderProps> = ({
               <Search className="w-4 h-4" />
             </button>
 
+            {/* Live Cloud Sync & Refresh Button */}
+            {onForceSync && (
+              <button
+                type="button"
+                onClick={onForceSync}
+                disabled={isSyncing}
+                title={
+                  isArabic
+                    ? (cloudSyncStatus === "error" ? `خطأ في المزامنة (${cloudSyncError || "إعادة المحاولة"}) - اضغط لإعادة المزامنة والحفظ السحابي` : `تحديث ومزامنة وحفظ البيانات سحابياً ${cloudSyncError ? `(خطأ: ${cloudSyncError})` : ''} ${lastSyncTime ? `(آخر حفظ: ${lastSyncTime})` : ''}`)
+                    : (cloudSyncStatus === "error" ? `Sync error (${cloudSyncError || "Retry"}) - Click to retry saving to cloud` : `Sync and save data to cloud ${cloudSyncError ? `(Error: ${cloudSyncError})` : ''} ${lastSyncTime ? `(Last save: ${lastSyncTime})` : ''}`)
+                }
+                className={`h-8 sm:h-9 px-2 sm:px-2.5 rounded-lg border transition flex items-center gap-1.5 text-xs font-bold shrink-0 shadow-sm ${
+                  cloudSyncStatus === "error"
+                    ? "bg-amber-950/90 border-amber-500/80 text-amber-200 ring-1 ring-amber-500/50 hover:bg-amber-900/90 cursor-pointer"
+                    : isSyncing
+                    ? "bg-sky-950/80 border-sky-500/60 text-sky-300 ring-1 ring-sky-400/40"
+                    : cloudSyncStatus === "offline"
+                    ? "bg-amber-950/60 border-amber-500/50 text-amber-300 hover:bg-amber-900/60"
+                    : "bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 hover:text-white border-emerald-500/40"
+                }`}
+              >
+                {cloudSyncStatus === "error" ? (
+                  <ShieldAlert className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                ) : isSyncing ? (
+                  <RefreshCw className="w-3.5 h-3.5 text-sky-400 shrink-0 animate-spin" />
+                ) : cloudSyncStatus === "offline" ? (
+                  <CloudOff className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                ) : (
+                  <Cloud className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                )}
+
+                <span className="hidden sm:inline">
+                  {cloudSyncStatus === "error"
+                    ? (isArabic ? "إعادة المحاولة السحابية ↻" : "Retry Cloud Sync ↻")
+                    : isSyncing
+                    ? (isArabic ? "جاري الحفظ السحابي..." : "Saving to cloud...")
+                    : cloudSyncStatus === "offline"
+                    ? (isArabic ? "حفظ محلي فقط" : "Local only")
+                    : (isArabic ? "محفوظ سحابياً" : "Cloud Synced")}
+                </span>
+
+                {lastSyncTime && !isSyncing && cloudSyncStatus !== "error" && (
+                  <span className="hidden 2xl:inline text-[9.5px] font-normal text-slate-400">
+                    {lastSyncTime}
+                  </span>
+                )}
+              </button>
+            )}
+
             {/* Quick Backup Modal Button - Visible on xl+ */}
             <button
               type="button"
@@ -250,6 +321,20 @@ export const Header: React.FC<HeaderProps> = ({
               <HardDriveDownload className="w-4 h-4 text-sky-400 shrink-0" />
               <span className="hidden 2xl:inline">{isArabic ? "نسخة احتياطية" : "Backup"}</span>
             </button>
+
+            {/* AI Assistant (Gemini Chat) Button */}
+            {onOpenAIChat && (
+              <button
+                type="button"
+                id="header-ai-chat-btn"
+                onClick={onOpenAIChat}
+                title={isArabic ? "مساعد الذكاء الاصطناعي (Gemini Chat)" : "AI Assistant (Gemini Chat)"}
+                className="h-8 sm:h-9 px-2 sm:px-2.5 rounded-lg bg-gradient-to-r from-purple-600/90 to-indigo-600/90 hover:from-purple-500 hover:to-indigo-500 text-white border border-purple-400/40 transition flex items-center gap-1.5 text-xs font-bold shrink-0 shadow-sm shadow-purple-500/20 cursor-pointer"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                <span className="hidden sm:inline">{isArabic ? "المساعد الذكي" : "AI Assistant"}</span>
+              </button>
+            )}
 
             {/* Install App as PWA Button */}
             <button
@@ -498,6 +583,40 @@ export const Header: React.FC<HeaderProps> = ({
                   </div>
 
                   <div className="pt-2 space-y-1">
+                    {onForceSync && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowUserMenu(false);
+                          onForceSync();
+                        }}
+                        disabled={isSyncing}
+                        className="w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-xs font-semibold text-sky-300 hover:text-white hover:bg-slate-800 transition text-right rtl:text-right ltr:text-left"
+                      >
+                        <div className="flex items-center gap-2">
+                          <RefreshCw className={`w-4 h-4 text-sky-400 shrink-0 ${isSyncing ? "animate-spin" : ""}`} />
+                          <span>{isArabic ? "تحديث ومزامنة البيانات الفورية" : "Sync Latest Changes Now"}</span>
+                        </div>
+                        {lastSyncTime && !isSyncing && (
+                          <span className="text-[10px] text-slate-400 font-normal">{lastSyncTime}</span>
+                        )}
+                      </button>
+                    )}
+
+                    {onOpenRulesModal && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowUserMenu(false);
+                          onOpenRulesModal();
+                        }}
+                        className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs font-semibold text-amber-300 hover:text-white hover:bg-slate-800 transition text-right rtl:text-right ltr:text-left"
+                      >
+                        <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0" />
+                        <span>{isArabic ? "قواعد أمان فايربيس (Firestore Rules)" : "Firestore Security Rules"}</span>
+                      </button>
+                    )}
+
                     <button
                       type="button"
                       onClick={() => {
@@ -593,6 +712,26 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           </div>
         )}
+        {/* Floating Sync Notification Toast */}
+        {syncMessage && (
+          <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-top-3 duration-200 pointer-events-none max-w-md w-[90%] sm:w-auto">
+            <div
+              className={`px-4 py-2.5 rounded-xl text-xs font-bold shadow-2xl border flex items-center gap-2.5 backdrop-blur-md ${
+                syncMessage.type === "error"
+                  ? "bg-rose-950/95 border-rose-600 text-rose-200 shadow-rose-950/60"
+                  : "bg-emerald-950/95 border-emerald-600 text-emerald-200 shadow-emerald-950/60"
+              }`}
+            >
+              {syncMessage.type === "error" ? (
+                <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+              ) : (
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              )}
+              <span>{syncMessage.text}</span>
+            </div>
+          </div>
+        )}
+
         {/* INSTALL APP MODAL */}
         <InstallAppModal
           isOpen={showInstallModal}

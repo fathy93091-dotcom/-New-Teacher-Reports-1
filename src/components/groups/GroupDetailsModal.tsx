@@ -19,7 +19,8 @@ import {
   Filter,
   Layers,
   ArrowRight,
-  ArrowLeft
+  ArrowLeft,
+  Sparkles
 } from "lucide-react";
 import {
   Group,
@@ -43,7 +44,8 @@ interface GroupDetailsModalProps {
   reports?: GeneratedReport[];
   onClose: () => void;
   onOpenGroupReport?: (group: Group) => void;
-  onLaunchAttendance: (group: Group) => void;
+  onLaunchAttendance?: (group: Group) => void;
+  onOpenStudentPersonalReport?: (student: Student) => void;
   onEditGroup: (group: Group) => void;
   onDeleteGroup: (group: Group) => void;
   onUpdateGroupStudentIds: (groupId: string, newStudentIds: string[]) => void;
@@ -66,6 +68,7 @@ export const GroupDetailsModal: React.FC<GroupDetailsModalProps> = ({
   onClose,
   onOpenGroupReport,
   onLaunchAttendance,
+  onOpenStudentPersonalReport,
   onEditGroup,
   onDeleteGroup,
   onUpdateGroupStudentIds,
@@ -82,6 +85,8 @@ export const GroupDetailsModal: React.FC<GroupDetailsModalProps> = ({
   const [showExistingSelector, setShowExistingSelector] = useState(false);
   const [selectedExistingIds, setSelectedExistingIds] = useState<string[]>([]);
   const [existingSearchQuery, setExistingSearchQuery] = useState("");
+  const [showPersonalReportStudentPicker, setShowPersonalReportStudentPicker] = useState(false);
+  const [personalReportSearch, setPersonalReportSearch] = useState("");
 
   // In-app confirmation dialog states
   const [studentToDeleteFromSystem, setStudentToDeleteFromSystem] = useState<Student | null>(null);
@@ -104,7 +109,7 @@ export const GroupDetailsModal: React.FC<GroupDetailsModalProps> = ({
     if (!matchesSearch) return false;
 
     if (financialFilter === "all") return true;
-    const fin = calculateStudentFinancials(st, attendanceRecords);
+    const fin = calculateStudentFinancials(st, attendanceRecords, paymentTransactions);
     if (financialFilter === "unpaid") return fin.amountDue > 0;
     if (financialFilter === "paid") return fin.amountDue === 0;
     return true;
@@ -190,14 +195,23 @@ export const GroupDetailsModal: React.FC<GroupDetailsModalProps> = ({
               </button>
             )}
 
-            <button
-              type="button"
-              onClick={() => onLaunchAttendance(group)}
-              className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md shadow-blue-600/30 flex items-center gap-1.5 transition"
-            >
-              <Play className="w-3.5 h-3.5 fill-current" />
-              <span>{isArabic ? "بدء الحصة المباشرة" : "Launch Class"}</span>
-            </button>
+            {onOpenStudentPersonalReport && enrolledStudents.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (enrolledStudents.length === 1) {
+                    onClose();
+                    onOpenStudentPersonalReport(enrolledStudents[0]);
+                  } else {
+                    setShowPersonalReportStudentPicker(true);
+                  }
+                }}
+                className="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs shadow-md shadow-purple-600/30 flex items-center gap-1.5 transition"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                <span>{isArabic ? "التقرير الشخصي" : "Personal Report"}</span>
+              </button>
+            )}
 
             <button
               type="button"
@@ -419,7 +433,7 @@ export const GroupDetailsModal: React.FC<GroupDetailsModalProps> = ({
             </div>
           ) : (
             filteredEnrolledStudents.map((student, idx) => {
-              const fin = calculateStudentFinancials(student, attendanceRecords);
+              const fin = calculateStudentFinancials(student, attendanceRecords, paymentTransactions, reports);
               const cleanParentPhone = (student.parentContact || "").replace(/[^0-9]/g, "");
 
               return (
@@ -497,6 +511,22 @@ export const GroupDetailsModal: React.FC<GroupDetailsModalProps> = ({
 
                     {/* Actions Toolbar per student */}
                     <div className="flex items-center gap-1">
+                      {/* Personal Report */}
+                      {onOpenStudentPersonalReport && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onClose();
+                            onOpenStudentPersonalReport(student);
+                          }}
+                          title={isArabic ? "فتح نظام التقرير الشخصي للطالب" : "Personal Report"}
+                          className="px-2.5 py-1 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-[11px] flex items-center gap-1 shadow-2xs transition"
+                        >
+                          <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                          <span>{isArabic ? "تقرير شخصي" : "Report"}</span>
+                        </button>
+                      )}
+
                       {/* View Profile */}
                       <button
                         type="button"
@@ -658,6 +688,90 @@ export const GroupDetailsModal: React.FC<GroupDetailsModalProps> = ({
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                   <span>{isArabic ? "تأكيد الحذف النهائي" : "Confirm Delete"}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Personal Report Student Picker Dialog */}
+        {showPersonalReportStudentPicker && (
+          <div className="fixed inset-0 z-60 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+            <div className="bg-white border border-slate-200 rounded-3xl max-w-md w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 flex flex-col max-h-[85vh]">
+              <div className="p-4 bg-gradient-to-r from-purple-700 to-indigo-700 text-white flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center">
+                    <Sparkles className="w-4 h-4 text-amber-300" />
+                  </div>
+                  <div>
+                    <h4 className="font-black text-sm">{isArabic ? "فتح التقرير الشخصي للطالب" : "Select Student Personal Report"}</h4>
+                    <p className="text-[11px] text-purple-200">{group.name} ({enrolledStudents.length} {isArabic ? "طالب" : "students"})</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowPersonalReportStudentPicker(false)}
+                  className="p-1 rounded-lg bg-white/10 hover:bg-white/20 text-white transition"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {enrolledStudents.length > 3 && (
+                <div className="p-3 border-b border-slate-100 bg-slate-50">
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 absolute right-3 top-2.5 text-slate-400" />
+                    <input
+                      type="text"
+                      value={personalReportSearch}
+                      onChange={e => setPersonalReportSearch(e.target.value)}
+                      placeholder={isArabic ? "بحث في طلاب المجموعة..." : "Search student..."}
+                      className="w-full bg-white border border-slate-200 rounded-xl pr-8 pl-3 py-1.5 text-xs text-slate-800 font-medium focus:outline-none focus:border-purple-500"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="p-3 overflow-y-auto flex-1 divide-y divide-slate-100 space-y-1">
+                {enrolledStudents
+                  .filter(s => !personalReportSearch.trim() || s.fullName.toLowerCase().includes(personalReportSearch.trim().toLowerCase()))
+                  .map(st => (
+                    <div
+                      key={st.id}
+                      onClick={() => {
+                        setShowPersonalReportStudentPicker(false);
+                        onClose();
+                        if (onOpenStudentPersonalReport) onOpenStudentPersonalReport(st);
+                      }}
+                      className="p-2.5 rounded-xl hover:bg-purple-50/70 border border-transparent hover:border-purple-200 transition cursor-pointer flex items-center justify-between gap-2 group"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-8 h-8 rounded-lg bg-purple-100 text-purple-800 font-black flex items-center justify-center text-xs group-hover:bg-purple-600 group-hover:text-white transition shrink-0">
+                          {st.fullName ? st.fullName.charAt(0) : "ط"}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="font-bold text-xs text-slate-900 group-hover:text-purple-900 truncate">{st.fullName}</p>
+                          <p className="text-[10.5px] text-slate-500">{st.academicYear || st.phone || (isArabic ? "طالب مقيد" : "Student")}</p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="py-1 px-2.5 rounded-lg bg-purple-600 group-hover:bg-purple-700 text-white font-bold text-[10.5px] flex items-center gap-1 shadow-2xs shrink-0"
+                      >
+                        <Sparkles className="w-3 h-3 text-amber-300" />
+                        <span>{isArabic ? "فتح التقرير" : "Report"}</span>
+                      </button>
+                    </div>
+                  ))}
+              </div>
+
+              <div className="p-3 border-t border-slate-100 bg-slate-50 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowPersonalReportStudentPicker(false)}
+                  className="px-4 py-1.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs transition"
+                >
+                  {isArabic ? "إلغاء" : "Cancel"}
                 </button>
               </div>
             </div>

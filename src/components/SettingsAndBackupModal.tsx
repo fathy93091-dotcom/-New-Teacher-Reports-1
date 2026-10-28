@@ -12,10 +12,13 @@ import {
   Plus,
   Download,
   Smartphone,
-  Laptop
+  Laptop,
+  RefreshCw,
+  Cloud
 } from "lucide-react";
 import { AppSettings, GoStarsBackupData, SubjectAiInstruction } from "../types";
 import { sanitizeTeacherName } from "../lib/storage";
+import { User as FirebaseUser } from "../lib/firebase";
 
 interface SettingsAndBackupModalProps {
   settings: AppSettings;
@@ -24,6 +27,10 @@ interface SettingsAndBackupModalProps {
   onSaveSettings: (settings: AppSettings) => void;
   onExportBackup: () => GoStarsBackupData;
   onRestoreBackup: (data: GoStarsBackupData) => boolean;
+  onForceSync?: () => Promise<void> | void;
+  isSyncing?: boolean;
+  lastSyncTime?: string | null;
+  currentUser?: FirebaseUser | null;
 }
 
 export const SettingsAndBackupModal: React.FC<SettingsAndBackupModalProps> = ({
@@ -32,7 +39,11 @@ export const SettingsAndBackupModal: React.FC<SettingsAndBackupModalProps> = ({
   onClose,
   onSaveSettings,
   onExportBackup,
-  onRestoreBackup
+  onRestoreBackup,
+  onForceSync,
+  isSyncing = false,
+  lastSyncTime,
+  currentUser
 }) => {
   const [activeTab, setActiveTab] = useState<"general" | "ai" | "backup" | "install">("general");
   const [teacherName, setTeacherName] = useState(sanitizeTeacherName(settings.teacherName));
@@ -420,9 +431,57 @@ export const SettingsAndBackupModal: React.FC<SettingsAndBackupModalProps> = ({
           </div>
         )}
 
-        {/* Tab 2: Backup & Restore */}
+        {/* Tab 2: Backup & Sync */}
         {activeTab === "backup" && (
-          <div className="space-y-6 text-xs">
+          <div className="space-y-4 text-xs">
+            {/* Real-time Cloud Sync & Multi-Device Update Card */}
+            <div className="p-4 rounded-2xl bg-gradient-to-r from-sky-900/10 via-indigo-900/10 to-blue-900/10 border border-sky-300/60 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-sky-600 text-white flex items-center justify-center shadow-md shadow-sky-600/30">
+                    <Cloud className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sky-950 text-sm">
+                      {isArabic ? "المزامنة والتحديث السحابي بين الأجهزة" : "Cloud Sync & Multi-Device Live Updates"}
+                    </h3>
+                    <p className="text-[11px] text-slate-500">
+                      {currentUser?.email
+                        ? (isArabic ? `متصل بحساب: ${currentUser.email}` : `Connected as: ${currentUser.email}`)
+                        : (isArabic ? "المزامنة السحابية الفورية نشطة" : "Real-time cloud sync active")}
+                    </p>
+                  </div>
+                </div>
+                {lastSyncTime && (
+                  <span className="px-2.5 py-1 rounded-lg bg-sky-100 text-sky-800 text-[10.5px] font-bold border border-sky-200">
+                    {isArabic ? `آخر مزامنة: ${lastSyncTime}` : `Last sync: ${lastSyncTime}`}
+                  </span>
+                )}
+              </div>
+
+              <p className="text-slate-600 text-[11.5px] leading-relaxed">
+                {isArabic
+                  ? "عند إجراء أي تعديلات على الهاتف، التابلت، أو كمبيوتر آخر، يمكنك الضغط على زر التحديث أدناه لجلب أحدث التعديلات ومزامنتها فوراً دون فقدان أي بيانات."
+                  : "If you made changes on your phone or another device, click the update button below to fetch and reflect latest modifications immediately."}
+              </p>
+
+              {onForceSync && (
+                <button
+                  type="button"
+                  onClick={onForceSync}
+                  disabled={isSyncing}
+                  className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 disabled:opacity-50 text-white font-bold shadow-md shadow-sky-600/20 transition flex items-center gap-2"
+                >
+                  <RefreshCw className={`w-4 h-4 text-white ${isSyncing ? "animate-spin" : ""}`} />
+                  <span>
+                    {isSyncing
+                      ? (isArabic ? "جاري المزامنة والتحديث..." : "Syncing in progress...")
+                      : (isArabic ? "مزامنة وتحديث أحدث التعديلات الآن" : "Sync Latest Changes Now")}
+                  </span>
+                </button>
+              )}
+            </div>
+
             <div className="p-4 rounded-2xl bg-blue-50 border border-blue-200 space-y-2">
               <h3 className="font-bold text-blue-900 text-sm flex items-center gap-2">
                 <HardDriveDownload className="w-4 h-4 text-blue-600" />

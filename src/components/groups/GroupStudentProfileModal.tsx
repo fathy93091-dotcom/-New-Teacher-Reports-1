@@ -14,7 +14,8 @@ import {
   PlusCircle,
   FileText,
   Trash2,
-  Share2
+  Share2,
+  Sparkles
 } from "lucide-react";
 import {
   Student,
@@ -22,9 +23,11 @@ import {
   ExamRecord,
   PaymentTransaction,
   GeneratedReport,
-  AppSettings
+  AppSettings,
+  deduplicateReportsList
 } from "../../types";
 import { calculateStudentFinancials } from "../../lib/financeUtils";
+import { matchesStudentRecord } from "../../lib/financeEngine";
 
 interface GroupStudentProfileModalProps {
   student: Student;
@@ -34,6 +37,7 @@ interface GroupStudentProfileModalProps {
   paymentTransactions?: PaymentTransaction[];
   reports?: GeneratedReport[];
   onClose: () => void;
+  onOpenPersonalReport?: (student: Student) => void;
   onEditStudent?: (studentId: string, data: Partial<Student>) => void;
   onOpenPaymentModal?: (student: Student) => void;
   onOpenExamModal?: (student: Student) => void;
@@ -49,6 +53,7 @@ export const GroupStudentProfileModal: React.FC<GroupStudentProfileModalProps> =
   paymentTransactions = [],
   reports = [],
   onClose,
+  onOpenPersonalReport,
   onEditStudent,
   onOpenPaymentModal,
   onOpenExamModal,
@@ -60,12 +65,12 @@ export const GroupStudentProfileModal: React.FC<GroupStudentProfileModalProps> =
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
 
-  const financialSummary = calculateStudentFinancials(student, attendanceRecords);
+  const financialSummary = calculateStudentFinancials(student, attendanceRecords, paymentTransactions, reports);
 
-  const studentAttendance = attendanceRecords.filter(r => r.studentId === student.id);
-  const studentExams = examRecords.filter(r => r.studentId === student.id);
-  const studentPayments = paymentTransactions.filter(p => p.studentId === student.id);
-  const studentReports = reports.filter(r => r.studentId === student.id);
+  const studentAttendance = attendanceRecords.filter(r => matchesStudentRecord(r, student));
+  const studentExams = examRecords.filter(r => matchesStudentRecord(r, student));
+  const studentPayments = paymentTransactions.filter(p => matchesStudentRecord(p, student));
+  const studentReports = deduplicateReportsList(reports.filter(r => matchesStudentRecord(r, student)));
 
   const cleanParentPhone = (student.parentContact || "").replace(/[^0-9]/g, "");
   const cleanStudentPhone = (student.studentPhone || "").replace(/[^0-9]/g, "");
@@ -95,22 +100,43 @@ export const GroupStudentProfileModal: React.FC<GroupStudentProfileModalProps> =
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-slate-400 hover:text-slate-700 p-1.5 rounded-xl hover:bg-slate-100 transition"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-1.5">
+            {onOpenPersonalReport && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onOpenPersonalReport(student);
+                }}
+                title={isArabic ? "فتح نظام التقرير الشخصي للطالب" : "Open Personal Report"}
+                className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs shadow-2xs flex items-center gap-1.5 transition"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                <span>{isArabic ? "التقرير الشخصي" : "Personal Report"}</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="text-slate-400 hover:text-slate-700 p-1.5 rounded-xl hover:bg-slate-100 transition"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Quick Financial Summary Badges */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 my-3 shrink-0">
           <div className="p-2.5 rounded-2xl bg-slate-50 border border-slate-200/80">
-            <p className="text-[10px] font-bold text-slate-500">{isArabic ? "الحصص المنفذة" : "Attended"}</p>
-            <p className="text-sm font-black text-slate-900 mt-0.5">
-              {financialSummary.totalAttendedLessons} {isArabic ? "حصة" : "lessons"}
-            </p>
+            <p className="text-[10px] font-bold text-slate-500">{isArabic ? "الحصص والساعات" : "Lessons & Hours"}</p>
+            <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+              <span className="text-sm font-black text-slate-900">
+                {financialSummary.totalAttendedLessons} {isArabic ? "حصة" : "lessons"}
+              </span>
+              <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-1 py-0.5 rounded border border-indigo-100">
+                ⏱️ {financialSummary.totalTaughtHours ?? Number(((financialSummary.totalAttendedLessons * 60) / 60).toFixed(1))} {isArabic ? "ساعة" : "hrs"}
+              </span>
+            </div>
           </div>
 
           <div className="p-2.5 rounded-2xl bg-blue-50 border border-blue-200/70">
@@ -357,7 +383,20 @@ export const GroupStudentProfileModal: React.FC<GroupStudentProfileModalProps> =
           )}
 
           {activeSubTab === "reports" && (
-            <div className="space-y-2">
+            <div className="space-y-3">
+              {onOpenPersonalReport && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenPersonalReport(student);
+                  }}
+                  className="w-full py-2.5 px-3 rounded-2xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs transition shadow-2xs flex items-center justify-center gap-2"
+                >
+                  <Sparkles className="w-4 h-4 text-amber-300" />
+                  <span>{isArabic ? "فتح نظام التقرير الشخصي الشامل والذكاء الاصطناعي" : "Open Personal AI Report"}</span>
+                </button>
+              )}
               {studentReports.length === 0 ? (
                 <p className="text-center py-6 text-slate-400 text-xs">{isArabic ? "لا توجد تقارير صادرة لهذا الطالب" : "No issued reports"}</p>
               ) : (

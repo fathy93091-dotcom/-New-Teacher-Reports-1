@@ -24,7 +24,8 @@ import {
   FileText,
   DollarSign,
   Award,
-  UserPlus
+  UserPlus,
+  Search
 } from "lucide-react";
 import {
   Group,
@@ -48,6 +49,7 @@ import { MixedScheduleEditor, formatTime12h } from "./MixedScheduleEditor";
 import { GroupDetailsModal } from "./groups/GroupDetailsModal";
 import { GroupStudentProfileModal } from "./groups/GroupStudentProfileModal";
 import { GroupReportView } from "./GroupReportView";
+import { StudentPersonalReportView } from "./StudentPersonalReportView";
 
 interface GroupsViewProps {
   settings: AppSettings;
@@ -82,12 +84,38 @@ interface GroupsViewProps {
   onGenerateReportAi: (payload: {
     studentName: string;
     subject: string;
-    teacherNotes: string;
+    teacherNotes?: string;
     aiInstructions?: string;
     generalAiInstructions?: string;
     subjectAiInstructions?: string;
     attachment?: ReportAttachment;
+    date?: string;
+    teacherName?: string;
+    lessonNumber?: number;
+    lessonDuration?: string;
+    includeStudentName?: boolean;
+    includeTeacherName?: boolean;
+    includeLessonNumber?: boolean;
+    includeDuration?: boolean;
+    includeLessonDate?: boolean;
+    preferredLanguage?: "ar" | "en";
+    durationMinutes?: number;
+    attendanceStatus?: string;
+    homeworkStatus?: string;
+    classEvents?: string;
+    homeworkNotes?: string;
+    overallEvaluation?: string;
   }) => Promise<string>;
+  onAddReport?: (report: Omit<GeneratedReport, "id" | "createdAt">) => void;
+  onDeleteReport?: (reportId: string) => void;
+  onToggleArchiveReport?: (reportId: string) => void;
+  onArchiveEndedCycle?: (params: {
+    studentId: string;
+    archiveGroupName: string;
+    newCycleStartDate: string;
+    newCycleName: string;
+    resetLessonBalance: boolean;
+  }) => void;
 }
 
 export const GroupsView: React.FC<GroupsViewProps> = ({
@@ -114,7 +142,11 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
   onRecordPayment,
   onAddExamRecord,
   onSaveAttendanceAndNotes,
-  onGenerateReportAi
+  onGenerateReportAi,
+  onAddReport,
+  onDeleteReport,
+  onToggleArchiveReport,
+  onArchiveEndedCycle
 }) => {
   const isArabic = settings.preferredLanguage === "ar";
   const [activeTab, setActiveTab] = useState<"groups" | "private">("groups");
@@ -134,6 +166,11 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
   const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
   const [whatsappGroupLink, setWhatsappGroupLink] = useState("");
   const [parentWhatsapp, setParentWhatsapp] = useState("");
+
+  // Standalone Full-Page Student Personal Report State
+  const [studentForPersonalReport, setStudentForPersonalReport] = useState<Student | null>(null);
+  const [groupForStudentPicker, setGroupForStudentPicker] = useState<{ group: Group; students: Student[] } | null>(null);
+  const [studentPickerSearch, setStudentPickerSearch] = useState("");
 
   // Standalone Full-Page Group Report State
   const [groupForReport, setGroupForReport] = useState<Group | null>(null);
@@ -495,7 +532,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
         const payloadStudents = groupStudentObjs.map(st => {
           const att = attendanceMap[st.id]?.attendance === "absent" ? "غائب" : "حاضر";
           const hwStatus = attendanceMap[st.id]?.homeworkStatus;
-          const hw = hwStatus === "not_done" ? "غير منجز" : hwStatus === "partial" ? "أنجز بعضه" : "منجز";
+          const hw = (hwStatus as string) === "not_done" ? "غير منجز" : (hwStatus as string) === "partial" || (hwStatus as string) === "late" ? "أنجز بعضه" : "منجز";
           return {
             name: st.fullName,
             attendance: att,
@@ -632,9 +669,13 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
     setEditStudentLessonCost(student.lessonCost || 50);
   };
 
-  const handleSaveEditStudent = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!studentToEdit || !editStudentName.trim()) return;
+  const handleSaveEditStudent = (e?: React.FormEvent) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!studentToEdit) return;
+    if (!editStudentName.trim()) {
+      alert(isArabic ? "يرجى كتابة اسم الطالب بالكامل" : "Please enter student name");
+      return;
+    }
 
     if (onEditStudent) {
       onEditStudent(studentToEdit.id, {
@@ -676,6 +717,26 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
     setStudentForExam(null);
   };
 
+  // Render Standalone Student Personal Report Page if active
+  if (studentForPersonalReport) {
+    const liveStudent = students.find(s => s.id === studentForPersonalReport.id) || studentForPersonalReport;
+    return (
+      <StudentPersonalReportView
+        student={liveStudent}
+        settings={settings}
+        reports={reports}
+        attendanceRecords={attendanceRecords}
+        isArabic={isArabic}
+        onBack={() => setStudentForPersonalReport(null)}
+        onAddReport={onAddReport || (() => {})}
+        onDeleteReport={onDeleteReport || (() => {})}
+        onToggleArchiveReport={onToggleArchiveReport}
+        onArchiveEndedCycle={onArchiveEndedCycle}
+        onGenerateReportAi={onGenerateReportAi}
+      />
+    );
+  }
+
   // Render Standalone Group Report Page if active
   if (groupForReport) {
     return (
@@ -685,6 +746,40 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
         settings={settings}
         isArabic={isArabic}
         onBack={() => setGroupForReport(null)}
+        onSaveReport={(reportData) => {
+          if (onAddReport) {
+            onAddReport({
+              studentId: `group_${groupForReport.id}`,
+              studentName: groupForReport.name,
+              subject: groupForReport.subject || "عام",
+              date: reportData.date,
+              teacherName: reportData.teacherName || settings.teacherName,
+              reportText: reportData.finalReportText,
+              generatedText: reportData.finalReportText,
+              teacherNotes: reportData.generalNotes,
+              attendance: "present",
+              deductCost: false,
+              aiInstructions: ""
+            });
+          }
+
+          if (onSaveAttendanceAndNotes && reportData.items && Object.keys(reportData.items).length > 0) {
+            const attendanceList = Object.entries(reportData.items).map(([studentId, item]) => ({
+              studentId,
+              attendance: (item.attendance === "absent" ? "absent" : "present") as AttendanceStatus,
+              homeworkStatus: (item.homework === "not_done" ? "not_done" : item.homework === "partial" ? "partial" : "done") as HomeworkStatus
+            }));
+
+            const targetLessonId = `les_grp_${groupForReport.id}_${reportData.date}`;
+            onSaveAttendanceAndNotes(
+              targetLessonId,
+              attendanceList,
+              reportData.generalNotes,
+              "",
+              reportData.finalReportText
+            );
+          }
+        }}
       />
     );
   }
@@ -841,12 +936,29 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
 
                 <div className="mt-3 pt-2 border-t border-slate-100 flex flex-col gap-1.5">
                   <div className="flex items-center gap-1.5">
+                    {/* 🌟 نظام التقرير الشخصي Button */}
                     <button
-                      onClick={() => handleOpenAttendanceSession(group)}
-                      className="flex-1 py-1.5 px-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition shadow-2xs flex items-center justify-center gap-1"
+                      type="button"
+                      onClick={() => {
+                        const groupStudents = students.filter(s =>
+                          (group.studentIds && group.studentIds.includes(s.id)) || s.groupId === group.id
+                        );
+                        if (groupStudents.length === 0) {
+                          alert(isArabic ? "لا يوجد طلاب مقيدون في هذه المجموعة لفتح تقرير شخصي." : "No students enrolled in this group yet.");
+                          return;
+                        }
+                        if (groupStudents.length === 1) {
+                          setStudentForPersonalReport(groupStudents[0]);
+                        } else {
+                          setStudentPickerSearch("");
+                          setGroupForStudentPicker({ group, students: groupStudents });
+                        }
+                      }}
+                      title={isArabic ? "فتح نظام التقرير الشخصي لطلاب المجموعة" : "Student Personal Report"}
+                      className="flex-1 py-1.5 px-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs transition shadow-2xs flex items-center justify-center gap-1.5"
                     >
-                      <Play className="w-3 h-3 fill-current shrink-0" />
-                      <span>{isArabic ? "بدء الحصة" : "Launch"}</span>
+                      <Sparkles className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                      <span>{isArabic ? "التقرير الشخصي" : "Personal Report"}</span>
                     </button>
 
                     {/* 📋 تقرير المجموعة Button */}
@@ -973,11 +1085,34 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
 
               <div className="mt-3 pt-2 border-t border-slate-100 flex items-center justify-between gap-1.5">
                 <button
-                  onClick={() => handleOpenAttendanceSession(undefined, prv)}
-                  className="flex-1 py-1.5 px-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs transition shadow-2xs flex items-center justify-center gap-1"
+                  type="button"
+                  onClick={() => {
+                    const st = students.find(s => s.id === prv.studentId || (s.fullName && prv.studentName && s.fullName.trim().toLowerCase() === prv.studentName.trim().toLowerCase()));
+                    if (st) {
+                      setStudentForPersonalReport(st);
+                    } else {
+                      const fallbackStudent: Student = {
+                        id: prv.studentId || `prv_${prv.id}`,
+                        fullName: prv.studentName,
+                        studentPhone: prv.phone || "",
+                        parentContact: prv.phone || "",
+                        subject: prv.subject,
+                        academicYear: prv.academicYear || "",
+                        studyType: "private",
+                        status: "active",
+                        paymentStatus: "paid",
+                        lessonCost: prv.fee || 50,
+                        totalPaidAmount: 0,
+                        createdAt: new Date().toISOString()
+                      };
+                      setStudentForPersonalReport(fallbackStudent);
+                    }
+                  }}
+                  title={isArabic ? "فتح نظام التقرير الشخصي للطالب" : "Student Personal Report"}
+                  className="flex-1 py-1.5 px-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs transition shadow-2xs flex items-center justify-center gap-1.5"
                 >
-                  <Play className="w-3 h-3 fill-current shrink-0" />
-                  <span>{isArabic ? "بدء الحصة" : "Launch"}</span>
+                  <Sparkles className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                  <span>{isArabic ? "التقرير الشخصي" : "Personal Report"}</span>
                 </button>
 
                 {/* Edit Private Lesson */}
@@ -1480,6 +1615,10 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
             setSelectedGroupForDetails(null);
             setGroupForReport(grp);
           }}
+          onOpenStudentPersonalReport={st => {
+            setSelectedGroupForDetails(null);
+            setStudentForPersonalReport(st);
+          }}
           onLaunchAttendance={grp => {
             setSelectedGroupForDetails(null);
             handleOpenAttendanceSession(grp);
@@ -1516,6 +1655,11 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
           paymentTransactions={paymentTransactions}
           reports={reports}
           onClose={() => setStudentForProfile(null)}
+          onOpenPersonalReport={st => {
+            setStudentForProfile(null);
+            setSelectedGroupForDetails(null);
+            setStudentForPersonalReport(st);
+          }}
           onOpenPaymentModal={st => {
             setStudentForPayment(st);
             setPayAmount(st.lessonCost ? st.lessonCost * 8 : 400);
@@ -1697,7 +1841,11 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-xs"
+                  onClick={e => {
+                    e.preventDefault();
+                    handleSaveEditStudent();
+                  }}
+                  className="px-4 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-xs cursor-pointer"
                 >
                   {isArabic ? "حفظ التعديلات" : "Save Changes"}
                 </button>
@@ -2183,7 +2331,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
                 <div className="p-4 rounded-2xl bg-slate-900 text-slate-100 text-xs space-y-3">
                   <div className="flex items-center justify-between pb-2 border-b border-slate-800">
                     <span className="font-bold text-sky-400">
-                      {isArabic ? "التقرير المنشأ بـ GoStars AI" : "Generated AI Report"}
+                      {isArabic ? "التقرير المنشأ بالذكاء الاصطناعي" : "Generated AI Report"}
                     </span>
                     <button
                       onClick={() => {
@@ -2225,6 +2373,89 @@ export const GroupsView: React.FC<GroupsViewProps> = ({
               >
                 <CheckCircle2 className="w-4 h-4" />
                 <span>{isArabic ? "حفظ الحضور والخصم التلقائي" : "Save Attendance & Deduct"}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Select Student for Personal Report from Group Card */}
+      {groupForStudentPicker && (
+        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-in fade-in">
+          <div className="bg-white border border-slate-200 rounded-3xl max-w-md w-full shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+            <div className="p-4 bg-gradient-to-r from-purple-700 to-indigo-700 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center">
+                  <Sparkles className="w-4 h-4 text-amber-300" />
+                </div>
+                <div>
+                  <h4 className="font-black text-sm">{isArabic ? "نظام التقرير الشخصي للطالب" : "Student Personal Report"}</h4>
+                  <p className="text-[11px] text-purple-200">{groupForStudentPicker.group.name} ({groupForStudentPicker.students.length} {isArabic ? "طالب" : "students"})</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setGroupForStudentPicker(null)}
+                className="p-1 rounded-lg bg-white/10 hover:bg-white/20 text-white transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {groupForStudentPicker.students.length > 3 && (
+              <div className="p-3 border-b border-slate-100 bg-slate-50">
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 absolute right-3 top-2.5 text-slate-400" />
+                  <input
+                    type="text"
+                    value={studentPickerSearch}
+                    onChange={e => setStudentPickerSearch(e.target.value)}
+                    placeholder={isArabic ? "بحث في طلاب المجموعة..." : "Search student..."}
+                    className="w-full bg-white border border-slate-200 rounded-xl pr-8 pl-3 py-1.5 text-xs text-slate-800 font-medium focus:outline-none focus:border-purple-500"
+                  />
+                </div>
+              </div>
+            )}
+
+            <div className="p-3 overflow-y-auto flex-1 divide-y divide-slate-100 space-y-1">
+              {groupForStudentPicker.students
+                .filter(s => !studentPickerSearch.trim() || s.fullName.toLowerCase().includes(studentPickerSearch.trim().toLowerCase()))
+                .map(st => (
+                  <div
+                    key={st.id}
+                    onClick={() => {
+                      setGroupForStudentPicker(null);
+                      setStudentForPersonalReport(st);
+                    }}
+                    className="p-2.5 rounded-xl hover:bg-purple-50/70 border border-transparent hover:border-purple-200 transition cursor-pointer flex items-center justify-between gap-2 group"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-8 h-8 rounded-lg bg-purple-100 text-purple-800 font-black flex items-center justify-center text-xs group-hover:bg-purple-600 group-hover:text-white transition shrink-0">
+                        {st.fullName ? st.fullName.charAt(0) : "ط"}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-bold text-xs text-slate-900 group-hover:text-purple-900 truncate">{st.fullName}</p>
+                        <p className="text-[10.5px] text-slate-500">{st.academicYear || st.phone || (isArabic ? "طالب مقيد" : "Student")}</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="py-1 px-3 rounded-lg bg-purple-600 group-hover:bg-purple-700 text-white font-bold text-[11px] flex items-center gap-1 shadow-2xs shrink-0"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                      <span>{isArabic ? "فتح التقرير" : "Report"}</span>
+                    </button>
+                  </div>
+                ))}
+            </div>
+
+            <div className="p-3 border-t border-slate-100 bg-slate-50 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setGroupForStudentPicker(null)}
+                className="px-4 py-1.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs transition"
+              >
+                {isArabic ? "إلغاء" : "Cancel"}
               </button>
             </div>
           </div>

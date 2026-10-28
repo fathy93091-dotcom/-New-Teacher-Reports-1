@@ -36,7 +36,14 @@ import {
   FolderTree,
   GitFork,
   Tag,
-  UserPlus
+  UserPlus,
+  Eye,
+  EyeOff,
+  HelpCircle,
+  Printer,
+  Archive,
+  ArchiveRestore,
+  FolderArchive
 } from "lucide-react";
 import {
   CombinedStudentGroup,
@@ -51,10 +58,35 @@ import {
   ReportAttachment,
   StudentStatus,
   AttendanceStatus,
-  HomeworkStatus
+  HomeworkStatus,
+  BillingType,
+  isDailyPersonalReport,
+  isMonthlyComprehensiveReport,
+  deduplicateReportsList,
+  mergeDirectAndAttendanceReports
 } from "../types";
-import { calculateStudentFinancials, StudentFinancialSummary } from "../lib/financeUtils";
+import {
+  calculateStudentFinancials,
+  StudentFinancialSummary,
+  formatHoursHuman,
+  generateStudentStatementWhatsAppMessage
+} from "../lib/financeUtils";
+import { matchesStudentRecord, isAttendedOrDeductedRecord } from "../lib/financeEngine";
+import { ComprehensiveMonthlyReportModal } from "./ComprehensiveMonthlyReportModal";
+import {
+  isQuranComprehensiveReportEligible,
+  isStudentEligibleForMonthlyReport,
+  getStudentEligibleQuranSubject
+} from "../lib/monthlyQuranReport";
+import { getReportTitle } from "../lib/reportTitleUtils";
 import { StudentPersonalReportView } from "./StudentPersonalReportView";
+import {
+  getActiveCycleInfo,
+  isReportInActiveCycle,
+  groupArchivedReports
+} from "../lib/reportArchiveEngine";
+import { ArchiveCycleModal } from "./ArchiveCycleModal";
+import { ArchivedReportsFolderList } from "./ArchivedReportsFolderList";
 
 const COMMON_CURRICULUMS = [
   { label: "منهج مصري (عربي)", flag: "🇪🇬" },
@@ -96,6 +128,8 @@ const COMMON_SUBJECT_SUGGESTIONS = [
   "العلوم",
   "الدراسات",
   "الحاسب الآلي",
+  "قرآن كريم",
+  "Quran, Arabic and Islamic Studies",
   "القرآن الكريم",
   "الفرنساوي"
 ];
@@ -117,7 +151,7 @@ interface CombinedStudentFileModalProps {
   onAddStudentToGroup?: (groupId: string, studentId: string) => void;
   onRemoveStudentFromGroup?: (groupId: string, studentId: string) => void;
   onRecordPayment?: (studentId: string, amount: number, notes?: string, date?: string) => void;
-  onEditStudent?: (studentId: string, updated: Partial<Student>) => void;
+  onEditStudent?: (studentId: string, updated: Partial<Student>, applyToPrevious?: boolean) => void;
   onDeleteStudent?: (studentId: string) => void;
   onUpdateStudentStatus?: (studentId: string, status: StudentStatus) => void;
   onAddExamRecord?: (studentId: string, examName: string, score: number, totalScore: number, date: string) => void;
@@ -127,13 +161,37 @@ interface CombinedStudentFileModalProps {
   onGenerateReportAi?: (payload: {
     studentName: string;
     subject: string;
-    teacherNotes: string;
+    date?: string;
+    teacherName?: string;
+    lessonNumber?: number;
+    lessonDuration?: string;
+    includeStudentName?: boolean;
+    includeTeacherName?: boolean;
+    includeLessonNumber?: boolean;
+    includeDuration?: boolean;
+    includeLessonDate?: boolean;
+    preferredLanguage?: "ar" | "en";
+    durationMinutes?: number;
+    attendanceStatus?: string;
+    homeworkStatus?: string;
+    teacherNotes?: string;
+    classEvents?: string;
+    homeworkNotes?: string;
+    overallEvaluation?: string;
     aiInstructions?: string;
     generalAiInstructions?: string;
     subjectAiInstructions?: string;
     attachment?: ReportAttachment;
   }) => Promise<string>;
   onOpenEditStudentModal?: (student: Student) => void;
+  onOpenMonthlyQuranReport?: (student: Student, subject: string) => void;
+  onArchiveEndedCycle?: (params: {
+    studentId: string;
+    archiveGroupName: string;
+    newCycleStartDate: string;
+    newCycleName: string;
+    resetLessonBalance: boolean;
+  }) => void;
 }
 
 export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> = ({
@@ -161,7 +219,9 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
   onDeleteReport = (_reportId: string) => {},
   onToggleArchiveReport = (_reportId: string) => {},
   onGenerateReportAi,
-  onOpenEditStudentModal
+  onOpenEditStudentModal,
+  onOpenMonthlyQuranReport,
+  onArchiveEndedCycle
 }) => {
   const isArabic = isArabicProp !== undefined ? isArabicProp : (settings?.preferredLanguage !== "en");
   const isArabicLang = isArabic;
@@ -172,8 +232,11 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
     ? availableUnbundledStudents
     : studentList.filter(s => s && !targetGroupStudentIds.includes(s.id));
 
-  // Navigation Tabs inside Combined File: "overview" | "student_profile" | "sub_groups" | "manage"
-  const [activeTab, setActiveTab] = useState<"overview" | "student_profile" | "sub_groups" | "manage">("overview");
+  // Navigation Tabs inside Combined File: "overview" | "student_profile" | "reports" | "sub_groups" | "manage"
+  const [activeTab, setActiveTab] = useState<"overview" | "student_profile" | "reports" | "sub_groups" | "manage">("overview");
+  const [groupReportsStudentFilter, setGroupReportsStudentFilter] = useState<string>("all");
+  const [groupReportsSearchQuery, setGroupReportsSearchQuery] = useState<string>("");
+  const [monthlyReportModalTarget, setMonthlyReportModalTarget] = useState<{ student: Student; subject: string } | null>(null);
 
   // Sub-groups (دمج داخل الدمج) state
   const subGroupsList: SubCombinedGroup[] = Array.isArray(group?.subGroups) ? group.subGroups : [];
@@ -203,7 +266,13 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
   const activeStudent = groupStudents.find(s => s.id === selectedStudentId) || groupStudents[0];
 
   // Sub-tabs for the internal student profile
-  const [studentProfileSubTab, setStudentProfileSubTab] = useState<"reports" | "finance" | "attendance">("reports");
+  const [studentProfileSubTab, setStudentProfileSubTab] = useState<"daily_reports" | "monthly_reports" | "finance" | "attendance">("daily_reports");
+  const [reportArchiveFilter, setReportArchiveFilter] = useState<"active" | "archived" | "all">("all");
+  const [archiveSearchQuery, setArchiveSearchQuery] = useState<string>("");
+  const [archiveCycleTargetStudent, setArchiveCycleTargetStudent] = useState<Student | null>(null);
+
+  // Filter for group reports tab by type: all, daily, monthly
+  const [groupReportsTypeFilter, setGroupReportsTypeFilter] = useState<"all" | "daily" | "monthly">("all");
 
   // Selected student for full-screen personal report
   const [studentForPersonalReport, setStudentForPersonalReport] = useState<Student | null>(null);
@@ -224,6 +293,12 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
 
   // WhatsApp Statement modal/copy state
   const [showStatementModal, setShowStatementModal] = useState(false);
+
+  // Confirmation modal states to prevent accidental deletions
+  const [reportToDeleteId, setReportToDeleteId] = useState<string | null>(null);
+  const [subGroupToDelete, setSubGroupToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [studentToRemoveFromGroup, setStudentToRemoveFromGroup] = useState<Student | null>(null);
+  const [showDisbandGroupConfirm, setShowDisbandGroupConfirm] = useState(false);
   const [copiedStatement, setCopiedStatement] = useState(false);
   const [copiedGroupLink, setCopiedGroupLink] = useState(false);
 
@@ -257,7 +332,6 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [copiedReportId, setCopiedReportId] = useState<string | null>(null);
   const [expandedReportIds, setExpandedReportIds] = useState<string[]>([]);
-  const [reportArchiveFilter, setReportArchiveFilter] = useState<"active" | "archived" | "all">("active");
 
   // Dedicated In-Modal Student Editor State
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
@@ -283,14 +357,22 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
     setEditWhatsappGroupLink(st.whatsappGroupLink || "");
     setEditNotes(st.notes || "");
     setEditStudentStatus(st.status || "active");
+    setEditApplyToPrevious(true);
+    setShowApplyConfirmDialog(false);
+    setPendingStudentDataToSave(null);
 
+    const effectiveBillingType: BillingType = st.billingType || (st.subjects && st.subjects[0]?.billingType) || "monthly_elapsed_lessons";
     if (st.subjects && st.subjects.length > 0) {
       setEditStudentSubjects(
         st.subjects.map(s => ({
           ...s,
-          rateType: s.rateType || "per_lesson",
-          hourlyCost: s.hourlyCost || s.lessonCost || 100,
-          defaultDurationMinutes: s.defaultDurationMinutes || 60
+          billingType: s.billingType || effectiveBillingType,
+          rateType: s.rateType || st.rateType || "per_lesson",
+          hourlyCost: s.hourlyCost !== undefined ? Number(s.hourlyCost) : (st.hourlyCost || s.lessonCost || 100),
+          lessonCost: s.lessonCost !== undefined ? Number(s.lessonCost) : (st.lessonCost || 100),
+          defaultDurationMinutes: s.defaultDurationMinutes || st.defaultDurationMinutes || 60,
+          monthlyCost: s.monthlyCost !== undefined ? Number(s.monthlyCost) : (s.billingType === "monthly" ? 400 : 0),
+          lessonsPerMonth: s.lessonsPerMonth || st.lessonsPerMonth || 8
         }))
       );
     } else {
@@ -299,17 +381,21 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
           id: `subj_edit_1`,
           subject: st.subject || "الرياضيات",
           studyType: st.studyType || "private",
-          billingType: st.billingType || "monthly",
+          billingType: effectiveBillingType,
           rateType: st.rateType || "per_lesson",
           lessonCost: st.lessonCost || 100,
           hourlyCost: st.hourlyCost || st.lessonCost || 100,
           defaultDurationMinutes: st.defaultDurationMinutes || 60,
-          monthlyCost: st.monthlyCost || 400,
+          monthlyCost: st.monthlyCost !== undefined ? Number(st.monthlyCost) : (effectiveBillingType === "monthly" ? 400 : 0),
           lessonsPerMonth: st.lessonsPerMonth || 8
         }
       ]);
     }
   };
+
+  const [editApplyToPrevious, setEditApplyToPrevious] = useState<boolean>(true);
+  const [showApplyConfirmDialog, setShowApplyConfirmDialog] = useState<boolean>(false);
+  const [pendingStudentDataToSave, setPendingStudentDataToSave] = useState<Partial<Student> | null>(null);
 
   const handleAddEditSubjectField = () => {
     const nextIdx = editStudentSubjects.length + 1;
@@ -323,12 +409,12 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
         id: `subj_edit_${Date.now()}_${nextIdx}`,
         subject: available,
         studyType: "private",
-        billingType: "monthly",
+        billingType: "monthly_elapsed_lessons",
         rateType: "per_lesson",
         lessonCost: 100,
         hourlyCost: 100,
         defaultDurationMinutes: 60,
-        monthlyCost: 400,
+        monthlyCost: 0,
         lessonsPerMonth: 8
       }
     ]);
@@ -345,13 +431,37 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
     );
   };
 
-  const handleSaveEditStudentDirectly = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingStudent || !editFullName.trim() || editStudentSubjects.length === 0) return;
+  const handleSaveEditStudentDirectly = (e?: React.FormEvent) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!editingStudent) {
+      alert(isArabic ? "لم يتم تحديد طالب للتعديل" : "No student selected for editing");
+      return;
+    }
+    if (!editFullName.trim()) {
+      alert(isArabic ? "يرجى كتابة اسم الطالب بالكامل" : "Please enter student full name");
+      return;
+    }
 
-    const subjectsSummary = editStudentSubjects.map(s => s.subject.trim()).filter(Boolean).join(" + ") || "عام";
-    const primaryStudyType = editStudentSubjects.some(s => s.studyType === "group") ? "group" : "private";
-    const primarySub = editStudentSubjects[0];
+    const fallbackSub: StudentSubjectPlan = {
+      id: `subj_edit_${Date.now()}`,
+      subject: editingStudent.subject || "عام",
+      studyType: "private",
+      billingType: "monthly_elapsed_lessons",
+      rateType: "per_lesson",
+      lessonCost: editingStudent.lessonCost || 100,
+      hourlyCost: editingStudent.hourlyCost || 100,
+      defaultDurationMinutes: editingStudent.defaultDurationMinutes || 60,
+      monthlyCost: editingStudent.monthlyCost || 0,
+      lessonsPerMonth: editingStudent.lessonsPerMonth || 8
+    };
+
+    const effectiveSubjects = editStudentSubjects.length > 0
+      ? editStudentSubjects
+      : [fallbackSub];
+
+    const subjectsSummary = effectiveSubjects.map(s => s.subject.trim()).filter(Boolean).join(" + ") || "عام";
+    const primaryStudyType = effectiveSubjects.some(s => s.studyType === "group") ? "group" : "private";
+    const primarySub = effectiveSubjects[0];
 
     const updatedData: Partial<Student> = {
       fullName: editFullName.trim(),
@@ -363,37 +473,63 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
       whatsappGroupLink: editWhatsappGroupLink.trim() || undefined,
       studyType: primaryStudyType,
       subject: subjectsSummary,
-      subjects: editStudentSubjects,
-      billingType: primarySub.billingType || "monthly",
+      subjects: effectiveSubjects,
+      billingType: primarySub.billingType || editingStudent.billingType || "monthly_elapsed_lessons",
       rateType: primarySub.rateType || "per_lesson",
-      lessonCost: primarySub.lessonCost || 100,
-      hourlyCost: primarySub.hourlyCost || primarySub.lessonCost || 100,
+      lessonCost: primarySub.lessonCost !== undefined ? Number(primarySub.lessonCost) : 100,
+      hourlyCost: primarySub.hourlyCost !== undefined ? Number(primarySub.hourlyCost) : (primarySub.lessonCost || 100),
       defaultDurationMinutes: primarySub.defaultDurationMinutes || 60,
-      monthlyCost: primarySub.monthlyCost || 400,
+      monthlyCost: primarySub.monthlyCost !== undefined ? Number(primarySub.monthlyCost) : 0,
       lessonsPerMonth: primarySub.lessonsPerMonth || 8,
       notes: editNotes,
       status: editStudentStatus
     };
 
     if (onEditStudent) {
-      onEditStudent(editingStudent.id, updatedData);
+      onEditStudent(editingStudent.id, updatedData, editApplyToPrevious);
     }
     if (onUpdateStudentStatus && editStudentStatus !== editingStudent.status) {
       onUpdateStudentStatus(editingStudent.id, editStudentStatus);
     }
 
+    const savedName = updatedData.fullName || editFullName;
     setEditingStudent(null);
-    setPaymentSuccessMsg(isArabic ? `تم حفظ وتحديث بيانات الطالب (${editFullName}) بنجاح!` : "Student updated successfully!");
+    setShowApplyConfirmDialog(false);
+    setPendingStudentDataToSave(null);
+    setPaymentSuccessMsg(isArabic ? `تم حفظ وتحديث بيانات الطالب (${savedName}) بنجاح!` : "Student updated successfully!");
+    setTimeout(() => setPaymentSuccessMsg(""), 4000);
+  };
+
+  const setPendingStudentDataDataOrSave = (data: Partial<Student>) => {
+    setPendingStudentDataToSave(data);
+    setShowApplyConfirmDialog(true);
+  };
+
+  const confirmExecuteSaveStudentDirectly = (applyToPrevious: boolean) => {
+    if (!editingStudent || !pendingStudentDataToSave) return;
+    if (onEditStudent) {
+      onEditStudent(editingStudent.id, pendingStudentDataToSave, applyToPrevious);
+    }
+    if (onUpdateStudentStatus && editStudentStatus !== editingStudent.status) {
+      onUpdateStudentStatus(editingStudent.id, editStudentStatus);
+    }
+
+    const savedName = pendingStudentDataToSave.fullName || editFullName;
+    setEditingStudent(null);
+    setShowApplyConfirmDialog(false);
+    setPendingStudentDataToSave(null);
+    setPaymentSuccessMsg(isArabic ? `تم حفظ وتحديث بيانات الطالب (${savedName}) بنجاح!` : "Student updated successfully!");
     setTimeout(() => setPaymentSuccessMsg(""), 4000);
   };
 
   // Calculate Combined Financials across all students in group
   const studentsFinancials: { student: Student; summary: StudentFinancialSummary }[] = groupStudents.map(st => ({
     student: st,
-    summary: calculateStudentFinancials(st, attendanceRecords)
+    summary: calculateStudentFinancials(st, attendanceRecords, paymentTransactions, reports)
   }));
 
   const totalAttendedLessonsAll = studentsFinancials.reduce((sum, item) => sum + item.summary.totalAttendedLessons, 0);
+  const totalTaughtHoursAll = Number(studentsFinancials.reduce((sum, item) => sum + (item.summary.totalTaughtHours || 0), 0).toFixed(2));
   const totalAccruedCostAll = studentsFinancials.reduce((sum, item) => sum + item.summary.totalAccruedCost, 0);
   const totalPaidAmountAll = studentsFinancials.reduce((sum, item) => sum + item.summary.totalPaidAmount, 0);
   const totalNetBalanceAll = totalPaidAmountAll - totalAccruedCostAll;
@@ -532,6 +668,7 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
         lines.push(`   📚 المادة: ${st.subject}`);
       }
       lines.push(`   🎯 الحصص المنفذة: ${fin.totalAttendedLessons} حصة`);
+      lines.push(`   ⏱️ عدد الساعات المنفذة: ${fin.totalTaughtHours ?? Number(((fin.totalAttendedLessons * 60) / 60).toFixed(1))} ساعة (${formatHoursHuman(fin.totalTaughtHours, isArabic)})`);
       lines.push(`   💵 إجمالي المسدد: ${fin.totalPaidAmount} ج.م`);
       if (fin.amountDue > 0) {
         lines.push(`   ⚠️ المستحق المطلوب سداده: ${fin.amountDue} ج.م`);
@@ -546,6 +683,7 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
     lines.push(`📈 *الملخص الإجمالي للملف المجمع:*`);
     lines.push(`• إجمالي عدد الطلاب: ${groupStudents.length} طلاب`);
     lines.push(`• إجمالي الحصص المنفذة للجميع: ${totalAttendedLessonsAll} حصة`);
+    lines.push(`• إجمالي الساعات المنفذة للجميع: ${totalTaughtHoursAll} ساعة (${formatHoursHuman(totalTaughtHoursAll, isArabic)})`);
     lines.push(`• إجمالي المبالغ المسددة: ${totalPaidAmountAll} ج.م`);
     if (totalAmountDueAll > 0) {
       lines.push(`• 🔴 *إجمالي المستحق المطلوب سداده:* ${totalAmountDueAll} ج.م`);
@@ -570,10 +708,11 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
     const subStudents = groupStudents.filter(s => (sg.studentIds || []).includes(s.id));
     const subFin = subStudents.map(st => ({
       student: st,
-      summary: calculateStudentFinancials(st, attendanceRecords)
+      summary: calculateStudentFinancials(st, attendanceRecords, paymentTransactions, reports)
     }));
 
     const totalAtt = subFin.reduce((sum, item) => sum + item.summary.totalAttendedLessons, 0);
+    const totalHoursSub = Number(subFin.reduce((sum, item) => sum + (item.summary.totalTaughtHours || 0), 0).toFixed(2));
     const totalPaid = subFin.reduce((sum, item) => sum + item.summary.totalPaidAmount, 0);
     const totalCost = subFin.reduce((sum, item) => sum + item.summary.totalAccruedCost, 0);
     const netBal = totalPaid - totalCost;
@@ -602,6 +741,7 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
         lines.push(`   📚 المادة: ${st.subject}`);
       }
       lines.push(`   🎯 الحصص المنفذة: ${f.totalAttendedLessons} حصة`);
+      lines.push(`   ⏱️ عدد الساعات المنفذة: ${f.totalTaughtHours ?? Number(((f.totalAttendedLessons * 60) / 60).toFixed(1))} ساعة (${formatHoursHuman(f.totalTaughtHours, isArabic)})`);
       lines.push(`   💵 إجمالي المسدد: ${f.totalPaidAmount} ج.م`);
       if (f.amountDue > 0) {
         lines.push(`   ⚠️ المستحق المطلوب سداده: ${f.amountDue} ج.م`);
@@ -616,6 +756,7 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
     lines.push(`📈 *الملخص الإجمالي للدمج الفرعي:*`);
     lines.push(`• عدد الطلاب: ${subStudents.length} طلاب`);
     lines.push(`• إجمالي الحصص المنفذة للدمج: ${totalAtt} حصة`);
+    lines.push(`• إجمالي الساعات المنفذة للدمج: ${totalHoursSub} ساعة (${formatHoursHuman(totalHoursSub, isArabic)})`);
     lines.push(`• إجمالي المبالغ المسددة: ${totalPaid} ج.م`);
     if (dueAmt > 0) {
       lines.push(`• 🔴 *إجمالي المستحق المطلوب سداده:* ${dueAmt} ج.م`);
@@ -706,19 +847,17 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
 
   // Delete Sub-Group
   const handleDeleteSubGroupClick = (subGroupId: string, subName: string) => {
-    if (
-      confirm(
-        isArabic
-          ? `هل أنت متأكد من رغبتك في حذف الدمج الفرعي (${subName})؟\n(ملاحظة: سيظل الطلاب مسجلين في هذا الملف المجمع الرئيسي ولا تُحذف أي بيانات لهم).`
-          : `Delete sub-group (${subName})? Students will remain in the parent group.`
-      )
-    ) {
-      const currentSubs = Array.isArray(group.subGroups) ? group.subGroups : [];
-      const nextSubs = currentSubs.filter(sg => sg.id !== subGroupId);
-      onUpdateGroup(group.id, { subGroups: nextSubs });
-      setPaymentSuccessMsg(isArabic ? "تم حذف الدمج الفرعي بنجاح." : "Sub-group deleted.");
-      setTimeout(() => setPaymentSuccessMsg(""), 3500);
-    }
+    setSubGroupToDelete({ id: subGroupId, name: subName });
+  };
+
+  const confirmDeleteSubGroup = () => {
+    if (!subGroupToDelete) return;
+    const currentSubs = Array.isArray(group.subGroups) ? group.subGroups : [];
+    const nextSubs = currentSubs.filter(sg => sg.id !== subGroupToDelete.id);
+    onUpdateGroup(group.id, { subGroups: nextSubs });
+    setPaymentSuccessMsg(isArabic ? "تم حذف الدمج الفرعي بنجاح." : "Sub-group deleted.");
+    setTimeout(() => setPaymentSuccessMsg(""), 3500);
+    setSubGroupToDelete(null);
   };
 
   // Sub-Group Payment Submit
@@ -731,7 +870,7 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
     const subStudentObjs = groupStudents.filter(s => activeSubGroupForPayment.studentIds.includes(s.id));
     const subFinancials = subStudentObjs.map(st => ({
       student: st,
-      summary: calculateStudentFinancials(st, attendanceRecords)
+      summary: calculateStudentFinancials(st, attendanceRecords, paymentTransactions)
     }));
 
     if (subGroupPayTarget === "auto_due") {
@@ -903,21 +1042,54 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
     handleOpenWhatsAppChooser(generateStatementText(), isArabic ? `كشف حساب مالي - ${group.name}` : `Statement - ${group.name}`);
   };
 
-  // If user requested full screen Personal Report View for one of the students
+  // If user requested Personal Report View for one of the students
   if (studentForPersonalReport) {
+    const livePersonalStudent = studentList.find(s => s.id === studentForPersonalReport.id) || studentForPersonalReport;
     return (
-      <StudentPersonalReportView
-        student={studentForPersonalReport}
-        settings={settings}
-        reports={reports}
-        attendanceRecords={attendanceRecords}
-        isArabic={isArabic}
-        onBack={() => setStudentForPersonalReport(null)}
-        onAddReport={onAddReport}
-        onDeleteReport={onDeleteReport}
-        onToggleArchiveReport={onToggleArchiveReport}
-        onGenerateReportAi={onGenerateReportAi}
-      />
+      <div className="fixed inset-0 z-[60] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 overflow-y-auto" dir={isArabic ? "rtl" : "ltr"}>
+        <div className="bg-slate-50 border border-slate-200 rounded-3xl w-full max-w-5xl shadow-2xl flex flex-col my-auto max-h-[94vh] overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+          {/* Top Header Bar */}
+          <div className="bg-gradient-to-r from-purple-900 via-indigo-950 to-slate-900 text-white p-3.5 sm:p-4 shrink-0 flex items-center justify-between gap-3 border-b border-purple-800/50">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-2xl bg-purple-500/20 border border-purple-400/30 text-purple-300 flex items-center justify-center font-black shadow-inner">
+                <Sparkles className="w-5 h-5 text-amber-300" />
+              </div>
+              <div>
+                <h3 className="font-black text-sm text-white flex items-center gap-2">
+                  <span>{isArabic ? `تقرير الطالب: ${livePersonalStudent.fullName}` : `Student Report: ${livePersonalStudent.fullName}`}</span>
+                  <span className="text-[11px] font-normal text-purple-300">
+                    ({isArabic ? `الملف المدمج: ${group.name}` : `Group: ${group.name}`})
+                  </span>
+                </h3>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setStudentForPersonalReport(null)}
+              className="px-3 py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-200 hover:text-white transition flex items-center gap-1.5 text-xs font-bold border border-slate-700 shadow-xs"
+            >
+              <ArrowLeft className={`w-4 h-4 ${isArabic ? "rotate-180" : ""}`} />
+              <span>{isArabic ? "الرجوع للملف المدمج" : "Back to Merged File"}</span>
+            </button>
+          </div>
+          {/* Modal Content */}
+          <div className="p-3 sm:p-6 overflow-y-auto flex-1 bg-slate-100/60">
+            <StudentPersonalReportView
+              student={livePersonalStudent}
+              settings={settings}
+              reports={reports}
+              attendanceRecords={attendanceRecords}
+              isArabic={isArabic}
+              onBack={() => setStudentForPersonalReport(null)}
+              onAddReport={onAddReport}
+              onDeleteReport={onDeleteReport}
+              onToggleArchiveReport={onToggleArchiveReport}
+              onArchiveEndedCycle={onArchiveEndedCycle}
+              onGenerateReportAi={onGenerateReportAi || (async () => "")}
+            />
+          </div>
+        </div>
+      </div>
     );
   }
 
@@ -1072,6 +1244,22 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
           </button>
 
           <button
+            onClick={() => setActiveTab("reports")}
+            className={`px-4 py-2.5 font-bold text-xs border-b-2 transition flex items-center gap-1.5 shrink-0 ${
+              activeTab === "reports"
+                ? "border-purple-600 text-purple-700 bg-white shadow-2xs"
+                : "border-transparent text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+            <span>
+              {isArabic
+                ? `📑 تقارير المتابعة والذكاء الاصطناعي`
+                : `📑 Reports & AI Follow-up`}
+            </span>
+          </button>
+
+          <button
             onClick={() => setActiveTab("sub_groups")}
             className={`px-4 py-2.5 font-bold text-xs border-b-2 transition flex items-center gap-1.5 shrink-0 ${
               activeTab === "sub_groups"
@@ -1131,14 +1319,15 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
                 </div>
               </div>
 
-              {/* Stat 2: Total Attended Lessons */}
+              {/* Stat 2: Total Attended Lessons & Hours */}
               <div className="p-3.5 rounded-2xl bg-blue-50/70 border border-blue-200/80 shadow-2xs">
                 <div className="text-[11px] font-bold text-blue-700 flex items-center justify-between mb-1">
-                  <span>{isArabic ? "إجمالي الحصص المنفذة" : "Total Attended"}</span>
+                  <span>{isArabic ? "إجمالي الحصص والساعات" : "Total Lessons & Hours"}</span>
                   <BookOpen className="w-4 h-4 text-blue-600" />
                 </div>
-                <div className="text-xl sm:text-2xl font-black text-slate-900">
-                  {totalAttendedLessonsAll} <span className="text-xs font-bold text-blue-600">{isArabic ? "حصة مجمعة" : "lessons"}</span>
+                <div className="text-xl sm:text-2xl font-black text-slate-900 flex items-baseline gap-1.5 flex-wrap">
+                  <span>{totalAttendedLessonsAll} <span className="text-xs font-bold text-blue-600">{isArabic ? "حصة مجمعة" : "lessons"}</span></span>
+                  <span className="text-sm font-bold text-indigo-700 font-sans">⏱️ {totalTaughtHoursAll} {isArabic ? "ساعة" : "hrs"}</span>
                 </div>
                 <div className="text-[10px] text-slate-500 mt-1 font-mono">
                   {isArabic ? `تكلفة الحصص: ${totalAccruedCostAll} ج.م` : `Accrued: ${totalAccruedCostAll} EGP`}
@@ -1498,7 +1687,7 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
                       <th className="py-2.5 px-3">{isArabic ? "اسم الطالب" : "Student Name"}</th>
                       <th className="py-2.5 px-3">{isArabic ? "المرحلة والمنهج" : "Grade & Curriculum"}</th>
                       <th className="py-2.5 px-3">{isArabic ? "المواد المسجل بها" : "Subjects"}</th>
-                      <th className="py-2.5 px-3 text-center">{isArabic ? "الحصص المنفذة" : "Attended"}</th>
+                      <th className="py-2.5 px-3 text-center">{isArabic ? "الحصص والساعات" : "Lessons & Hours"}</th>
                       <th className="py-2.5 px-3 text-center">{isArabic ? "المسدد" : "Paid"}</th>
                       <th className="py-2.5 px-3 text-center">{isArabic ? "الموقف المالي" : "Financial Status"}</th>
                       <th className="py-2.5 px-3 text-center">{isArabic ? "الإجراءات" : "Actions"}</th>
@@ -1560,6 +1749,9 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
                             <span className="font-bold text-blue-700">
                               {fin.totalAttendedLessons} {isArabic ? "حصة" : "lss"}
                             </span>
+                            <div className="text-[10px] text-indigo-700 font-bold">
+                              ⏱️ {fin.totalTaughtHours ?? Number(((fin.totalAttendedLessons * 60) / 60).toFixed(1))} {isArabic ? "ساعة" : "hrs"}
+                            </div>
                             <div className="text-[10px] text-slate-400 font-mono">
                               {fin.totalAccruedCost} ج.م
                             </div>
@@ -1692,7 +1884,7 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
                     const sgStudents = groupStudents.filter(s => (sg.studentIds || []).includes(s.id));
                     const sgFinancials = sgStudents.map(st => ({
                       student: st,
-                      summary: calculateStudentFinancials(st, attendanceRecords)
+                      summary: calculateStudentFinancials(st, attendanceRecords, paymentTransactions)
                     }));
                     const sgAttended = sgFinancials.reduce((sum, i) => sum + i.summary.totalAttendedLessons, 0);
                     const sgCost = sgFinancials.reduce((sum, i) => sum + i.summary.totalAccruedCost, 0);
@@ -1840,7 +2032,7 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
               </span>
               {groupStudents.map(st => {
                 const isSelected = st.id === activeStudent.id;
-                const fin = calculateStudentFinancials(st, attendanceRecords);
+                const fin = calculateStudentFinancials(st, attendanceRecords, paymentTransactions);
 
                 return (
                   <button
@@ -1914,54 +2106,110 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
                 </div>
               </div>
 
-              {/* Sub Tabs: Reports | Finance | Attendance */}
-              <div className="flex border-b border-slate-200">
-                <button
-                  onClick={() => setStudentProfileSubTab("reports")}
-                  className={`px-4 py-2 font-bold text-xs border-b-2 transition flex items-center gap-1.5 ${
-                    studentProfileSubTab === "reports"
-                      ? "border-purple-600 text-purple-700 bg-purple-50/50"
-                      : "border-transparent text-slate-500 hover:text-slate-800"
-                  }`}
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-purple-600" />
-                  <span>{isArabic ? "تقارير الطالب بالذكاء الاصطناعي" : "Student Reports & AI"}</span>
-                </button>
-                <button
-                  onClick={() => setStudentProfileSubTab("finance")}
-                  className={`px-4 py-2 font-bold text-xs border-b-2 transition flex items-center gap-1.5 ${
-                    studentProfileSubTab === "finance"
-                      ? "border-blue-600 text-blue-600 bg-blue-50/50"
-                      : "border-transparent text-slate-500 hover:text-slate-800"
-                  }`}
-                >
-                  <DollarSign className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>{isArabic ? "المالية والحصص للطالب" : "Student Financials"}</span>
-                </button>
-                <button
-                  onClick={() => setStudentProfileSubTab("attendance")}
-                  className={`px-4 py-2 font-bold text-xs border-b-2 transition flex items-center gap-1.5 ${
-                    studentProfileSubTab === "attendance"
-                      ? "border-indigo-600 text-indigo-600 bg-indigo-50/50"
-                      : "border-transparent text-slate-500 hover:text-slate-800"
-                  }`}
-                >
-                  <Calendar className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>{isArabic ? "سجل الحضور والغياب" : "Attendance Log"}</span>
-                </button>
-              </div>
+              {/* Sub Tabs: Daily Reports | Monthly Reports | Finance | Attendance */}
+              {(() => {
+                const studentId = String(activeStudent.id || "").trim();
+                const studentName = (activeStudent.fullName || "").trim().toLowerCase();
+                const activeStAllReps = reports.filter(
+                  r => r && (
+                    (r.studentId && String(r.studentId).trim() === studentId) ||
+                    (r.studentName && r.studentName.trim().toLowerCase() === studentName)
+                  )
+                );
+                const dailyCount = activeStAllReps.filter(isDailyPersonalReport).length;
+                const monthlyCount = activeStAllReps.filter(isMonthlyComprehensiveReport).length;
+
+                return (
+                  <div className="flex border-b border-slate-200 overflow-x-auto">
+                    {/* SubTab 1: Daily Personal Reports */}
+                    <button
+                      type="button"
+                      onClick={() => setStudentProfileSubTab("daily_reports")}
+                      className={`px-4 py-2 font-bold text-xs border-b-2 transition flex items-center gap-1.5 shrink-0 ${
+                        studentProfileSubTab === "daily_reports"
+                          ? "border-purple-600 text-purple-700 bg-purple-50/50"
+                          : "border-transparent text-slate-500 hover:text-slate-800"
+                      }`}
+                    >
+                      <FileText className="w-3.5 h-3.5 text-purple-600" />
+                      <span>{isArabic ? "التقارير الشخصية اليومية" : "Daily Reports"}</span>
+                      {dailyCount > 0 && (
+                        <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
+                          studentProfileSubTab === "daily_reports" ? "bg-purple-600 text-white" : "bg-purple-100 text-purple-700"
+                        }`}>
+                          {dailyCount}
+                        </span>
+                      )}
+                    </button>
+
+                    {/* SubTab 2: Comprehensive Monthly Reports */}
+                    <button
+                      type="button"
+                      onClick={() => setStudentProfileSubTab("monthly_reports")}
+                      className={`px-4 py-2 font-bold text-xs border-b-2 transition flex items-center gap-1.5 shrink-0 ${
+                        studentProfileSubTab === "monthly_reports"
+                          ? "border-teal-600 text-teal-700 bg-teal-50/50"
+                          : "border-transparent text-slate-500 hover:text-slate-800"
+                      }`}
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-teal-600" />
+                      <span>{isArabic ? "التقارير الشهرية الشاملة" : "Monthly Reports"}</span>
+                      {monthlyCount > 0 && (
+                        <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
+                          studentProfileSubTab === "monthly_reports" ? "bg-teal-600 text-white" : "bg-teal-100 text-teal-700"
+                        }`}>
+                          {monthlyCount}
+                        </span>
+                      )}
+                    </button>
+
+                    {/* SubTab 3: Financials */}
+                    <button
+                      type="button"
+                      onClick={() => setStudentProfileSubTab("finance")}
+                      className={`px-4 py-2 font-bold text-xs border-b-2 transition flex items-center gap-1.5 shrink-0 ${
+                        studentProfileSubTab === "finance"
+                          ? "border-blue-600 text-blue-600 bg-blue-50/50"
+                          : "border-transparent text-slate-500 hover:text-slate-800"
+                      }`}
+                    >
+                      <DollarSign className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>{isArabic ? "المالية والحصص للطالب" : "Student Financials"}</span>
+                    </button>
+
+                    {/* SubTab 4: Attendance Log */}
+                    <button
+                      type="button"
+                      onClick={() => setStudentProfileSubTab("attendance")}
+                      className={`px-4 py-2 font-bold text-xs border-b-2 transition flex items-center gap-1.5 shrink-0 ${
+                        studentProfileSubTab === "attendance"
+                          ? "border-indigo-600 text-indigo-600 bg-indigo-50/50"
+                          : "border-transparent text-slate-500 hover:text-slate-800"
+                      }`}
+                    >
+                      <Calendar className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>{isArabic ? "سجل الحضور والغياب" : "Attendance Log"}</span>
+                    </button>
+                  </div>
+                );
+              })()}
 
               {/* Sub Tab: Finance */}
               {studentProfileSubTab === "finance" && (
                 <div className="space-y-4 text-xs">
                   {(() => {
-                    const fin = calculateStudentFinancials(activeStudent, attendanceRecords);
+                    const fin = calculateStudentFinancials(activeStudent, attendanceRecords, paymentTransactions);
                     return (
                       <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/90 space-y-3">
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
                           <div className="p-3 bg-white rounded-xl border border-slate-100">
-                            <div className="text-slate-400 text-[10px] mb-1">{isArabic ? "الحصص المنفذة" : "Attended"}</div>
-                            <div className="text-lg font-black text-blue-600">{fin.totalAttendedLessons}</div>
+                            <div className="text-slate-400 text-[10px] mb-1">{isArabic ? "الحصص والساعات" : "Lessons & Hours"}</div>
+                            <div className="text-lg font-black text-blue-600">
+                              {fin.totalAttendedLessons} <span className="text-xs font-normal text-slate-500">{isArabic ? "حصة" : "lss"}</span>
+                            </div>
+                            <div className="text-[10px] font-bold text-indigo-700 mt-0.5">
+                              ⏱️ {fin.totalTaughtHours ?? Number(((fin.totalAttendedLessons * 60) / 60).toFixed(1))} {isArabic ? "ساعة" : "hrs"}
+                            </div>
                           </div>
                           <div className="p-3 bg-white rounded-xl border border-slate-100">
                             <div className="text-slate-400 text-[10px] mb-1">{isArabic ? "إجمالي التكلفة" : "Accrued"}</div>
@@ -1984,6 +2232,118 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
                                 ? `رصيد +${fin.creditRemaining} ج.م`
                                 : (isArabic ? "مسدد بالكامل" : "Settled")}
                             </div>
+                          </div>
+                        </div>
+
+                        {/* STUDY HOURS & FINANCIAL STATEMENT ACTIONS */}
+                        <div className="p-3 rounded-xl bg-gradient-to-r from-sky-50 to-indigo-50 border border-sky-200/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
+                          <div className="flex items-center gap-2">
+                            <Clock className="w-4 h-4 text-sky-600 shrink-0" />
+                            <div>
+                              <span className="font-black text-slate-800 text-xs">
+                                {isArabic ? "ساعات التدريس الفعلي المنفذة:" : "Study Hours Completed:"}{" "}
+                                <span className="text-sky-700 font-black">
+                                  ⏱️ {fin.totalTaughtHours} {isArabic ? "ساعة درسها" : "hours studied"}
+                                </span>
+                              </span>
+                              <p className="text-[10.5px] text-slate-500 mt-0.5">
+                                {isArabic
+                                  ? `درس الطالب ما مجموعه (${formatHoursHuman(fin.totalTaughtHours, true)}) بما يعادل ${Math.round((fin.totalTaughtHours || 0) * 60)} دقيقة موزعة على ${fin.totalAttendedLessons} حصة حضور فعلية.`
+                                  : `Completed (${formatHoursHuman(fin.totalTaughtHours, false)}) totaling ${Math.round((fin.totalTaughtHours || 0) * 60)} minutes.`}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 self-end sm:self-auto shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const statementText = generateStudentStatementWhatsAppMessage({
+                                  studentName: activeStudent.fullName,
+                                  subjectName: activeStudent.subject,
+                                  studyTypeLabel: activeStudent.studyType === "group" ? (isArabic ? "مجموعة" : "Group") : (isArabic ? "خاص" : "Private"),
+                                  totalTaughtHours: fin.totalTaughtHours,
+                                  totalAttendedLessons: fin.totalAttendedLessons,
+                                  totalAccruedCost: fin.totalAccruedCost,
+                                  totalPaidAmount: fin.totalPaidAmount,
+                                  amountDue: fin.amountDue,
+                                  creditRemaining: fin.creditRemaining,
+                                  isMonthly: fin.isMonthly,
+                                  billedMonthsCount: fin.billedMonthsCount,
+                                  monthlyCost: fin.monthlyCost,
+                                  subjectsBreakdown: fin.subjectsDetails?.map(s => ({
+                                    subjectName: s.subject,
+                                    totalTaughtHours: s.totalTaughtHours,
+                                    attendedCount: s.totalAttendedLessons,
+                                    accruedCost: s.totalAccruedCost,
+                                    paidAmount: s.totalPaidAmount,
+                                    amountDue: s.amountDue
+                                  })),
+                                  recentAttendance: attendanceRecords
+                                    .filter(ar => matchesStudentRecord(ar, activeStudent) && isAttendedOrDeductedRecord(ar))
+                                    .slice(0, 10)
+                                    .map(ar => ({
+                                      lessonNumber: ar.lessonNumber,
+                                      date: ar.date,
+                                      durationMinutes: ar.durationMinutes,
+                                      subject: ar.subject
+                                    }))
+                                }, isArabic);
+
+                                navigator.clipboard.writeText(statementText);
+                                setPaymentSuccessMsg(isArabic ? "تم نسخ كشف الحساب وساعات الدراسة بنجاح!" : "Statement copied!");
+                                setTimeout(() => setPaymentSuccessMsg(""), 3500);
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 text-xs font-bold transition flex items-center gap-1 shadow-2xs"
+                              title={isArabic ? "نسخ كشف الحساب المالي مع عدد الساعات" : "Copy Statement"}
+                            >
+                              <Copy className="w-3.5 h-3.5 text-slate-500" />
+                              <span>{isArabic ? "نسخ الكشف" : "Copy"}</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const statementText = generateStudentStatementWhatsAppMessage({
+                                  studentName: activeStudent.fullName,
+                                  subjectName: activeStudent.subject,
+                                  studyTypeLabel: activeStudent.studyType === "group" ? (isArabic ? "مجموعة" : "Group") : (isArabic ? "خاص" : "Private"),
+                                  totalTaughtHours: fin.totalTaughtHours,
+                                  totalAttendedLessons: fin.totalAttendedLessons,
+                                  totalAccruedCost: fin.totalAccruedCost,
+                                  totalPaidAmount: fin.totalPaidAmount,
+                                  amountDue: fin.amountDue,
+                                  creditRemaining: fin.creditRemaining,
+                                  isMonthly: fin.isMonthly,
+                                  billedMonthsCount: fin.billedMonthsCount,
+                                  monthlyCost: fin.monthlyCost,
+                                  subjectsBreakdown: fin.subjectsDetails?.map(s => ({
+                                    subjectName: s.subject,
+                                    totalTaughtHours: s.totalTaughtHours,
+                                    attendedCount: s.totalAttendedLessons,
+                                    accruedCost: s.totalAccruedCost,
+                                    paidAmount: s.totalPaidAmount,
+                                    amountDue: s.amountDue
+                                  })),
+                                  recentAttendance: attendanceRecords
+                                    .filter(ar => matchesStudentRecord(ar, activeStudent) && isAttendedOrDeductedRecord(ar))
+                                    .slice(0, 10)
+                                    .map(ar => ({
+                                      lessonNumber: ar.lessonNumber,
+                                      date: ar.date,
+                                      durationMinutes: ar.durationMinutes,
+                                      subject: ar.subject
+                                    }))
+                                }, isArabic);
+
+                                handleOpenWhatsAppChooser(statementText, `كشف حساب ${activeStudent.fullName}`);
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition flex items-center gap-1 shadow-2xs"
+                              title={isArabic ? "إرسال كشف الحساب مع ساعات الدراسة لواتساب" : "Share via WhatsApp"}
+                            >
+                              <Share2 className="w-3.5 h-3.5" />
+                              <span>{isArabic ? "واتساب" : "WhatsApp"}</span>
+                            </button>
                           </div>
                         </div>
 
@@ -2086,82 +2446,540 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
                 </div>
               )}
 
-              {/* Sub Tab: Reports & AI */}
-              {studentProfileSubTab === "reports" && (
+              {/* Sub Tab 1: Daily Personal Reports */}
+              {studentProfileSubTab === "daily_reports" && (
                 <div className="space-y-3 text-xs">
                   {(() => {
-                    const studentReports = reports.filter(
-                      r => r.studentId === activeStudent.id || r.studentName === activeStudent.fullName
+                    const studentId = String(activeStudent.id || "").trim();
+                    const studentName = (activeStudent.fullName || "").trim().toLowerCase();
+                    const directDailyReports = reports.filter(
+                      r => r && (
+                        (r.studentId && String(r.studentId).trim() === studentId) ||
+                        (r.studentName && r.studentName.trim().toLowerCase() === studentName)
+                      ) && isDailyPersonalReport(r)
+                    );
+
+                    const attReports: GeneratedReport[] = attendanceRecords
+                      .filter(ar => ar && (
+                        (ar.studentId && String(ar.studentId).trim() === studentId) ||
+                        (ar.studentName && ar.studentName.trim().toLowerCase() === studentName)
+                      ) && (ar.generatedReportText || ar.teacherNotes))
+                      .map(ar => ({
+                        id: ar.id,
+                        studentId: ar.studentId,
+                        studentName: activeStudent.fullName,
+                        subject: ar.subject || activeStudent.subject,
+                        lessonNumber: ar.lessonNumber,
+                        attendance: ar.attendance,
+                        deductCost: ar.deducted,
+                        date: ar.date,
+                        teacherNotes: ar.teacherNotes || "",
+                        aiInstructions: ar.aiInstructions || "",
+                        reportText: ar.generatedReportText || ar.teacherNotes || "",
+                        generatedText: ar.generatedReportText || ar.teacherNotes || "",
+                        archived: (ar as any).archived === true,
+                        archiveGroup: (ar as any).archiveGroup,
+                        archivedAt: (ar as any).archivedAt,
+                        manuallyUnarchived: (ar as any).manuallyUnarchived === true,
+                        createdAt: ar.date
+                      }));
+
+                    const mergedDailyReports = mergeDirectAndAttendanceReports(
+                      directDailyReports,
+                      attReports
+                    );
+
+                    mergedDailyReports.sort((a, b) => new Date(b.date || b.createdAt).getTime() - new Date(a.date || a.createdAt).getTime());
+
+                    const activeCycle = getActiveCycleInfo(activeStudent);
+                    const classifiedReports = mergedDailyReports.map(rep => {
+                      const isArchived = rep.archived === true || !isReportInActiveCycle(rep, activeStudent, activeCycle);
+                      return {
+                        ...rep,
+                        isArchived
+                      };
+                    });
+
+                    const activeCount = classifiedReports.filter(r => !r.isArchived).length;
+                    const archivedCount = classifiedReports.filter(r => r.isArchived).length;
+                    const totalCount = classifiedReports.length;
+
+                    const filteredReports = classifiedReports.filter(rep => {
+                      if (reportArchiveFilter === "active" && rep.isArchived) return false;
+                      if (reportArchiveFilter === "archived" && !rep.isArchived) return false;
+                      if (archiveSearchQuery.trim()) {
+                        const q = archiveSearchQuery.toLowerCase();
+                        const content = (rep.generatedText || rep.reportText || rep.teacherNotes || "").toLowerCase();
+                        const subj = (rep.subject || "").toLowerCase();
+                        const d = (rep.date || "").toLowerCase();
+                        if (!content.includes(q) && !subj.includes(q) && !d.includes(q)) return false;
+                      }
+                      return true;
+                    });
+
+                    return (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <h4 className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                            <FileText className="w-3.5 h-3.5 text-purple-600" />
+                            <span>{isArabic ? `التقارير الشخصية اليومية المسجلة (${totalCount}):` : `Daily Reports (${totalCount}):`}</span>
+                          </h4>
+
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <button
+                              type="button"
+                              onClick={() => setArchiveCycleTargetStudent(activeStudent)}
+                              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs flex items-center gap-1.5 shadow-2xs transition active:scale-95"
+                            >
+                              <FolderArchive className="w-3.5 h-3.5 text-amber-300" />
+                              <span>{isArabic ? "أرشفة الشهر / الباقة المنتهية" : "Archive Ended Cycle"}</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => setStudentForPersonalReport(activeStudent)}
+                              className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-2xs transition active:scale-95"
+                            >
+                              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                              <span>{isArabic ? "إنشاء وتوليد تقرير يومي ذكي" : "Generate Daily Report"}</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Archive Filter Bar */}
+                        {totalCount > 0 && (
+                          <div className="p-2 rounded-2xl bg-slate-100/90 border border-slate-200/80 flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center gap-1.5 p-1 bg-white rounded-xl border border-slate-200 shadow-2xs">
+                              <button
+                                type="button"
+                                onClick={() => setReportArchiveFilter("active")}
+                                className={`px-3 py-1 rounded-lg font-black text-xs transition flex items-center gap-1.5 ${
+                                  reportArchiveFilter === "active"
+                                    ? "bg-purple-600 text-white shadow-xs"
+                                    : "text-slate-600 hover:text-purple-600 hover:bg-slate-50"
+                                }`}
+                              >
+                                <Sparkles className="w-3 h-3" />
+                                <span>{isArabic ? "التقارير الحالية" : "Active"}</span>
+                                <span className={`px-1.5 py-0.2 text-[10px] rounded-full font-black ${
+                                  reportArchiveFilter === "active" ? "bg-purple-800 text-purple-100" : "bg-slate-200 text-slate-700"
+                                }`}>
+                                  {activeCount}
+                                </span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => setReportArchiveFilter("archived")}
+                                className={`px-3 py-1 rounded-lg font-black text-xs transition flex items-center gap-1.5 ${
+                                  reportArchiveFilter === "archived"
+                                    ? "bg-slate-800 text-white shadow-xs"
+                                    : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+                                }`}
+                              >
+                                <FolderArchive className="w-3 h-3 text-amber-400" />
+                                <span>{isArabic ? "الأرشيف" : "Archived"}</span>
+                                <span className={`px-1.5 py-0.2 text-[10px] rounded-full font-black ${
+                                  reportArchiveFilter === "archived" ? "bg-slate-950 text-amber-300" : "bg-slate-200 text-slate-700"
+                                }`}>
+                                  {archivedCount}
+                                </span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => setReportArchiveFilter("all")}
+                                className={`px-2.5 py-1 rounded-lg font-black text-xs transition flex items-center gap-1.5 ${
+                                  reportArchiveFilter === "all"
+                                    ? "bg-indigo-600 text-white shadow-xs"
+                                    : "text-slate-600 hover:text-indigo-600 hover:bg-slate-50"
+                                }`}
+                              >
+                                <span>{isArabic ? "الكل" : "All"}</span>
+                                <span className={`px-1.5 py-0.2 text-[10px] rounded-full font-black ${
+                                  reportArchiveFilter === "all" ? "bg-indigo-800 text-indigo-100" : "bg-slate-200 text-slate-700"
+                                }`}>
+                                  {totalCount}
+                                </span>
+                              </button>
+                            </div>
+
+                            <div className="relative flex-1 min-w-[180px] max-w-xs">
+                              <Search className="w-3.5 h-3.5 absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                              <input
+                                type="text"
+                                value={archiveSearchQuery}
+                                onChange={e => setArchiveSearchQuery(e.target.value)}
+                                placeholder={isArabic ? "بحث في تقارير الطالب..." : "Search student reports..."}
+                                className="w-full pl-2.5 pr-8 py-1 bg-white border border-slate-200 rounded-lg text-[11px] font-bold text-slate-800 focus:outline-none focus:border-purple-500"
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        {reportArchiveFilter === "archived" ? (
+                          <ArchivedReportsFolderList
+                            groups={groupArchivedReports(classifiedReports.filter(r => r.isArchived), !isArabic)}
+                            isArabic={isArabic}
+                            onToggleArchiveReport={(repId) => {
+                              onToggleArchiveReport(repId);
+                              setWhatsappSentNotice(isArabic ? "تم استعادة التقرير إلى قائمة التقارير الحالية النشطة!" : "Report restored to active reports!");
+                              setTimeout(() => setWhatsappSentNotice(""), 3000);
+                            }}
+                            onDeleteReport={id => setReportToDeleteId(id)}
+                            onCopyReport={r => {
+                              const t = r.generatedText || r.reportText || r.teacherNotes || "";
+                              if (t) navigator.clipboard.writeText(t);
+                            }}
+                            onShareWhatsApp={r => {
+                              const t = r.generatedText || r.reportText || r.teacherNotes || "";
+                              if (t) handleOpenWhatsAppChooser(t, `تقرير ${activeStudent.fullName} - ${r.subject}`);
+                            }}
+                            searchActive={Boolean(archiveSearchQuery.trim())}
+                          />
+                        ) : filteredReports.length === 0 ? (
+                          <div className="p-6 text-center text-slate-400 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+                            <FileText className="w-6 h-6 text-purple-400 mx-auto mb-1 opacity-60" />
+                            <p className="font-bold text-slate-600">
+                              {totalCount === 0
+                                ? (isArabic ? "لا توجد تقارير يومية شخصية منشأة لهذا الطالب بعد." : "No daily reports created yet.")
+                                : (isArabic ? "لا توجد تقارير نشطة حالياً في هذه الدورة (التقارير السابقة محفوظة في الأرشيف)." : "No active reports in this cycle.")}
+                            </p>
+                            {archivedCount > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setReportArchiveFilter("archived")}
+                                className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs inline-flex items-center gap-1.5 shadow-2xs transition"
+                              >
+                                <FolderArchive className="w-3.5 h-3.5 text-amber-400" />
+                                <span>{isArabic ? `فتح قسم الأرشيف (${archivedCount} تقارير)` : `Open Archive (${archivedCount})`}</span>
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="space-y-2.5">
+                            {filteredReports.map(rep => {
+                              const isExpanded = expandedReportIds.includes(rep.id);
+                              const text = rep.reportText || rep.generatedText || rep.teacherNotes || "";
+                              const repTitle = getReportTitle(rep, isArabic);
+
+                              return (
+                                <div
+                                  key={rep.id}
+                                  className={`rounded-2xl bg-white border transition shadow-2xs overflow-hidden ${
+                                    isExpanded ? "border-purple-300 ring-1 ring-purple-100" : "border-slate-200 hover:border-slate-300"
+                                  }`}
+                                >
+                                  <div
+                                    onClick={() => {
+                                      if (isExpanded) {
+                                        setExpandedReportIds(prev => prev.filter(id => id !== rep.id));
+                                      } else {
+                                        setExpandedReportIds(prev => [...prev, rep.id]);
+                                      }
+                                    }}
+                                    className={`p-3.5 cursor-pointer select-none transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                                      isExpanded ? "bg-purple-50/40 border-b border-purple-100" : "bg-white hover:bg-slate-50/70"
+                                    }`}
+                                  >
+                                    <div className="space-y-1 flex-1 min-w-0">
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="font-black text-[11px] text-purple-900 bg-purple-100 px-2 py-0.5 rounded-lg shrink-0">
+                                          #{rep.lessonNumber || 1}
+                                        </span>
+                                        <h5 className="font-black text-xs text-slate-900 truncate">
+                                          {repTitle}
+                                        </h5>
+                                        {rep.isArchived && (
+                                          <span className="px-2 py-0.5 rounded-md bg-slate-200 text-slate-700 text-[10px] font-bold flex items-center gap-1">
+                                            <Archive className="w-3 h-3 text-amber-600" />
+                                            <span>{isArabic ? "مؤرشف" : "Archived"}</span>
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="flex items-center gap-1.5 flex-wrap text-[11px] text-slate-500">
+                                        <span className="font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded-md">
+                                          📚 {rep.subject}
+                                        </span>
+                                        <span className="bg-slate-50 px-2 py-0.5 rounded-md border border-slate-200/60">
+                                          📅 {rep.date}
+                                        </span>
+                                      </div>
+                                    </div>
+
+                                    <div className="flex items-center gap-1.5 self-end sm:self-center shrink-0 flex-wrap" onClick={e => e.stopPropagation()}>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          if (isExpanded) {
+                                            setExpandedReportIds(prev => prev.filter(id => id !== rep.id));
+                                          } else {
+                                            setExpandedReportIds(prev => [...prev, rep.id]);
+                                          }
+                                        }}
+                                        className={`px-2.5 py-1 rounded-xl font-bold text-xs transition flex items-center gap-1 shadow-2xs ${
+                                          isExpanded
+                                            ? "bg-slate-200 hover:bg-slate-300 text-slate-800"
+                                            : "bg-purple-600 hover:bg-purple-700 text-white shadow-purple-600/20"
+                                        }`}
+                                      >
+                                        {isExpanded ? (
+                                          <>
+                                            <EyeOff className="w-3.5 h-3.5" />
+                                            <span>{isArabic ? "إخفاء التقرير" : "Hide Report"}</span>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <Eye className="w-3.5 h-3.5 text-amber-300" />
+                                            <span>{isArabic ? "إظهار التقرير كامل" : "Show Full Report"}</span>
+                                          </>
+                                        )}
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          onToggleArchiveReport(rep.id);
+                                          setWhatsappSentNotice(
+                                            rep.isArchived
+                                              ? (isArabic ? "تم استعادة التقرير إلى قائمة التقارير الحالية النشطة!" : "Report restored to active!")
+                                              : (isArabic ? "تم نقل التقرير إلى قسم الأرشيف بنجاح!" : "Report archived!")
+                                          );
+                                          setTimeout(() => setWhatsappSentNotice(""), 3000);
+                                        }}
+                                        className={`px-2.5 py-1 rounded-xl font-bold text-xs transition flex items-center gap-1 border ${
+                                          rep.isArchived
+                                            ? "bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200"
+                                            : "bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-200"
+                                        }`}
+                                        title={rep.isArchived ? (isArabic ? "استعادة للنشطة" : "Restore") : (isArabic ? "نقل التقرير للأرشيف يدوياً" : "Archive Report")}
+                                      >
+                                        {rep.isArchived ? (
+                                          <>
+                                            <ArchiveRestore className="w-3.5 h-3.5 text-purple-600" />
+                                            <span>{isArabic ? "استعادة" : "Restore"}</span>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <Archive className="w-3.5 h-3.5 text-amber-600" />
+                                            <span>{isArabic ? "أرشفة" : "Archive"}</span>
+                                          </>
+                                        )}
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          handleOpenWhatsAppChooser(text, `تقرير ${activeStudent.fullName} - ${rep.subject}`);
+                                        }}
+                                        className="p-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold flex items-center gap-1 transition border border-emerald-200"
+                                        title={isArabic ? "إرسال التقرير عبر واتساب" : "Share via WhatsApp"}
+                                      >
+                                        <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          navigator.clipboard.writeText(text);
+                                          setCopiedReportId(rep.id);
+                                          setTimeout(() => setCopiedReportId(null), 2000);
+                                        }}
+                                        className="p-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold transition"
+                                        title={isArabic ? "نسخ التقرير" : "Copy"}
+                                      >
+                                        {copiedReportId === rep.id ? (
+                                          <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                        ) : (
+                                          <Copy className="w-3.5 h-3.5" />
+                                        )}
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                  {isExpanded && (
+                                    <div className="p-3.5 bg-slate-50 border-t border-slate-100 text-slate-800 text-xs leading-relaxed whitespace-pre-wrap animate-in fade-in">
+                                      {text}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+
+              {/* Sub Tab 2: Comprehensive Monthly Reports (معزولة تماماً في خانة وتبويب مستقل) */}
+              {studentProfileSubTab === "monthly_reports" && (
+                <div className="space-y-3 text-xs animate-in fade-in">
+                  {(() => {
+                    const studentId = String(activeStudent.id || "").trim();
+                    const studentName = (activeStudent.fullName || "").trim().toLowerCase();
+                    const studentMonthlyReports = reports.filter(
+                      r => r && (
+                        (r.studentId && String(r.studentId).trim() === studentId) ||
+                        (r.studentName && r.studentName.trim().toLowerCase() === studentName)
+                      ) && isMonthlyComprehensiveReport(r)
                     );
 
                     return (
                       <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <h4 className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
-                            <Sparkles className="w-3.5 h-3.5 text-purple-600" />
-                            <span>{isArabic ? `تقارير الطالب المسجلة (${studentReports.length}):` : `Reports (${studentReports.length}):`}</span>
-                          </h4>
+                        <div className="p-3.5 rounded-2xl bg-gradient-to-r from-teal-50 to-emerald-50 border border-teal-200/80 flex flex-wrap items-center justify-between gap-2.5">
+                          <div>
+                            <h4 className="font-black text-slate-800 text-xs flex items-center gap-1.5">
+                              <Sparkles className="w-3.5 h-3.5 text-teal-600" />
+                              <span>{isArabic ? `التقارير الشهرية الشاملة (${studentMonthlyReports.length}):` : `Monthly Reports (${studentMonthlyReports.length}):`}</span>
+                            </h4>
+                            <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+                              {isArabic
+                                ? "تقارير تقييم وإحصائيات شهرية رسمية معزولة تماماً عن التقارير اليومية."
+                                : "Official monthly comprehensive reports isolated from daily logs."}
+                            </p>
+                          </div>
+
                           <button
-                            onClick={() => setStudentForPersonalReport(activeStudent)}
-                            className="px-3 py-1 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs flex items-center gap-1 shadow-2xs"
+                            type="button"
+                            id={`btn-monthly-quran-combined-subtab-${activeStudent.id}`}
+                            onClick={() => {
+                              const targetSubj = getStudentEligibleQuranSubject(activeStudent);
+                              if (onOpenMonthlyQuranReport) {
+                                onOpenMonthlyQuranReport(activeStudent, targetSubj);
+                              } else {
+                                setMonthlyReportModalTarget({ student: activeStudent, subject: targetSubj });
+                              }
+                            }}
+                            className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-teal-600 to-emerald-700 hover:from-teal-700 hover:to-emerald-800 text-white font-black text-xs shadow-xs flex items-center gap-1.5 transition active:scale-95"
                           >
-                            <Sparkles className="w-3 h-3 text-amber-300" />
-                            <span>{isArabic ? "إنشاء وتوليد تقارير بالذكاء الاصطناعي" : "Generate AI Report"}</span>
+                            <Sparkles className="w-3.5 h-3.5 text-amber-200" />
+                            <span>{isArabic ? "✨ إنشاء تقرير شهري شامل" : "✨ Create Monthly Report"}</span>
                           </button>
                         </div>
 
-                        {studentReports.length === 0 ? (
-                          <div className="p-6 text-center text-slate-400 bg-slate-50 rounded-2xl border border-slate-200">
-                            <Sparkles className="w-6 h-6 text-purple-400 mx-auto mb-2 opacity-60" />
-                            <p>{isArabic ? "لا توجد تقارير منشأة لهذا الطالب بعد." : "No reports created yet."}</p>
+                        {studentMonthlyReports.length === 0 ? (
+                          <div className="p-6 text-center text-slate-400 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+                            <BookOpen className="w-6 h-6 text-teal-500 mx-auto mb-1 opacity-70" />
+                            <p className="font-bold text-slate-700">{isArabic ? "لا توجد تقارير شهرية شاملة مسجلة بعد لهذا الطالب." : "No monthly reports created yet."}</p>
+                            <p className="text-[11px] text-slate-400">{isArabic ? "يمكنك إنشاء تقرير تقييم شهري شامل بالضغط على الزر أعلاه." : "You can create a monthly evaluation report above."}</p>
                           </div>
                         ) : (
-                          <div className="space-y-2">
-                            {studentReports.map(rep => (
-                              <div
-                                key={rep.id}
-                                className="p-3.5 rounded-2xl bg-white border border-slate-200 space-y-2 shadow-2xs hover:border-purple-200 transition"
-                              >
-                                <div className="flex items-center justify-between">
-                                  <div className="font-bold text-slate-900 text-xs flex items-center gap-2">
-                                    <span>📚 {rep.subject}</span>
-                                    <span className="text-slate-400 text-[10.5px]">({rep.date})</span>
+                          <div className="space-y-2.5">
+                            {studentMonthlyReports.map(rep => {
+                              const isExpanded = expandedReportIds.includes(rep.id);
+                              const text = rep.reportText || rep.generatedText || rep.teacherNotes || "";
+
+                              return (
+                                <div
+                                  key={rep.id}
+                                  className={`rounded-2xl bg-white border transition shadow-2xs overflow-hidden ${
+                                    isExpanded ? "border-teal-300 ring-1 ring-teal-100" : "border-slate-200 hover:border-slate-300"
+                                  }`}
+                                >
+                                  <div
+                                    onClick={() => {
+                                      if (isExpanded) {
+                                        setExpandedReportIds(prev => prev.filter(id => id !== rep.id));
+                                      } else {
+                                        setExpandedReportIds(prev => [...prev, rep.id]);
+                                      }
+                                    }}
+                                    className={`p-3.5 cursor-pointer select-none transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                                      isExpanded ? "bg-teal-50/40 border-b border-teal-100" : "bg-white hover:bg-slate-50/70"
+                                    }`}
+                                  >
+                                    <div className="space-y-1 flex-1 min-w-0">
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="font-black text-[11px] text-teal-900 bg-teal-100 px-2 py-0.5 rounded-lg shrink-0 flex items-center gap-1">
+                                          📊 {rep.evaluationMonth || (isArabic ? "تقرير شهري شامل" : "Monthly Report")}
+                                        </span>
+                                        <h5 className="font-black text-xs text-slate-900 truncate">
+                                          {rep.subject || activeStudent.subject}
+                                        </h5>
+                                      </div>
+                                      <div className="flex items-center gap-1.5 flex-wrap text-[11px] text-slate-500">
+                                        {rep.date && (
+                                          <span className="bg-slate-50 px-2 py-0.5 rounded-md border border-slate-200/60">
+                                            📅 {rep.date}
+                                          </span>
+                                        )}
+                                        {rep.lessonNumber !== undefined && rep.lessonNumber > 0 && (
+                                          <span className="bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-md font-bold">
+                                            {rep.lessonNumber} {isArabic ? "حصة" : "lessons"}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+
+                                    <div className="flex items-center gap-1.5 self-end sm:self-center shrink-0" onClick={e => e.stopPropagation()}>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          if (isExpanded) {
+                                            setExpandedReportIds(prev => prev.filter(id => id !== rep.id));
+                                          } else {
+                                            setExpandedReportIds(prev => [...prev, rep.id]);
+                                          }
+                                        }}
+                                        className={`px-2.5 py-1 rounded-xl font-bold text-xs transition flex items-center gap-1 shadow-2xs ${
+                                          isExpanded
+                                            ? "bg-slate-200 hover:bg-slate-300 text-slate-800"
+                                            : "bg-teal-600 hover:bg-teal-700 text-white shadow-teal-600/20"
+                                        }`}
+                                      >
+                                        {isExpanded ? (
+                                          <>
+                                            <EyeOff className="w-3.5 h-3.5" />
+                                            <span>{isArabic ? "إخفاء" : "Hide"}</span>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <Eye className="w-3.5 h-3.5 text-amber-200" />
+                                            <span>{isArabic ? "عرض كامل" : "Show Full"}</span>
+                                          </>
+                                        )}
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          handleOpenWhatsAppChooser(text, `تقرير شهري ${activeStudent.fullName} - ${rep.subject}`);
+                                        }}
+                                        className="p-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold flex items-center gap-1 transition border border-emerald-200"
+                                        title={isArabic ? "إرسال التقرير عبر واتساب" : "Share via WhatsApp"}
+                                      >
+                                        <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          navigator.clipboard.writeText(text);
+                                          setCopiedReportId(rep.id);
+                                          setTimeout(() => setCopiedReportId(null), 2000);
+                                        }}
+                                        className="p-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold transition"
+                                        title={isArabic ? "نسخ التقرير" : "Copy"}
+                                      >
+                                        {copiedReportId === rep.id ? (
+                                          <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                        ) : (
+                                          <Copy className="w-3.5 h-3.5" />
+                                        )}
+                                      </button>
+                                    </div>
                                   </div>
-                                  <div className="flex items-center gap-1.5">
-                                    <button
-                                      onClick={() => {
-                                        const text = rep.reportText || rep.generatedText || rep.teacherNotes;
-                                        handleOpenWhatsAppChooser(text, `تقرير ${activeStudent.fullName} - ${rep.subject}`);
-                                      }}
-                                      className="p-1 px-2 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[10.5px] font-bold flex items-center gap-1 transition"
-                                      title={isArabic ? "إرسال التقرير عبر واتساب (أعمال / عادي)" : "Share via WhatsApp"}
-                                    >
-                                      <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
-                                      <span>{isArabic ? "واتساب" : "WhatsApp"}</span>
-                                    </button>
-                                    <button
-                                      onClick={() => {
-                                        const text = rep.reportText || rep.generatedText || rep.teacherNotes;
-                                        navigator.clipboard.writeText(text);
-                                        setCopiedReportId(rep.id);
-                                        setTimeout(() => setCopiedReportId(null), 2000);
-                                      }}
-                                      className="p-1 px-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10.5px] font-bold flex items-center gap-1"
-                                    >
-                                      {copiedReportId === rep.id ? (
-                                        <Check className="w-3.5 h-3.5 text-emerald-600" />
-                                      ) : (
-                                        <Copy className="w-3.5 h-3.5" />
-                                      )}
-                                      <span>{copiedReportId === rep.id ? "تم النسخ" : "نسخ"}</span>
-                                    </button>
-                                  </div>
+
+                                  {isExpanded && (
+                                    <div className="p-3.5 bg-slate-50 border-t border-slate-100 text-slate-800 text-xs leading-relaxed whitespace-pre-wrap animate-in fade-in">
+                                      {text}
+                                    </div>
+                                  )}
                                 </div>
-                                <div className="text-slate-700 bg-slate-50 p-2.5 rounded-xl border border-slate-100 text-[11px] leading-relaxed whitespace-pre-wrap">
-                                  {rep.reportText || rep.generatedText || rep.teacherNotes}
-                                </div>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         )}
                       </div>
@@ -2170,6 +2988,408 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {/* TAB: COMBINED GROUP REPORTS & AI HUB */}
+        {activeTab === "reports" && (
+          <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4 text-xs">
+            {/* Reports Top Banner */}
+            <div className="bg-gradient-to-r from-purple-950 via-indigo-950 to-purple-900 text-white rounded-3xl p-5 shadow-lg space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-purple-500/20 backdrop-blur-md flex items-center justify-center font-black text-xl border border-purple-400/30 text-amber-300">
+                    <Sparkles className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-base sm:text-lg font-black">
+                        {isArabic ? "تقارير المتابعة والذكاء الاصطناعي للملف المدمج" : "Group Reports & AI Follow-up Hub"}
+                      </h2>
+                      <span className="px-2 py-0.5 rounded-full bg-purple-500/40 text-purple-200 text-[10px] font-bold border border-purple-400/30">
+                        {reports.filter(r => targetGroupStudentIds.includes(r.studentId) || groupStudents.some(s => s.fullName === r.studentName)).length} {isArabic ? "تقرير مسجل" : "reports"}
+                      </span>
+                    </div>
+                    <p className="text-xs text-purple-200/80 mt-0.5 max-w-2xl">
+                      {isArabic
+                        ? "يمكنك من هنا استعراض كافة تقارير الطلاب المسجلة في هذا الملف المدمج، أو توليد وتخصيص تقارير ذكية جديدة ومشاركتها عبر واتساب مباشرة."
+                        : "Browse all student reports recorded for this merged group, or generate customized AI reports and share them directly."}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  {(() => {
+                    const eligibleQuranStudents = groupStudents.filter(st => isStudentEligibleForMonthlyReport(st));
+                    if (eligibleQuranStudents.length === 0) return null;
+
+                    const targetStudent = groupReportsStudentFilter !== "all"
+                      ? (eligibleQuranStudents.find(s => s.id === groupReportsStudentFilter) || eligibleQuranStudents[0])
+                      : eligibleQuranStudents[0];
+
+                    if (!targetStudent) return null;
+
+                    return (
+                      <button
+                        type="button"
+                        id="btn-monthly-quran-combined-group-header"
+                        onClick={() => {
+                          const targetSubj = getStudentEligibleQuranSubject(targetStudent);
+                          if (onOpenMonthlyQuranReport) {
+                            onOpenMonthlyQuranReport(targetStudent, targetSubj);
+                          } else {
+                            setMonthlyReportModalTarget({ student: targetStudent, subject: targetSubj });
+                          }
+                        }}
+                        className="px-3.5 py-2 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white font-black text-xs transition shadow-lg shadow-emerald-700/20 flex items-center gap-2 active:scale-95 animate-in fade-in"
+                        title={isArabic ? "إنشاء تقرير شهري شامل (خاص بالقرآن والدراسات الإسلامية)" : "Create Comprehensive Monthly Report"}
+                      >
+                        <Sparkles className="w-4 h-4 text-emerald-200" />
+                        <span>
+                          {isArabic
+                            ? `إنشاء تقرير شهري شامل ${groupReportsStudentFilter !== "all" ? `(${targetStudent.fullName.split(" ")[0]})` : ""}`
+                            : "Comprehensive Monthly Report"}
+                        </span>
+                      </button>
+                    );
+                  })()}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const targetStudent = groupStudents.find(s => s.id === groupReportsStudentFilter) || groupStudents[0];
+                      if (targetStudent) {
+                        setStudentForPersonalReport(targetStudent);
+                      }
+                    }}
+                    className="px-4 py-2 rounded-2xl bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-600 hover:to-indigo-700 text-white font-black text-xs transition shadow-lg shadow-purple-600/30 flex items-center gap-2"
+                  >
+                    <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+                    <span>{isArabic ? "✨ إنشاء وتوليد تقرير ذكي لطالب" : "✨ Create / Generate AI Report"}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Quick Student Selector Bar */}
+              <div className="pt-3 border-t border-purple-800/60 flex flex-wrap items-center gap-2">
+                <span className="text-[11px] font-bold text-purple-300 flex items-center gap-1">
+                  <Users className="w-3.5 h-3.5" />
+                  <span>{isArabic ? "تصفية حسب الطالب:" : "Filter by Student:"}</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setGroupReportsStudentFilter("all")}
+                  className={`px-3 py-1 rounded-xl text-xs font-bold transition ${
+                    groupReportsStudentFilter === "all"
+                      ? "bg-white text-purple-950 font-black shadow-xs"
+                      : "bg-purple-900/60 text-purple-200 hover:bg-purple-800/80 border border-purple-700/50"
+                  }`}
+                >
+                  {isArabic ? `جميع طلاب الملف (${groupStudents.length})` : `All Students (${groupStudents.length})`}
+                </button>
+                {groupStudents.map(st => (
+                  <button
+                    key={st.id}
+                    type="button"
+                    onClick={() => setGroupReportsStudentFilter(st.id)}
+                    className={`px-3 py-1 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                      groupReportsStudentFilter === st.id
+                        ? "bg-white text-purple-950 font-black shadow-xs"
+                        : "bg-purple-900/60 text-purple-200 hover:bg-purple-800/80 border border-purple-700/50"
+                    }`}
+                  >
+                    <span>{st.fullName}</span>
+                    <span className="text-[10px] opacity-75">
+                      ({reports.filter(r => r.studentId === st.id || r.studentName === st.fullName).length})
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Reports Search and List */}
+            {(() => {
+              const allGroupReports = reports.filter(r => {
+                const isGroupMember = targetGroupStudentIds.includes(r.studentId) || groupStudents.some(s => s.fullName === r.studentName);
+                if (!isGroupMember) return false;
+                if (groupReportsStudentFilter !== "all") {
+                  const selectedSt = groupStudents.find(s => s.id === groupReportsStudentFilter);
+                  return r.studentId === groupReportsStudentFilter || (selectedSt && r.studentName === selectedSt.fullName);
+                }
+                return true;
+              }).filter(r => {
+                if (groupReportsTypeFilter === "daily") return isDailyPersonalReport(r);
+                if (groupReportsTypeFilter === "monthly") return isMonthlyComprehensiveReport(r);
+                return true;
+              }).filter(r => {
+                if (!groupReportsSearchQuery.trim()) return true;
+                const q = groupReportsSearchQuery.toLowerCase();
+                return (
+                  (r.studentName || "").toLowerCase().includes(q) ||
+                  (r.subject || "").toLowerCase().includes(q) ||
+                  (r.date || "").toLowerCase().includes(q) ||
+                  (r.reportText || r.generatedText || r.teacherNotes || "").toLowerCase().includes(q)
+                );
+              }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+              return (
+                <div className="space-y-3">
+                  {/* Search Bar & Direct Type Filter */}
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs">
+                    <div className="relative flex-1">
+                      <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={groupReportsSearchQuery}
+                        onChange={e => setGroupReportsSearchQuery(e.target.value)}
+                        placeholder={isArabic ? "بحث في نصوص ومواضيع وتواريخ التقارير..." : "Search reports text, subject, date..."}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl pr-9 pl-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:border-purple-500 focus:bg-white"
+                      />
+                    </div>
+                    {/* Filter Pills for Report Type */}
+                    <div className="flex items-center gap-1.5 shrink-0 bg-slate-100 p-1 rounded-xl">
+                      <button
+                        type="button"
+                        onClick={() => setGroupReportsTypeFilter("all")}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+                          groupReportsTypeFilter === "all" ? "bg-white text-slate-900 shadow-xs" : "text-slate-600 hover:text-slate-900"
+                        }`}
+                      >
+                        {isArabic ? "الكل" : "All"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setGroupReportsTypeFilter("daily")}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 ${
+                          groupReportsTypeFilter === "daily" ? "bg-purple-600 text-white shadow-xs" : "text-slate-600 hover:text-purple-700"
+                        }`}
+                      >
+                        <FileText className="w-3 h-3" />
+                        <span>{isArabic ? "يومية" : "Daily"}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setGroupReportsTypeFilter("monthly")}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 ${
+                          groupReportsTypeFilter === "monthly" ? "bg-teal-600 text-white shadow-xs" : "text-slate-600 hover:text-teal-700"
+                        }`}
+                      >
+                        <Sparkles className="w-3 h-3" />
+                        <span>{isArabic ? "شاملة شهرية" : "Monthly"}</span>
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] text-slate-500 font-bold">
+                        {isArabic ? `النتائج (${allGroupReports.length})` : `Count (${allGroupReports.length})`}
+                      </span>
+                    </div>
+                  </div>
+
+                  {allGroupReports.length === 0 ? (
+                    <div className="p-8 text-center text-slate-500 bg-white rounded-3xl border border-slate-200/90 space-y-3 shadow-2xs">
+                      <div className="w-14 h-14 rounded-3xl bg-purple-50 text-purple-600 flex items-center justify-center mx-auto border border-purple-100 shadow-inner">
+                        <Sparkles className="w-7 h-7" />
+                      </div>
+                      <h3 className="font-black text-slate-800 text-sm">
+                        {isArabic ? "لا توجد تقارير مسجلة مطابقة للبحث" : "No matching reports found"}
+                      </h3>
+                      <p className="text-xs text-slate-500 max-w-md mx-auto">
+                        {isArabic
+                          ? "اضغط على زر إنشاء تقرير لفتح صفحة التقرير وتوليد تقرير احترافي بالذكاء الاصطناعي لأي طالب في هذا الملف المدمج."
+                          : "Click Create Report to open the report view and generate an AI report for any student in this group."}
+                      </p>
+                      <div className="pt-2 flex justify-center gap-2 flex-wrap">
+                        {groupStudents.map(st => (
+                          <button
+                            key={st.id}
+                            type="button"
+                            onClick={() => setStudentForPersonalReport(st)}
+                            className="px-3.5 py-1.5 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold text-xs border border-purple-200 transition flex items-center gap-1.5"
+                          >
+                            <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                            <span>{isArabic ? `إنشاء تقرير لـ ${st.fullName}` : `Report for ${st.fullName}`}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {allGroupReports.map(rep => {
+                        const targetStudent = groupStudents.find(
+                          s => s.id === rep.studentId || s.fullName === rep.studentName
+                        );
+                        const repText = rep.reportText || rep.generatedText || rep.teacherNotes || "";
+                        const isExpanded = expandedReportIds.includes(rep.id);
+                        const repTitle = getReportTitle(rep, isArabic);
+
+                        return (
+                          <div
+                            key={rep.id}
+                            className={`rounded-3xl bg-white border transition shadow-xs overflow-hidden ${
+                              isExpanded ? "border-purple-300 ring-1 ring-purple-100" : "border-slate-200 hover:border-purple-200"
+                            }`}
+                          >
+                            <div
+                              onClick={() => {
+                                if (isExpanded) {
+                                  setExpandedReportIds(prev => prev.filter(id => id !== rep.id));
+                                } else {
+                                  setExpandedReportIds(prev => [...prev, rep.id]);
+                                }
+                              }}
+                              className={`p-4 cursor-pointer select-none transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                                isExpanded ? "bg-purple-50/40 border-b border-purple-100" : "bg-white hover:bg-slate-50/70"
+                              }`}
+                            >
+                              <div className="flex items-center gap-3 flex-1 min-w-0">
+                                <div className="w-9 h-9 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center font-black text-xs shrink-0">
+                                  <Sparkles className="w-4 h-4" />
+                                </div>
+                                <div className="space-y-1 flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="font-black text-slate-900 text-xs">
+                                      {rep.studentName || targetStudent?.fullName || "طالب"}
+                                    </span>
+                                    {rep.lessonNumber && (
+                                      <span className="px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 text-[10px] font-bold">
+                                        #{rep.lessonNumber}
+                                      </span>
+                                    )}
+                                    <h5 className="font-bold text-xs text-purple-950 truncate">
+                                      {repTitle}
+                                    </h5>
+                                  </div>
+                                  <div className="flex items-center gap-1.5 flex-wrap text-[11px] text-slate-500">
+                                    {rep.subject && (
+                                      <span className="px-2 py-0.5 rounded-md bg-purple-50 text-purple-800 text-[10px] font-bold border border-purple-200">
+                                        📚 {rep.subject}
+                                      </span>
+                                    )}
+                                    <span className="text-slate-400 text-[10.5px]">📅 {rep.date}</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-1.5 self-end sm:self-center shrink-0" onClick={e => e.stopPropagation()}>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (isExpanded) {
+                                      setExpandedReportIds(prev => prev.filter(id => id !== rep.id));
+                                    } else {
+                                      setExpandedReportIds(prev => [...prev, rep.id]);
+                                    }
+                                  }}
+                                  className={`px-3 py-1.5 rounded-xl font-bold text-xs transition flex items-center gap-1.5 shadow-2xs ${
+                                    isExpanded
+                                      ? "bg-slate-200 hover:bg-slate-300 text-slate-800"
+                                      : "bg-purple-600 hover:bg-purple-700 text-white shadow-purple-600/20"
+                                  }`}
+                                >
+                                  {isExpanded ? (
+                                    <>
+                                      <EyeOff className="w-3.5 h-3.5" />
+                                      <span>{isArabic ? "إخفاء التقرير" : "Hide Report"}</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Eye className="w-3.5 h-3.5 text-amber-300" />
+                                      <span>{isArabic ? "إظهار التقرير كامل" : "Show Full Report"}</span>
+                                    </>
+                                  )}
+                                </button>
+
+                                {targetStudent && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setStudentForPersonalReport(targetStudent)}
+                                    className="px-2.5 py-1.5 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-bold border border-purple-200 transition flex items-center gap-1"
+                                    title={isArabic ? "فتح صفحة التقرير الكاملة لهذا الطالب" : "Open Full Report Page"}
+                                  >
+                                    <ExternalLink className="w-3 h-3 text-purple-600" />
+                                    <span className="hidden sm:inline">{isArabic ? "صفحة التقرير" : "Full View"}</span>
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    onToggleArchiveReport(rep.id);
+                                    setWhatsappSentNotice(
+                                      rep.archived
+                                        ? (isArabic ? "تم استعادة التقرير إلى التقارير النشطة!" : "Report restored!")
+                                        : (isArabic ? "تم أرشفة التقرير بنجاح!" : "Report archived!")
+                                    );
+                                    setTimeout(() => setWhatsappSentNotice(""), 3000);
+                                  }}
+                                  className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 border ${
+                                    rep.archived
+                                      ? "bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200"
+                                      : "bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-200"
+                                  }`}
+                                  title={rep.archived ? (isArabic ? "استعادة للنشطة" : "Restore") : (isArabic ? "أرشفة التقرير يدوياً" : "Archive Report")}
+                                >
+                                  {rep.archived ? (
+                                    <>
+                                      <ArchiveRestore className="w-3 h-3 text-purple-600" />
+                                      <span className="hidden sm:inline">{isArabic ? "استعادة" : "Restore"}</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Archive className="w-3 h-3 text-amber-600" />
+                                      <span className="hidden sm:inline">{isArabic ? "أرشفة" : "Archive"}</span>
+                                    </>
+                                  )}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenWhatsAppChooser(repText, `تقرير ${rep.studentName || targetStudent?.fullName || ""} - ${rep.subject || ""}`)}
+                                  className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition flex items-center gap-1 shadow-2xs"
+                                >
+                                  <MessageSquare className="w-3 h-3" />
+                                  <span>{isArabic ? "واتساب" : "WhatsApp"}</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(repText);
+                                    setCopiedReportId(rep.id);
+                                    setTimeout(() => setCopiedReportId(null), 2000);
+                                  }}
+                                  className="p-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition"
+                                  title={isArabic ? "نسخ التقرير" : "Copy"}
+                                >
+                                  {copiedReportId === rep.id ? (
+                                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                  ) : (
+                                    <Copy className="w-3.5 h-3.5" />
+                                  )}
+                                </button>
+                                {onDeleteReport && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setReportToDeleteId(rep.id)}
+                                    className="p-1.5 rounded-xl bg-slate-100 hover:bg-rose-50 text-slate-500 hover:text-rose-600 transition"
+                                    title={isArabic ? "حذف التقرير" : "Delete Report"}
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            {isExpanded && (
+                              <div className="bg-slate-50 p-4 border-t border-slate-100 text-slate-800 text-xs font-medium leading-relaxed whitespace-pre-wrap animate-in fade-in">
+                                {repText}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         )}
 
@@ -2343,7 +3563,7 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
                             </span>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                               {sgStudents.map(st => {
-                                const stFin = calculateStudentFinancials(st, attendanceRecords);
+                                const stFin = calculateStudentFinancials(st, attendanceRecords, paymentTransactions);
                                 return (
                                   <div
                                     key={st.id}
@@ -2589,17 +3809,7 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
 
                       <button
                         type="button"
-                        onClick={() => {
-                          if (
-                            confirm(
-                              isArabic
-                                ? `هل تريد فك تجميع الطالب (${st.fullName}) وإعادته كملف مستقل في القائمة الرئيسية؟`
-                                : `Remove ${st.fullName} from this group?`
-                            )
-                          ) {
-                            onRemoveStudentFromGroup(group.id, st.id);
-                          }
-                        }}
+                        onClick={() => setStudentToRemoveFromGroup(st)}
                         className="px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-rose-600 border border-slate-200 hover:border-rose-200 transition font-bold text-[10.5px] flex items-center gap-1"
                       >
                         <UserX className="w-3.5 h-3.5" />
@@ -2684,18 +3894,7 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
               </div>
               <button
                 type="button"
-                onClick={() => {
-                  if (
-                    confirm(
-                      isArabic
-                        ? `هل أنت متأكد من فك الملف المجمع (${group.name})؟ سيعود جميع الطلاب كملفات شخصية مستقلة.`
-                        : `Are you sure you want to disband ${group.name}?`
-                    )
-                  ) {
-                    onDeleteGroup(group.id);
-                    onClose();
-                  }
-                }}
+                onClick={() => setShowDisbandGroupConfirm(true)}
                 className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs transition shadow-2xs flex items-center gap-1.5"
               >
                 <Trash2 className="w-3.5 h-3.5" />
@@ -2923,7 +4122,7 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
                 const sgStudents = groupStudents.filter(s => (activeSubGroupForPayment.studentIds || []).includes(s.id));
                 const sgFinancials = sgStudents.map(st => ({
                   student: st,
-                  summary: calculateStudentFinancials(st, attendanceRecords)
+                  summary: calculateStudentFinancials(st, attendanceRecords, paymentTransactions)
                 }));
                 const sgCost = sgFinancials.reduce((sum, i) => sum + i.summary.totalAccruedCost, 0);
                 const sgPaid = sgFinancials.reduce((sum, i) => sum + i.summary.totalPaidAmount, 0);
@@ -3111,14 +4310,26 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
                 )}
               </div>
 
-              <div className="flex items-center justify-between pt-2 gap-2">
-                <button
-                  onClick={handleCopyStatement}
-                  className="px-3.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition flex items-center gap-1.5"
-                >
-                  {copiedStatement ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copiedStatement ? (isArabic ? "تم النسخ!" : "Copied!") : (isArabic ? "نسخ النص" : "Copy")}</span>
-                </button>
+              <div className="flex items-center justify-between pt-2 gap-2 flex-wrap">
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={handleCopyStatement}
+                    className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition flex items-center gap-1.5"
+                  >
+                    {copiedStatement ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedStatement ? (isArabic ? "تم النسخ!" : "Copied!") : (isArabic ? "نسخ النص" : "Copy")}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => window.print()}
+                    className="px-3 py-1.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-bold text-xs transition flex items-center gap-1.5 shadow-2xs"
+                    title={isArabic ? "طباعة كشف الحساب المالي للملف المجمع" : "Print Combined Statement"}
+                  >
+                    <Printer className="w-3.5 h-3.5 text-slate-600" />
+                    <span>{isArabic ? "طباعة الكشف" : "Print"}</span>
+                  </button>
+                </div>
 
                 <button
                   onClick={() => handleOpenWhatsAppChooser(generateStatementText(), isArabic ? `كشف حساب مالي - ${group.name}` : `Statement - ${group.name}`)}
@@ -3127,6 +4338,93 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
                   <Share2 className="w-3.5 h-3.5" />
                   <span>{isArabic ? "جميع خيارات الإرسال..." : "All Options..."}</span>
                 </button>
+              </div>
+
+              {/* Printable Combined Financial Statement Voucher */}
+              <div id="student-statement-printable" className="hidden print:block text-slate-900 bg-white font-sans text-xs p-4" dir={isArabic ? "rtl" : "ltr"}>
+                <div className="border-b-2 border-slate-900 pb-3 mb-4 flex items-center justify-between">
+                  <div>
+                    <h1 className="text-xl font-black text-slate-900">
+                      {settings.teacherName || (isArabic ? "المنصة التعليمية اليومية" : "Educational Platform")}
+                    </h1>
+                    <h2 className="text-sm font-bold text-slate-700 mt-0.5">
+                      {isArabic ? `كشف الحساب المالي وساعات الدراسة للملف المجمع: ${group.name}` : `Combined Financial Statement: ${group.name}`}
+                    </h2>
+                  </div>
+                  <div className="text-left font-mono text-[10px] text-slate-500">
+                    <p>{isArabic ? "تاريخ الإصدار:" : "Date:"} {new Date().toLocaleDateString(isArabic ? "ar-EG" : "en-US", { year: "numeric", month: "long", day: "numeric" })}</p>
+                    <p className="font-bold text-slate-700 mt-0.5">IFRS Certified Report</p>
+                  </div>
+                </div>
+
+                {/* Group Summary Banner */}
+                <div className="p-3.5 rounded-xl bg-sky-50 border-2 border-sky-600 mb-4 flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-black text-sky-950 block">
+                      ⏱️ إجمالي الساعات المنفذة لكافة طلاب الملف: {totalTaughtHoursAll} ساعة ({formatHoursHuman(totalTaughtHoursAll, isArabic)})
+                    </span>
+                    <p className="text-[10.5px] text-slate-700 mt-0.5">
+                      إجمالي الحصص المنفذة: {totalAttendedLessonsAll} حصة • إجمالي عدد الطلاب: {groupStudents.length} طلاب • إجمالي المسدد: {totalPaidAmountAll} ج.م • {totalAmountDueAll > 0 ? `المستحق: ${totalAmountDueAll} ج.م` : `الحساب مسدد بالكامل`}
+                    </p>
+                  </div>
+                  <div className="text-left font-black text-xl text-sky-900 bg-white px-3 py-1.5 rounded-lg border border-sky-300 shrink-0">
+                    {totalTaughtHoursAll} ساعة
+                  </div>
+                </div>
+
+                {/* Table of Students with Hours */}
+                <table className="w-full text-right border-collapse border border-slate-300 text-[11px] mb-4">
+                  <thead>
+                    <tr className="bg-slate-100 text-slate-800 font-bold border-b border-slate-300">
+                      <th className="p-1.5 border-r border-slate-300 w-8 text-center">#</th>
+                      <th className="p-1.5 border-r border-slate-300">اسم الطالب</th>
+                      <th className="p-1.5 border-r border-slate-300">المواد</th>
+                      <th className="p-1.5 border-r border-slate-300 text-center">الحصص المنفذة</th>
+                      <th className="p-1.5 border-r border-slate-300 text-center">ساعات الدراسة</th>
+                      <th className="p-1.5 border-r border-slate-300 text-center">المحسوب</th>
+                      <th className="p-1.5 border-r border-slate-300 text-center">المسدد</th>
+                      <th className="p-1.5 text-center">الموقف المالي</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {studentsFinancials.map((item, idx) => {
+                      const st = item.student;
+                      const fin = item.summary;
+                      return (
+                        <tr key={st.id} className="border-b border-slate-200">
+                          <td className="p-1.5 border-r border-slate-300 text-center font-bold">{idx + 1}</td>
+                          <td className="p-1.5 border-r border-slate-300 font-bold">{st.fullName}</td>
+                          <td className="p-1.5 border-r border-slate-300">{st.subjects && st.subjects.length > 0 ? st.subjects.map(s => s.subject).join("، ") : st.subject}</td>
+                          <td className="p-1.5 border-r border-slate-300 text-center font-bold text-blue-800">{fin.totalAttendedLessons} حصة</td>
+                          <td className="p-1.5 border-r border-slate-300 text-center font-black text-sky-900">⏱️ {fin.totalTaughtHours ?? Number(((fin.totalAttendedLessons * 60) / 60).toFixed(1))} ساعة</td>
+                          <td className="p-1.5 border-r border-slate-300 text-center font-mono">{fin.totalAccruedCost} ج.م</td>
+                          <td className="p-1.5 border-r border-slate-300 text-center font-mono text-emerald-800">{fin.totalPaidAmount} ج.م</td>
+                          <td className="p-1.5 text-center font-bold">
+                            {fin.amountDue > 0 ? (
+                              <span className="text-rose-700 font-black">{fin.amountDue} ج.م مستحق</span>
+                            ) : fin.creditRemaining > 0 ? (
+                              <span className="text-emerald-700">+{fin.creditRemaining} ج.م رصيد</span>
+                            ) : (
+                              <span className="text-emerald-700">مسدد بالكامل</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+
+                {/* Footer and Signatures */}
+                <div className="pt-3 border-t-2 border-slate-900 flex items-center justify-between text-xs font-bold text-slate-700">
+                  <div>
+                    <p>تم استخراج وتدقيق هذا الكشف المالي وساعات الدراسة المجمعة إلكترونياً.</p>
+                    <p className="text-[10px] text-slate-500 font-normal mt-0.5">صادر عن منظومة إدارة المعلم الإسلامي والتعليمي اليومية</p>
+                  </div>
+                  <div className="text-center min-w-[150px]">
+                    <p className="border-b border-slate-400 pb-4 mb-1">توقيع المعلم / الإدارة</p>
+                    <span className="text-[10px] text-slate-500">معتمد</span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -3392,11 +4690,10 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
 
                     <div>
                       <label className="block font-bold text-slate-700 mb-1 text-[11px]">
-                        {isArabic ? "رقم ولي الأمر (واتساب) *" : "Parent WhatsApp Number *"}
+                        {isArabic ? "رقم ولي الأمر (واتساب)" : "Parent WhatsApp Number"}
                       </label>
                       <input
                         type="text"
-                        required
                         value={editParentContact}
                         onChange={e => setEditParentContact(e.target.value)}
                         placeholder="+201000000000"
@@ -3583,107 +4880,328 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
                               {isArabic ? "نظام المحاسبة" : "Billing Mode"}
                             </label>
                             <select
-                              value={sub.billingType || "monthly"}
+                              value={sub.billingType || "monthly_elapsed_lessons"}
                               onChange={e => handleUpdateEditSubjectField(sIdx, { billingType: e.target.value as any })}
-                              className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-indigo-500"
+                              className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-indigo-500 font-bold"
                             >
-                              <option value="monthly">📅 {isArabic ? "اشتراك شهري كامل" : "Full Monthly"}</option>
-                              <option value="per_lesson">💵 {isArabic ? "محاسبة بالحصة المنفذة" : "Per Lesson"}</option>
-                              <option value="monthly_elapsed_lessons">🗓️ {isArabic ? "حصص الشهر المنقضية" : "Elapsed Lessons"}</option>
+                              <option value="monthly_elapsed_lessons">🗓️ {isArabic ? "حساب آخر الشهر (حصص وساعات فعلية)" : "Elapsed Lessons (Month-End)"}</option>
+                              <option value="monthly">📅 {isArabic ? "اشتراك شهري كامل (مبلغ محدد مسبقاً)" : "Full Monthly Subscription"}</option>
                               <option value="monthly_fixed_lessons">🎯 {isArabic ? "باقة حصص شهرية محددة" : "Fixed Lessons Package"}</option>
                             </select>
                           </div>
                         </div>
 
-                        {/* Pricing inputs */}
+                        {/* Pricing inputs matching the selected billing method */}
                         <div className="space-y-2 pt-1">
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                            <div>
-                              <label className="block font-bold text-slate-700 mb-1 text-[10.5px]">
-                                {isArabic ? "سعر الشهر الكامل (ج.م)" : "Monthly Cost"}
-                              </label>
-                              <input
-                                type="number"
-                                min="0"
-                                step="any"
-                                value={sub.monthlyCost || 0}
-                                onChange={e => {
-                                  const mCost = parseFloat(e.target.value) || 0;
-                                  const count = sub.lessonsPerMonth || 4;
-                                  const lCost = Math.max(0, Number((mCost / count).toFixed(2)));
-                                  handleUpdateEditSubjectField(sIdx, {
-                                    monthlyCost: mCost,
-                                    lessonCost: (sub.billingType === "monthly" || sub.billingType === "monthly_fixed_lessons" || !sub.billingType) ? lCost : sub.lessonCost
-                                  });
-                                }}
-                                className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-mono font-bold text-slate-900 focus:outline-none focus:border-indigo-500"
-                              />
-                            </div>
+                          {/* Case 1: Elapsed Lessons (Month-End) */}
+                          {(sub.billingType === "monthly_elapsed_lessons" || (!sub.billingType && sub.billingType !== "monthly" && sub.billingType !== "monthly_fixed_lessons")) && (
+                            <div className="space-y-2 bg-blue-50/50 p-2.5 rounded-xl border border-blue-100">
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                <div>
+                                  <label className="block font-bold text-slate-700 mb-1 text-[10.5px]">
+                                    {isArabic ? "طريقة التسعير" : "Pricing Basis"}
+                                  </label>
+                                  <select
+                                    value={sub.rateType || "per_lesson"}
+                                    onChange={e => {
+                                      const newRateType = e.target.value as "per_lesson" | "per_hour";
+                                      const currentHourly = sub.hourlyCost || sub.lessonCost || 100;
+                                      const dur = sub.defaultDurationMinutes || 60;
+                                      const calculatedLessonCost = newRateType === "per_hour" ? Math.max(0, Number(((currentHourly * dur) / 60).toFixed(2))) : sub.lessonCost;
+                                      handleUpdateEditSubjectField(sIdx, {
+                                        rateType: newRateType,
+                                        hourlyCost: currentHourly,
+                                        defaultDurationMinutes: dur,
+                                        lessonCost: calculatedLessonCost
+                                      });
+                                    }}
+                                    className="w-full bg-white border border-slate-200 rounded-xl px-2 py-1.5 text-xs font-bold text-slate-900 focus:outline-none focus:border-indigo-500"
+                                  >
+                                    <option value="per_lesson">💵 {isArabic ? "سعر الحصة" : "Per Lesson"}</option>
+                                    <option value="per_hour">⏱️ {isArabic ? "سعر الساعة" : "Per Hour"}</option>
+                                  </select>
+                                </div>
 
-                            <div>
-                              <label className="block font-bold text-slate-700 mb-1 text-[10.5px]">
-                                {isArabic ? "سعر الحصة (ج.م)" : "Lesson Cost"}
-                              </label>
-                              <input
-                                type="number"
-                                min="0"
-                                step="any"
-                                value={sub.lessonCost}
-                                onChange={e => {
-                                  const lCost = parseFloat(e.target.value) || 0;
-                                  const count = sub.lessonsPerMonth || 4;
-                                  handleUpdateEditSubjectField(sIdx, {
-                                    lessonCost: lCost,
-                                    monthlyCost: sub.billingType === "monthly_fixed_lessons" ? Number((lCost * count).toFixed(2)) : sub.monthlyCost
-                                  });
-                                }}
-                                className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-mono font-bold text-slate-900 focus:outline-none focus:border-indigo-500"
-                              />
-                            </div>
+                                {sub.rateType === "per_hour" ? (
+                                  <div>
+                                    <label className="block font-bold text-slate-700 mb-1 text-[10.5px]">
+                                      {isArabic ? "سعر الساعة (ج.م)" : "Hourly Rate (EGP)"}
+                                    </label>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="any"
+                                      value={sub.hourlyCost || sub.lessonCost || 100}
+                                      onChange={e => {
+                                        const hCost = parseFloat(e.target.value) || 0;
+                                        const dur = sub.defaultDurationMinutes || 60;
+                                        const lCost = Math.max(0, Number(((hCost * dur) / 60).toFixed(2)));
+                                        handleUpdateEditSubjectField(sIdx, {
+                                          hourlyCost: hCost,
+                                          lessonCost: lCost
+                                        });
+                                      }}
+                                      className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-mono font-bold text-slate-900 focus:outline-none focus:border-indigo-500"
+                                    />
+                                  </div>
+                                ) : (
+                                  <div>
+                                    <label className="block font-bold text-slate-700 mb-1 text-[10.5px]">
+                                      {isArabic ? "سعر الحصة (ج.م)" : "Lesson Cost (EGP)"}
+                                    </label>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="any"
+                                      value={sub.lessonCost}
+                                      onChange={e => handleUpdateEditSubjectField(sIdx, { lessonCost: parseFloat(e.target.value) || 0 })}
+                                      className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-mono font-bold text-slate-900 focus:outline-none focus:border-indigo-500"
+                                    />
+                                  </div>
+                                )}
 
-                            <div>
-                              <label className="block font-bold text-slate-700 mb-1 text-[10.5px]">
-                                {isArabic ? "الحصص شهرياً" : "Lessons / Month"}
-                              </label>
-                              <input
-                                type="number"
-                                min="1"
-                                value={sub.lessonsPerMonth || 4}
-                                onChange={e => {
-                                  const count = Math.max(1, Number(e.target.value) || 1);
-                                  const mCost = sub.monthlyCost || 0;
-                                  const lCost = mCost > 0 ? Math.max(0, Number((mCost / count).toFixed(2))) : sub.lessonCost;
-                                  handleUpdateEditSubjectField(sIdx, {
-                                    lessonsPerMonth: count,
-                                    lessonCost: (sub.billingType === "monthly" || sub.billingType === "monthly_fixed_lessons") && mCost > 0 ? lCost : sub.lessonCost
-                                  });
-                                }}
-                                className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-mono text-slate-900 focus:outline-none focus:border-indigo-500"
-                              />
-                            </div>
+                                <div>
+                                  <label className="block font-bold text-slate-700 mb-1 text-[10.5px]">
+                                    {isArabic ? "مدة الحصة (دقيقة)" : "Duration (min)"}
+                                  </label>
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    max="360"
+                                    value={sub.defaultDurationMinutes || ""}
+                                    placeholder="60"
+                                    onChange={e => {
+                                      const val = parseInt(e.target.value, 10);
+                                      const dur = isNaN(val) ? 0 : Math.max(1, val);
+                                      if (sub.rateType === "per_hour") {
+                                        const hCost = sub.hourlyCost || sub.lessonCost || 100;
+                                        const lCost = Math.max(0, Number(((hCost * dur) / 60).toFixed(2)));
+                                        handleUpdateEditSubjectField(sIdx, { defaultDurationMinutes: dur, lessonCost: lCost });
+                                      } else {
+                                        handleUpdateEditSubjectField(sIdx, { defaultDurationMinutes: dur });
+                                      }
+                                    }}
+                                    className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-mono text-slate-900 focus:outline-none focus:border-indigo-500 text-center"
+                                  />
+                                  <div className="flex items-center gap-1 flex-wrap mt-1">
+                                    {[10, 15, 20, 25, 30, 45, 60, 90, 120].map(dur => (
+                                      <button
+                                        type="button"
+                                        key={dur}
+                                        onClick={() => {
+                                          if (sub.rateType === "per_hour") {
+                                            const hCost = sub.hourlyCost || sub.lessonCost || 100;
+                                            const lCost = Math.max(0, Number(((hCost * dur) / 60).toFixed(2)));
+                                            handleUpdateEditSubjectField(sIdx, { defaultDurationMinutes: dur, lessonCost: lCost });
+                                          } else {
+                                            handleUpdateEditSubjectField(sIdx, { defaultDurationMinutes: dur });
+                                          }
+                                        }}
+                                        className={`px-1.5 py-0.5 rounded text-[9px] font-bold transition ${
+                                          (sub.defaultDurationMinutes || 60) === dur
+                                            ? "bg-indigo-600 text-white shadow-2xs"
+                                            : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                                        }`}
+                                      >
+                                        {dur}{isArabic ? "د" : "m"}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              </div>
 
-                            <div>
-                              <label className="block font-bold text-slate-700 mb-1 text-[10.5px]">
-                                {isArabic ? "مدة الحصة (دقيقة)" : "Duration (min)"}
-                              </label>
-                              <input
-                                type="number"
-                                min="15"
-                                value={sub.defaultDurationMinutes || 60}
-                                onChange={e => handleUpdateEditSubjectField(sIdx, { defaultDurationMinutes: Number(e.target.value) || 60 })}
-                                className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-mono text-slate-900 focus:outline-none focus:border-indigo-500"
-                              />
+                              <div className="text-[11px] text-blue-800 bg-white/90 p-2 rounded-lg border border-blue-200 flex items-center justify-between gap-2">
+                                <span>🗓️ {isArabic ? "حساب آخر الشهر: تُحسب التكلفة تلقائياً بنهاية الشهر بناءً على عدد الحصص والساعات الفعلية المنفذة." : "Month-end billing based on actual attended lessons and hours."}</span>
+                                <span className="font-bold text-blue-700 shrink-0">
+                                  {sub.lessonCost} {isArabic ? "ج.م / حصة" : "EGP/lesson"}
+                                </span>
+                              </div>
                             </div>
-                          </div>
+                          )}
 
-                          {(sub.monthlyCost && sub.monthlyCost > 0 && sub.lessonsPerMonth && sub.lessonsPerMonth > 0) && (
-                            <div className="flex items-center justify-between gap-2 bg-indigo-50/70 px-3 py-1.5 rounded-xl border border-indigo-200 text-xs">
-                              <span className="font-bold text-indigo-900 text-[11px]">
-                                {isArabic ? "➗ ناتج تقسيم سعر الشهر على عدد الحصص:" : "Monthly Split Rate:"}
-                              </span>
-                              <span className="font-black text-indigo-700 bg-white px-2 py-0.5 rounded-lg border border-indigo-200 text-[11px]">
-                                = {Number((sub.monthlyCost / sub.lessonsPerMonth).toFixed(2))} {isArabic ? "ج.م / حصة" : "EGP / lesson"} ({sub.monthlyCost} ÷ {sub.lessonsPerMonth})
-                              </span>
+                          {/* Case 2: Full Month */}
+                          {sub.billingType === "monthly" && (
+                            <div className="space-y-2 bg-purple-50/50 p-2.5 rounded-xl border border-purple-100">
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                <div>
+                                  <label className="block font-bold text-slate-700 mb-1 text-[10.5px]">
+                                    {isArabic ? "سعر الشهر الكامل (ج.م)" : "Monthly Cost"}
+                                  </label>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="any"
+                                    value={sub.monthlyCost !== undefined ? sub.monthlyCost : 400}
+                                    onChange={e => {
+                                      const mCost = parseFloat(e.target.value) || 0;
+                                      const count = sub.lessonsPerMonth || 4;
+                                      const lCost = Math.max(0, Number((mCost / count).toFixed(2)));
+                                      handleUpdateEditSubjectField(sIdx, {
+                                        monthlyCost: mCost,
+                                        lessonCost: lCost
+                                      });
+                                    }}
+                                    className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-mono font-bold text-slate-900 focus:outline-none focus:border-indigo-500"
+                                  />
+                                </div>
+
+                                <div>
+                                  <label className="block font-bold text-slate-700 mb-1 text-[10.5px]">
+                                    {isArabic ? "الحصص شهرياً (للتقسيم)" : "Lessons / Month"}
+                                  </label>
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    value={sub.lessonsPerMonth || 4}
+                                    onChange={e => {
+                                      const count = Math.max(1, Number(e.target.value) || 1);
+                                      const mCost = sub.monthlyCost !== undefined ? sub.monthlyCost : 400;
+                                      const lCost = mCost > 0 ? Math.max(0, Number((mCost / count).toFixed(2))) : sub.lessonCost;
+                                      handleUpdateEditSubjectField(sIdx, {
+                                        lessonsPerMonth: count,
+                                        lessonCost: lCost
+                                      });
+                                    }}
+                                    className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-mono text-slate-900 focus:outline-none focus:border-indigo-500"
+                                  />
+                                </div>
+
+                                <div>
+                                  <label className="block font-bold text-slate-700 mb-1 text-[10.5px]">
+                                    {isArabic ? "مدة الحصة (دقيقة)" : "Duration (min)"}
+                                  </label>
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    max="360"
+                                    value={sub.defaultDurationMinutes || ""}
+                                    placeholder="60"
+                                    onChange={e => {
+                                      const val = parseInt(e.target.value, 10);
+                                      const dur = isNaN(val) ? 0 : Math.max(1, val);
+                                      handleUpdateEditSubjectField(sIdx, { defaultDurationMinutes: dur });
+                                    }}
+                                    className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-mono text-slate-900 focus:outline-none focus:border-indigo-500 text-center"
+                                  />
+                                  <div className="flex items-center gap-1 flex-wrap mt-1">
+                                    {[10, 15, 20, 25, 30, 45, 60, 90, 120].map(dur => (
+                                      <button
+                                        type="button"
+                                        key={dur}
+                                        onClick={() => handleUpdateEditSubjectField(sIdx, { defaultDurationMinutes: dur })}
+                                        className={`px-1.5 py-0.5 rounded text-[9px] font-bold transition ${
+                                          (sub.defaultDurationMinutes || 60) === dur
+                                            ? "bg-indigo-600 text-white shadow-2xs"
+                                            : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                                        }`}
+                                      >
+                                        {dur}{isArabic ? "د" : "m"}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center justify-between gap-2 bg-white/90 px-3 py-1.5 rounded-lg border border-purple-200 text-xs">
+                                <span className="font-bold text-purple-900 text-[11px]">
+                                  {isArabic ? "➗ ناتج تقسيم سعر الشهر على عدد الحصص:" : "Monthly Split Rate:"}
+                                </span>
+                                <span className="font-black text-purple-700 text-[11px]">
+                                  = {sub.lessonCost || Number(((sub.monthlyCost || 400) / (sub.lessonsPerMonth || 4)).toFixed(2))} {isArabic ? "ج.م / حصة" : "EGP / lesson"} ({sub.monthlyCost || 400} ÷ {sub.lessonsPerMonth || 4})
+                                </span>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Case 3: Fixed Lessons Package */}
+                          {sub.billingType === "monthly_fixed_lessons" && (
+                            <div className="space-y-2 bg-emerald-50/50 p-2.5 rounded-xl border border-emerald-100">
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                <div>
+                                  <label className="block font-bold text-slate-700 mb-1 text-[10.5px]">
+                                    {isArabic ? "سعر الحصة (ج.م)" : "Lesson Cost"}
+                                  </label>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="any"
+                                    value={sub.lessonCost}
+                                    onChange={e => {
+                                      const lCost = parseFloat(e.target.value) || 0;
+                                      const count = sub.lessonsPerMonth || 8;
+                                      handleUpdateEditSubjectField(sIdx, {
+                                        lessonCost: lCost,
+                                        monthlyCost: Number((lCost * count).toFixed(2))
+                                      });
+                                    }}
+                                    className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-mono font-bold text-slate-900 focus:outline-none focus:border-indigo-500"
+                                  />
+                                </div>
+
+                                <div>
+                                  <label className="block font-bold text-slate-700 mb-1 text-[10.5px]">
+                                    {isArabic ? "عدد حصص الباقة" : "Package Lessons"}
+                                  </label>
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    value={sub.lessonsPerMonth || 8}
+                                    onChange={e => {
+                                      const count = Math.max(1, Number(e.target.value) || 1);
+                                      const lCost = sub.lessonCost || 100;
+                                      handleUpdateEditSubjectField(sIdx, {
+                                        lessonsPerMonth: count,
+                                        monthlyCost: Number((lCost * count).toFixed(2))
+                                      });
+                                    }}
+                                    className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-mono text-slate-900 focus:outline-none focus:border-indigo-500"
+                                  />
+                                </div>
+
+                                <div>
+                                  <label className="block font-bold text-slate-700 mb-1 text-[10.5px]">
+                                    {isArabic ? "مدة الحصة (دقيقة)" : "Duration (min)"}
+                                  </label>
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    max="360"
+                                    value={sub.defaultDurationMinutes || ""}
+                                    placeholder="60"
+                                    onChange={e => {
+                                      const val = parseInt(e.target.value, 10);
+                                      const dur = isNaN(val) ? 0 : Math.max(1, val);
+                                      handleUpdateEditSubjectField(sIdx, { defaultDurationMinutes: dur });
+                                    }}
+                                    className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-mono text-slate-900 focus:outline-none focus:border-indigo-500 text-center"
+                                  />
+                                  <div className="flex items-center gap-1 flex-wrap mt-1">
+                                    {[10, 15, 20, 25, 30, 45, 60, 90, 120].map(dur => (
+                                      <button
+                                        type="button"
+                                        key={dur}
+                                        onClick={() => handleUpdateEditSubjectField(sIdx, { defaultDurationMinutes: dur })}
+                                        className={`px-1.5 py-0.5 rounded text-[9px] font-bold transition ${
+                                          (sub.defaultDurationMinutes || 60) === dur
+                                            ? "bg-indigo-600 text-white shadow-2xs"
+                                            : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                                        }`}
+                                      >
+                                        {dur}{isArabic ? "د" : "m"}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center justify-between gap-2 bg-white/90 px-3 py-1.5 rounded-lg border border-emerald-200 text-xs">
+                                <span className="font-bold text-emerald-900 text-[11px]">
+                                  {isArabic ? "🎯 إجمالي تكلفة الباقة:" : "Total Package Cost:"}
+                                </span>
+                                <span className="font-black text-emerald-700 text-[11px]">
+                                  = {Number(((sub.lessonCost || 100) * (sub.lessonsPerMonth || 8)).toFixed(2))} {isArabic ? "ج.م" : "EGP"} ({sub.lessonsPerMonth || 8} حصص × {sub.lessonCost || 100} ج.م)
+                                </span>
+                              </div>
                             </div>
                           )}
                         </div>
@@ -3706,6 +5224,64 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
                   />
                 </div>
 
+                {/* Scope of Changes: Apply to Previous vs Future Lessons Only */}
+                <div className="p-3.5 rounded-2xl bg-amber-50/70 border border-amber-200/90 space-y-2 text-right">
+                  <div className="flex items-center gap-2 text-amber-950 font-black text-xs">
+                    <HelpCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                    <span>{isArabic ? "نطاق تطبيق التعديلات (تطبيقه على السابق أم لا):" : "Scope of Changes (Past vs Future Lessons):"}</span>
+                  </div>
+                  <p className="text-[11px] text-amber-800 font-medium">
+                    {isArabic
+                      ? "اختر هل ترغب في تطبيق هذه التعديلات والأسعار على الحصص السابقة بأثر رجعي، أم قصرها على الحصص القادمة فقط:"
+                      : "Choose whether changes apply retroactively to past lessons, or start fresh for future lessons only:"}
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                    <label
+                      className={`p-3 rounded-xl border-2 cursor-pointer transition flex items-start gap-2.5 select-none ${
+                        editApplyToPrevious
+                          ? "border-emerald-500 bg-emerald-50/90 text-emerald-950 shadow-xs"
+                          : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="editApplyToPreviousRadioCombined"
+                        checked={editApplyToPrevious}
+                        onChange={() => setEditApplyToPrevious(true)}
+                        className="mt-0.5 accent-emerald-600"
+                      />
+                      <div className="text-right">
+                        <p className="text-xs font-black">{isArabic ? "نعم، تطبيق على السابق والقادم" : "Yes, apply to past & future"}</p>
+                        <p className="text-[10.5px] text-slate-500 mt-0.5 leading-relaxed">
+                          {isArabic ? "تحديث أسعار وحسابات الحصص السابقة وسجلات الحضور والاسم لتطابق التعديل الجديد بأثر رجعي." : "Updates past lessons and attendance records with new rates."}
+                        </p>
+                      </div>
+                    </label>
+
+                    <label
+                      className={`p-3 rounded-xl border-2 cursor-pointer transition flex items-start gap-2.5 select-none ${
+                        !editApplyToPrevious
+                          ? "border-blue-500 bg-blue-50/90 text-blue-950 shadow-xs"
+                          : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="editApplyToPreviousRadioCombined"
+                        checked={!editApplyToPrevious}
+                        onChange={() => setEditApplyToPrevious(false)}
+                        className="mt-0.5 accent-blue-600"
+                      />
+                      <div className="text-right">
+                        <p className="text-xs font-black">{isArabic ? "لا، التطبيق على القادم فقط" : "No, future lessons only"}</p>
+                        <p className="text-[10.5px] text-slate-500 mt-0.5 leading-relaxed">
+                          {isArabic ? "تثبيت وتجميد أسعار وحسابات الحصص السابقة كما هي دون المساس بها، وبدء التسعير الجديد للحصص القادمة." : "Locks and preserves past lesson calculations as they were."}
+                        </p>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+
                 {/* Submit Actions */}
                 <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2.5">
                   <button
@@ -3718,7 +5294,11 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
 
                   <button
                     type="submit"
-                    className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition shadow-md shadow-indigo-600/20 flex items-center gap-1.5"
+                    onClick={e => {
+                      e.preventDefault();
+                      handleSaveEditStudentDirectly();
+                    }}
+                    className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition shadow-md shadow-indigo-600/20 flex items-center gap-1.5 cursor-pointer"
                   >
                     <Check className="w-4 h-4" />
                     <span>{isArabic ? "حفظ وتحديث بيانات الطالب" : "Save Changes"}</span>
@@ -3727,6 +5307,322 @@ export const CombinedStudentFileModal: React.FC<CombinedStudentFileModalProps> =
               </form>
             </div>
           </div>
+        )}
+
+        {/* Confirmation Dialog for Combined Modal: Apply Changes to Previous or Not? */}
+        {showApplyConfirmDialog && pendingStudentDataToSave && editingStudent && (
+          <div className="fixed inset-0 z-[100] bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+            <div className="bg-white rounded-3xl p-5 sm:p-6 max-w-md w-full shadow-2xl border border-slate-200 text-right space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0 border border-amber-200">
+                  <HelpCircle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-slate-900 text-sm">
+                    {isArabic ? "تأكيد نطاق تطبيق التعديلات" : "Confirm Changes Scope"}
+                  </h3>
+                  <p className="text-xs text-slate-500 font-semibold mt-0.5">
+                    {isArabic
+                      ? `هل ترغب في تطبيق تعديلات (${pendingStudentDataToSave.fullName || editingStudent.fullName}) على الحصص والسجلات السابقة؟`
+                      : `Apply changes for (${pendingStudentDataToSave.fullName || editingStudent.fullName}) to previous records?`}
+                  </p>
+                </div>
+              </div>
+
+              <p className="text-xs text-slate-600 leading-relaxed bg-slate-50 p-3 rounded-2xl border border-slate-200/80">
+                {isArabic
+                  ? "يمكنك اختيار تحديث الحصص والماليات السابقة بأثر رجعي، أو تجميد السجلات السابقة وتطبيق التعديل على الحصص القادمة فقط."
+                  : "Choose whether to update past lessons retroactively or lock past records and apply new rates only to future lessons."}
+              </p>
+
+              <div className="space-y-2.5">
+                <button
+                  type="button"
+                  onClick={() => confirmExecuteSaveStudentDirectly(true)}
+                  className="w-full text-right p-3.5 rounded-2xl border-2 border-emerald-500 bg-emerald-50/70 hover:bg-emerald-100 transition flex items-start gap-3 group"
+                >
+                  <span className="w-5 h-5 rounded-full border-2 border-emerald-600 flex items-center justify-center mt-0.5 shrink-0 bg-white group-hover:scale-105 transition-transform">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-600" />
+                  </span>
+                  <div>
+                    <p className="text-xs font-black text-emerald-950">
+                      {isArabic ? "نعم، تطبيق على السابق والقادم (أثر رجعي)" : "Yes, apply to past & future"}
+                    </p>
+                    <p className="text-[11px] text-emerald-800 mt-0.5 leading-relaxed">
+                      {isArabic
+                        ? "تحديث أسعار وحسابات الحصص السابقة وسجلات الحضور والاسم لتطابق التعديل الجديد بأثر رجعي."
+                        : "Recalculates past lessons with new rates and updates historical records."}
+                    </p>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => confirmExecuteSaveStudentDirectly(false)}
+                  className="w-full text-right p-3.5 rounded-2xl border-2 border-blue-400 bg-blue-50/70 hover:bg-blue-100 transition flex items-start gap-3 group"
+                >
+                  <span className="w-5 h-5 rounded-full border-2 border-blue-500 flex items-center justify-center mt-0.5 shrink-0 bg-white group-hover:scale-105 transition-transform">
+                    <span className="w-2.5 h-2.5 rounded-full bg-blue-600" />
+                  </span>
+                  <div>
+                    <p className="text-xs font-black text-blue-950">
+                      {isArabic ? "لا، التطبيق على القادم فقط (تجميد السابق)" : "No, future lessons only"}
+                    </p>
+                    <p className="text-[11px] text-blue-800 mt-0.5 leading-relaxed">
+                      {isArabic
+                        ? "الاحتفاظ بحسابات وأسعار الحصص السابقة كما هي دون تعديل، والبدء بالحسابات الجديدة للحصص المستقبلية."
+                        : "Preserves past lesson rates and calculations as they were, applying new rates to future lessons."}
+                    </p>
+                  </div>
+                </button>
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowApplyConfirmDialog(false);
+                    setPendingStudentDataToSave(null);
+                  }}
+                  className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition"
+                >
+                  {isArabic ? "الرجوع للتعديل" : "Back to Edit"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Confirm Delete Report */}
+        {reportToDeleteId && (
+          <div className="fixed inset-0 z-80 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+            <div className="bg-white border border-slate-200 rounded-3xl p-5 max-w-md w-full shadow-2xl animate-in fade-in zoom-in-95 space-y-4">
+              <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div className="text-center">
+                <h3 className="font-black text-slate-900 text-base">
+                  {isArabic ? "تأكيد حذف التقرير والخصم المالي" : "Confirm Report Deletion & Reversal"}
+                </h3>
+                <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
+                  {isArabic
+                    ? "هل أنت متأكد من رغبتك في حذف هذا التقرير نهائياً؟"
+                    : "Are you sure you want to permanently delete this report?"}
+                </p>
+                <div className="mt-2.5 p-2.5 rounded-xl bg-amber-50 border border-amber-200/80 text-[11px] font-bold text-amber-900 text-right leading-relaxed flex items-center gap-2">
+                  <span className="shrink-0 text-base">ℹ️</span>
+                  <span>
+                    {isArabic
+                      ? "عند الحذف، سيتم إلغاء احتساب هذه الحصة تلقائياً وخصم سعرها ووقتها من الحساب المالي وسجل ساعات الطالب."
+                      : "Upon deletion, this lesson will no longer be counted, and its cost and time will be deducted from the student's financial balance and hours."}
+                  </span>
+                </div>
+              </div>
+              <div className="pt-2 flex items-center justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setReportToDeleteId(null)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition"
+                >
+                  {isArabic ? "إلغاء التراجع" : "Cancel"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onDeleteReport) {
+                      onDeleteReport(reportToDeleteId);
+                    }
+                    setReportToDeleteId(null);
+                  }}
+                  className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs transition shadow-md shadow-rose-600/30 flex items-center gap-1.5"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>{isArabic ? "تأكيد الحذف النهائي" : "Confirm Delete"}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Confirm Delete Sub-Group */}
+        {subGroupToDelete && (
+          <div className="fixed inset-0 z-80 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+            <div className="bg-white border border-slate-200 rounded-3xl p-5 max-w-md w-full shadow-2xl animate-in fade-in zoom-in-95 space-y-4">
+              <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div className="text-center">
+                <h3 className="font-black text-slate-900 text-base">
+                  {isArabic ? `حذف الدمج الفرعي (${subGroupToDelete.name})` : `Delete Sub-Group (${subGroupToDelete.name})`}
+                </h3>
+                <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                  {isArabic
+                    ? "هل أنت متأكد من رغبتك في حذف هذا الدمج الفرعي؟ سيظل الطلاب مسجلين في الملف المجمع الرئيسي ولا تُحذف أي بيانات أو حصص لهم."
+                    : "Are you sure you want to delete this sub-group? Students will remain registered in the parent group."}
+                </p>
+              </div>
+              <div className="pt-2 flex items-center justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSubGroupToDelete(null)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition"
+                >
+                  {isArabic ? "إلغاء" : "Cancel"}
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmDeleteSubGroup}
+                  className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs transition shadow-md shadow-rose-600/30 flex items-center gap-1.5"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>{isArabic ? "تأكيد الحذف" : "Confirm Delete"}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Confirm Unlink Student from Group */}
+        {studentToRemoveFromGroup && (
+          <div className="fixed inset-0 z-80 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+            <div className="bg-white border border-slate-200 rounded-3xl p-5 max-w-md w-full shadow-2xl animate-in fade-in zoom-in-95 space-y-4">
+              <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-600 flex items-center justify-center mx-auto">
+                <UserX className="w-6 h-6" />
+              </div>
+              <div className="text-center">
+                <h3 className="font-black text-slate-900 text-base">
+                  {isArabic ? `فك تجميع الطالب: ${studentToRemoveFromGroup.fullName}` : `Unlink: ${studentToRemoveFromGroup.fullName}`}
+                </h3>
+                <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                  {isArabic
+                    ? "هل تريد إخراج هذا الطالب من الملف المجمع وإعادته كملف مستقل في القائمة الرئيسية؟ لن تُحذف أي بيانات تخص الطالب."
+                    : "Return this student to the main list as a standalone profile? No data will be deleted."}
+                </p>
+              </div>
+              <div className="pt-2 flex items-center justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setStudentToRemoveFromGroup(null)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition"
+                >
+                  {isArabic ? "إلغاء" : "Cancel"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onRemoveStudentFromGroup(group.id, studentToRemoveFromGroup.id);
+                    setStudentToRemoveFromGroup(null);
+                  }}
+                  className="px-5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs transition shadow-md shadow-amber-600/30 flex items-center gap-1.5"
+                >
+                  <UserX className="w-3.5 h-3.5" />
+                  <span>{isArabic ? "تأكيد فك التجميع" : "Confirm Unlink"}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Confirm Disband Combined Group */}
+        {showDisbandGroupConfirm && (
+          <div className="fixed inset-0 z-80 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+            <div className="bg-white border border-slate-200 rounded-3xl p-5 max-w-md w-full shadow-2xl animate-in fade-in zoom-in-95 space-y-4">
+              <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div className="text-center">
+                <h3 className="font-black text-slate-900 text-base">
+                  {isArabic ? `تأكيد فك الملف المجمع (${group.name})` : `Disband (${group.name})`}
+                </h3>
+                <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                  {isArabic
+                    ? "هل أنت متأكد من رغبتك في فك هذا الملف المجمع؟ سيعود جميع الطلاب كملفات شخصية مستقلة في القائمة، ولن يتم حذف أي بيانات أو سجلات للطلاب."
+                    : "Are you sure you want to disband this combined group? All students will return as standalone profiles with all their data intact."}
+                </p>
+              </div>
+              <div className="pt-2 flex items-center justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowDisbandGroupConfirm(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition"
+                >
+                  {isArabic ? "إلغاء التراجع" : "Cancel"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowDisbandGroupConfirm(false);
+                    onDeleteGroup(group.id);
+                    onClose();
+                  }}
+                  className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs transition shadow-md shadow-rose-600/30 flex items-center gap-1.5"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>{isArabic ? "تأكيد فك الملف" : "Confirm Disband"}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Comprehensive Monthly Report for Quran / Islamic Studies */}
+        {monthlyReportModalTarget && (
+          <ComprehensiveMonthlyReportModal
+            isOpen={!!monthlyReportModalTarget}
+            onClose={() => setMonthlyReportModalTarget(null)}
+            student={monthlyReportModalTarget.student}
+            subject={monthlyReportModalTarget.subject}
+            settings={settings}
+            attendanceRecords={attendanceRecords}
+            reports={reports}
+            onSaveReport={onAddReport ? async (repData) => {
+              await onAddReport({
+                studentId: monthlyReportModalTarget.student.id,
+                studentName: monthlyReportModalTarget.student.fullName,
+                teacherName: repData.teacherName || settings.teacherName,
+                subject: monthlyReportModalTarget.subject,
+                reportType: "monthly_comprehensive",
+                evaluationMonth: repData.evaluationMonth,
+                date: repData.date || new Date().toISOString().split("T")[0],
+                attendance: "present",
+                deductCost: false,
+                teacherNotes: repData.teacherNotes || "تقرير الأداء الشهري للقرآن الكريم والدراسات الإسلامية",
+                reportText: repData.reportText || repData.generatedText || "",
+                generatedText: repData.generatedText,
+                aiInstructions: ""
+              });
+            } : undefined}
+          />
+        )}
+
+        {/* Modal: Archive Ended Cycle for Student inside Combined File */}
+        {archiveCycleTargetStudent && (
+          <ArchiveCycleModal
+            isOpen={Boolean(archiveCycleTargetStudent)}
+            onClose={() => setArchiveCycleTargetStudent(null)}
+            student={studentList.find(s => s.id === archiveCycleTargetStudent.id) || archiveCycleTargetStudent}
+            allReports={reports}
+            allAttendance={attendanceRecords}
+            isArabic={isArabic}
+            onConfirmArchive={params => {
+              if (onArchiveEndedCycle) {
+                onArchiveEndedCycle({
+                  studentId: archiveCycleTargetStudent.id,
+                  archiveGroupName: params.archiveGroupName,
+                  newCycleStartDate: params.newCycleStartDate,
+                  newCycleName: params.newCycleName,
+                  resetLessonBalance: params.resetLessonBalance
+                });
+                setReportArchiveFilter("active");
+                setWhatsappSentNotice(
+                  isArabic
+                    ? `تم أرشفة تقارير الدورة المنتهية في (${params.archiveGroupName}) وبدء الدورة الجديدة من الحصة رقم 1 بنجاح!`
+                    : `Archived ended cycle into (${params.archiveGroupName}) and started new cycle!`
+                );
+                setTimeout(() => setWhatsappSentNotice(""), 4500);
+              }
+            }}
+          />
         )}
       </div>
     </div>

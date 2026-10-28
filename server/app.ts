@@ -1,6 +1,13 @@
 import "dotenv/config";
 import express from "express";
-import { generateGoStarsReportAI, generateGoStarsGroupReportAI } from "./ai";
+import {
+  generateGoStarsReportAI,
+  generateGoStarsGroupReportAI,
+  generateComprehensiveMonthlyReportAI,
+  parseExternalMonthlyReportDataAI,
+  fallbackParseExternalMonthlyReportText,
+  handleGoStarsChatAI
+} from "./ai";
 
 export const app = express();
 
@@ -47,6 +54,66 @@ app.post(["/api/ai/generate-group-report", "/ai/generate-group-report", "/genera
   } catch (err: any) {
     console.error("Error in AI group report route:", err);
     res.status(500).json({ error: "Failed to generate group report", details: err?.message || String(err) });
+  }
+});
+
+// Comprehensive Monthly Report AI Generation endpoint (supports /api/ai/generate-monthly-report and /ai/generate-monthly-report)
+app.post(["/api/ai/generate-monthly-report", "/ai/generate-monthly-report", "/generate-monthly-report"], async (req, res) => {
+  try {
+    const aiResult = await generateComprehensiveMonthlyReportAI(req.body);
+    const reportText = typeof aiResult === "string" ? aiResult : (aiResult?.reportText || "");
+    let reportData: any = aiResult && typeof aiResult === "object" && aiResult.reportData ? aiResult.reportData : null;
+    const structuredAnalysis: any = aiResult && typeof aiResult === "object" && aiResult.structuredAnalysis ? aiResult.structuredAnalysis : null;
+
+    if (!reportData) {
+      try {
+        reportData = fallbackParseExternalMonthlyReportText({
+          text: reportText,
+          studentNameHint: req.body.studentName,
+          subjectHint: req.body.subject,
+          monthHint: req.body.month,
+          yearHint: req.body.year,
+          teacherNameHint: req.body.teacherName,
+          lang: req.body.lang,
+          previousContext: req.body.previousContext
+        });
+      } catch (parseErr) {
+        console.log("[GoStars AI Server] Non-fatal parsing error for monthly report text:", parseErr);
+      }
+    }
+
+    res.json({ success: true, reportText, reportData, structuredAnalysis });
+  } catch (err: any) {
+    console.error("Error in AI monthly report route:", err);
+    res.status(500).json({ error: "Failed to generate comprehensive monthly report", details: err?.message || String(err) });
+  }
+});
+
+// External Monthly Report Parser endpoint (supports file uploads / pasted text)
+app.post(["/api/ai/parse-monthly-report-data", "/ai/parse-monthly-report-data", "/parse-monthly-report-data"], async (req, res) => {
+  try {
+    const reportData = await parseExternalMonthlyReportDataAI(req.body);
+    res.json({ success: true, reportData });
+  } catch (err: any) {
+    console.log("[GoStars AI Server] Route error, using fallback parser:", err?.message || err);
+    try {
+      const fallbackData = fallbackParseExternalMonthlyReportText(req.body);
+      res.json({ success: true, reportData: fallbackData });
+    } catch (fallbackErr: any) {
+      console.error("Error in fallback parser:", fallbackErr);
+      res.status(500).json({ error: "Failed to parse external monthly report data", details: fallbackErr?.message || String(fallbackErr) });
+    }
+  }
+});
+
+// AI Multi-Turn Chatbot endpoint
+app.post(["/api/ai/chat", "/ai/chat", "/chat"], async (req, res) => {
+  try {
+    const text = await handleGoStarsChatAI(req.body);
+    res.json({ success: true, text });
+  } catch (err: any) {
+    console.error("Error in AI chat route:", err);
+    res.status(500).json({ error: "Failed to generate chat response", details: err?.message || String(err) });
   }
 });
 

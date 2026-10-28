@@ -17,6 +17,7 @@ import {
   History,
   Check,
   Share2,
+  Copy,
   LayoutGrid,
   List,
   Target,
@@ -25,9 +26,10 @@ import {
   ChevronUp,
   PieChart,
   Info,
-  Calendar
+  Calendar,
+  Printer
 } from "lucide-react";
-import { Student, PaymentTransaction, SubjectPaymentAllocation, AppSettings, AttendanceRecord, Group, PrivateLesson } from "../types";
+import { Student, PaymentTransaction, SubjectPaymentAllocation, AppSettings, AttendanceRecord, GeneratedReport, Group, PrivateLesson, CombinedStudentGroup } from "../types";
 import {
   calculateStudentFinancialProfile,
   calculateTotalExpectedMonthlyRevenue,
@@ -38,14 +40,17 @@ import {
   ExpectedMonthlyRevenueSummary,
   SubjectFinancialItem
 } from "../lib/financeEngine";
+import { formatHoursHuman, generateStudentStatementWhatsAppMessage, calculateCombinedGroupFinancials, CombinedGroupFinancialSummary } from "../lib/financeUtils";
 
 interface FinanceViewProps {
   settings: AppSettings;
   students: Student[];
+  combinedStudentGroups?: CombinedStudentGroup[];
   groups?: Group[];
   privateLessons?: PrivateLesson[];
   attendanceRecords?: AttendanceRecord[];
   paymentTransactions: PaymentTransaction[];
+  reports?: GeneratedReport[];
   onRecordPayment: (
     studentId: string,
     amount: number,
@@ -59,10 +64,12 @@ interface FinanceViewProps {
 export const FinanceView: React.FC<FinanceViewProps> = ({
   settings,
   students = [],
+  combinedStudentGroups = [],
   groups = [],
   privateLessons = [],
   attendanceRecords = [],
   paymentTransactions = [],
+  reports = [],
   onRecordPayment
 }) => {
   const isArabic = settings.preferredLanguage === "ar";
@@ -77,6 +84,12 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
   const [billingTypeFilter, setBillingTypeFilter] = useState<"all" | "per_lesson" | "monthly" | "monthly_elapsed_lessons" | "monthly_fixed_lessons">("all");
   const [searchQuery, setSearchQuery] = useState("");
 
+  // Month Selection State
+  const now = new Date();
+  const [selectedYear, setSelectedYear] = useState<number>(now.getFullYear());
+  const [selectedMonthIndex, setSelectedMonthIndex] = useState<number>(now.getMonth());
+  const [showAccountingGuide, setShowAccountingGuide] = useState<boolean>(false);
+
   // Modals
   // 1. Record Payment Modal
   const [paymentModalStudent, setPaymentModalStudent] = useState<StudentFinancialProfile | null>(null);
@@ -89,15 +102,25 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
 
   // 2. Student Statement Modal (كشف حساب الطالب)
   const [statementModalProfile, setStatementModalProfile] = useState<StudentFinancialProfile | null>(null);
+  const [copiedStatementId, setCopiedStatementId] = useState<string | null>(null);
+
+  // Compute target Date for month filter
+  const selectedTargetDate = useMemo(() => {
+    return new Date(selectedYear, selectedMonthIndex, 1);
+  }, [selectedYear, selectedMonthIndex]);
+
+  const selectedMonthStr = useMemo(() => {
+    return `${selectedYear}-${String(selectedMonthIndex + 1).padStart(2, "0")}`;
+  }, [selectedYear, selectedMonthIndex]);
 
   // Compute all profiles with schedule & groups/private lessons info
   const allProfiles = useMemo(() => {
     return students
       .filter(s => s.status === "active")
-      .map(s => calculateStudentFinancialProfile(s, attendanceRecords, paymentTransactions, groups, privateLessons));
-  }, [students, attendanceRecords, paymentTransactions, groups, privateLessons]);
+      .map(s => calculateStudentFinancialProfile(s, attendanceRecords, paymentTransactions, groups, privateLessons, reports));
+  }, [students, attendanceRecords, paymentTransactions, groups, privateLessons, reports]);
 
-  // Expected Monthly Revenue Summary calculation based on student schedules and billing systems
+  // Expected Monthly Revenue Summary calculation based on student schedules and billing systems for selected month
   const expectedMonthlySummary = useMemo<ExpectedMonthlyRevenueSummary>(() => {
     return calculateTotalExpectedMonthlyRevenue(
       students,
@@ -105,28 +128,16 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
       privateLessons,
       paymentTransactions,
       attendanceRecords,
-      new Date()
+      selectedTargetDate
     );
-  }, [students, groups, privateLessons, paymentTransactions, attendanceRecords]);
+  }, [students, groups, privateLessons, paymentTransactions, attendanceRecords, selectedTargetDate]);
 
-  // Current Month Name
-  const currentMonthName = useMemo(() => {
-    const now = new Date();
-    return now.toLocaleString(isArabic ? "ar-EG" : "en-US", { month: "long", year: "numeric" });
-  }, [isArabic]);
-
-  // KPIs
-  const currentMonthStr = useMemo(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-  }, []);
-
-  // 1. إيرادات الشهر (Payments made in current month)
+  // 1. إيرادات الشهر المحدد (Cash Payments recorded in selected month)
   const monthRevenue = useMemo(() => {
     return paymentTransactions
-      .filter(pt => pt.date && pt.date.startsWith(currentMonthStr))
+      .filter(pt => pt.date && pt.date.startsWith(selectedMonthStr))
       .reduce((sum, pt) => sum + pt.amount, 0);
-  }, [paymentTransactions, currentMonthStr]);
+  }, [paymentTransactions, selectedMonthStr]);
 
   // Total All-Time Revenue
   const totalRevenue = useMemo(() => {
@@ -295,12 +306,89 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
     setPaymentModalStudent(null);
   };
 
+  const handleCopyStatement = (profile: StudentFinancialProfile) => {
+    const text = generateStudentStatementWhatsAppMessage({
+      studentName: profile.fullName,
+      subjectName: profile.subjectName,
+      studyTypeLabel: profile.studyTypeLabel,
+      totalTaughtHours: profile.totalTaughtHours,
+      totalAttendedLessons: profile.attendedLessonsCount,
+      totalAccruedCost: profile.attendedLessonsCost,
+      totalPaidAmount: profile.totalPaidAmount,
+      amountDue: profile.amountDue,
+      creditRemaining: profile.creditRemaining,
+      isMonthly: profile.isMonthly,
+      billedMonthsCount: profile.billedMonthsCount,
+      monthlyCost: profile.monthlyCost,
+      subjectsBreakdown: profile.subjectBreakdown?.map(s => ({
+        subjectName: s.subjectName,
+        totalTaughtHours: s.totalTaughtHours,
+        attendedCount: s.attendedCount,
+        accruedCost: s.accruedCost,
+        paidAmount: s.paidAmount,
+        amountDue: s.amountDue
+      })),
+      recentAttendance: profile.attendanceHistory.slice(0, 10).map(ar => ({
+        lessonNumber: ar.lessonNumber,
+        date: ar.date,
+        durationMinutes: ar.durationMinutes,
+        subject: ar.subject
+      }))
+    }, isArabic);
+
+    navigator.clipboard.writeText(text);
+    setCopiedStatementId(profile.studentId);
+    setTimeout(() => setCopiedStatementId(null), 2500);
+  };
+
+  const handleShareStatementWhatsApp = (profile: StudentFinancialProfile) => {
+    const text = generateStudentStatementWhatsAppMessage({
+      studentName: profile.fullName,
+      subjectName: profile.subjectName,
+      studyTypeLabel: profile.studyTypeLabel,
+      totalTaughtHours: profile.totalTaughtHours,
+      totalAttendedLessons: profile.attendedLessonsCount,
+      totalAccruedCost: profile.attendedLessonsCost,
+      totalPaidAmount: profile.totalPaidAmount,
+      amountDue: profile.amountDue,
+      creditRemaining: profile.creditRemaining,
+      isMonthly: profile.isMonthly,
+      billedMonthsCount: profile.billedMonthsCount,
+      monthlyCost: profile.monthlyCost,
+      subjectsBreakdown: profile.subjectBreakdown?.map(s => ({
+        subjectName: s.subjectName,
+        totalTaughtHours: s.totalTaughtHours,
+        attendedCount: s.attendedCount,
+        accruedCost: s.accruedCost,
+        paidAmount: s.paidAmount,
+        amountDue: s.amountDue
+      })),
+      recentAttendance: profile.attendanceHistory.slice(0, 10).map(ar => ({
+        lessonNumber: ar.lessonNumber,
+        date: ar.date,
+        durationMinutes: ar.durationMinutes,
+        subject: ar.subject
+      }))
+    }, isArabic);
+
+    const rawContact = profile.student?.parentContact || "";
+    const cleanPhone = rawContact.replace(/\D/g, "");
+    const url = cleanPhone
+      ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(text)}`
+      : `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+    window.open(url, "_blank");
+  };
+
+  const handlePrintStatement = () => {
+    window.print();
+  };
+
   return (
     <div className="space-y-4 pb-12">
-      {/* Header Banner */}
+      {/* Header Banner & Month Picker */}
       <div className="bg-white border border-slate-200/90 rounded-2xl p-4 sm:p-5 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-3">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold shadow-sm shadow-emerald-600/30">
               <DollarSign className="w-5 h-5" />
             </div>
@@ -308,270 +396,153 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
               {isArabic ? "الحسابات والتحصيل المالي الموحد" : "Unified Financial Ledger & Collections"}
             </h1>
             <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-bold">
-              {isArabic ? "نظام تحصيل مباشر" : "Direct Balance"}
+              {isArabic ? "معايير IFRS المحاسبية" : "IFRS Compliant"}
             </span>
           </div>
           <p className="text-[11px] sm:text-xs text-slate-500 font-medium mt-1">
             {isArabic
-              ? "يتم احتساب الحالة المالية تلقائياً بناءً على إجمالي قيمة الحصص المنفذة مقارنة بإجمالي المدفوعات المسددة."
-              : "Financial ledger auto-calculates total lesson value vs total payments recorded."}
+              ? "متابعة دقيقة للتحصيل النقدي الفعلي، الإيراد المحقق بالحصة، والاشتراكات الشهرية دون تكرار أو افتراضات غير دقيقة."
+              : "Accurate tracking of cash collections, recognized revenue per lesson, and flat subscriptions."}
           </p>
         </div>
 
-        {/* Section Tabs Switcher */}
-        <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-2xl border border-slate-200 shrink-0">
-          <button
-            type="button"
-            onClick={() => setMainSection("students")}
-            className={`px-3.5 py-1.5 rounded-xl font-bold text-xs transition flex items-center gap-1.5 ${
-              mainSection === "students"
-                ? "bg-white text-slate-900 shadow-xs"
-                : "text-slate-600 hover:text-slate-900"
-            }`}
-          >
-            <User className="w-3.5 h-3.5" />
-            <span>{isArabic ? "حسابات الطلاب" : "Student Balances"}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setMainSection("transactions")}
-            className={`px-3.5 py-1.5 rounded-xl font-bold text-xs transition flex items-center gap-1.5 ${
-              mainSection === "transactions"
-                ? "bg-white text-slate-900 shadow-xs"
-                : "text-slate-600 hover:text-slate-900"
-            }`}
-          >
-            <History className="w-3.5 h-3.5 text-blue-600" />
-            <span>{isArabic ? "سجل المعاملات والمدفوعات" : "Transactions Log"}</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Hero: بطاقة إجمالي الإيرادات المتوقعة لهذا الشهر بناءً على جداول الطلاب ونظام الحصص */}
-      <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white rounded-3xl p-4 sm:p-6 shadow-xl border border-slate-700/80 relative overflow-hidden">
-        {/* Background ambient lighting effects */}
-        <div className="absolute top-0 right-0 w-72 h-72 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20"></div>
-        <div className="absolute bottom-0 left-0 w-72 h-72 bg-blue-500/10 rounded-full blur-3xl pointer-events-none -ml-20 -mb-20"></div>
-
-        <div className="relative z-10 space-y-4">
-          {/* Header Row */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-700/60 pb-3.5">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center justify-center font-bold shadow-inner shrink-0">
-                <Target className="w-5 h-5" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h2 className="text-base sm:text-lg font-black text-white">
-                    {isArabic ? "إجمالي الإيرادات المتوقعة هذا الشهر" : "Expected Monthly Revenue"}
-                  </h2>
-                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[11px] font-bold">
-                    {currentMonthName}
-                  </span>
-                </div>
-                <p className="text-[11px] sm:text-xs text-slate-400 font-medium mt-0.5">
-                  {isArabic
-                    ? "محسوبة بدقة بناءً على جدول مواعيد الحصص الأسبوعية ونظام محاسبة كل طالب (شهري / بالحصة / باقة حصص)."
-                    : "Accurately calculated from weekly schedules and each student's billing configuration."}
-                </p>
-              </div>
-            </div>
-
-            {/* Toggle Breakdown Button */}
+        <div className="flex items-center gap-2 flex-wrap justify-between md:justify-end">
+          {/* Month & Year Filter Controls */}
+          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200/90 p-1.5 rounded-2xl">
             <button
               type="button"
-              onClick={() => setShowExpectedRevenueBreakdown(!showExpectedRevenueBreakdown)}
-              className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 text-xs font-bold transition flex items-center gap-1.5 self-start sm:self-auto shadow-xs"
+              onClick={() => {
+                const now = new Date();
+                setSelectedYear(now.getFullYear());
+                setSelectedMonthIndex(now.getMonth());
+              }}
+              className={`px-2.5 py-1 rounded-xl text-xs font-bold transition ${
+                selectedYear === now.getFullYear() && selectedMonthIndex === now.getMonth()
+                  ? "bg-emerald-600 text-white shadow-xs"
+                  : "bg-white text-slate-700 hover:bg-slate-100 border border-slate-200"
+              }`}
             >
-              <PieChart className="w-3.5 h-3.5 text-emerald-400" />
-              <span>{isArabic ? "تفصيل الإيرادات حسب نظام الحصص" : "Breakdown by Billing System"}</span>
-              {showExpectedRevenueBreakdown ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+              {isArabic ? "الشهر الحالي" : "Current Month"}
+            </button>
+
+            <select
+              value={selectedMonthIndex}
+              onChange={e => setSelectedMonthIndex(Number(e.target.value))}
+              className="bg-white border border-slate-200 rounded-xl px-2 py-1 text-xs font-bold text-slate-800 focus:outline-none"
+            >
+              {[
+                "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
+                "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"
+              ].map((mName, idx) => (
+                <option key={idx} value={idx}>
+                  {isArabic ? mName : new Date(2026, idx, 1).toLocaleString("en-US", { month: "short" })}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={selectedYear}
+              onChange={e => setSelectedYear(Number(e.target.value))}
+              className="bg-white border border-slate-200 rounded-xl px-2 py-1 text-xs font-bold text-slate-800 focus:outline-none"
+            >
+              {[2024, 2025, 2026, 2027].map(y => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Section Tabs Switcher */}
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-2xl border border-slate-200 shrink-0">
+            <button
+              type="button"
+              onClick={() => setMainSection("students")}
+              className={`px-3 py-1.5 rounded-xl font-bold text-xs transition flex items-center gap-1.5 ${
+                mainSection === "students"
+                  ? "bg-white text-slate-900 shadow-xs"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              <User className="w-3.5 h-3.5" />
+              <span>{isArabic ? "حسابات الطلاب" : "Student Balances"}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setMainSection("transactions")}
+              className={`px-3 py-1.5 rounded-xl font-bold text-xs transition flex items-center gap-1.5 ${
+                mainSection === "transactions"
+                  ? "bg-white text-slate-900 shadow-xs"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              <History className="w-3.5 h-3.5 text-blue-600" />
+              <span>{isArabic ? "سجل المعاملات" : "Transactions Log"}</span>
             </button>
           </div>
-
-          {/* 4 Core Financial Projection Metrics */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {/* Metric 1: Expected Revenue */}
-            <div className="bg-slate-800/80 backdrop-blur-xs rounded-2xl p-3.5 border border-slate-700/70 flex flex-col justify-between">
-              <span className="text-[11px] font-bold text-slate-400">
-                {isArabic ? "🎯 الإيراد المتوقع للشهر" : "Target Revenue"}
-              </span>
-              <div className="text-xl sm:text-2xl font-black text-emerald-400 my-1 truncate">
-                {expectedMonthlySummary.totalExpectedRevenue.toLocaleString()} <span className="text-xs font-normal text-slate-300">{isArabic ? "ج.م" : "EGP"}</span>
-              </div>
-              <span className="text-[10px] text-slate-400 font-medium">
-                {isArabic ? `لعدد ${expectedMonthlySummary.activeStudentsCount} طالب نشط` : `For ${expectedMonthlySummary.activeStudentsCount} active students`}
-              </span>
-            </div>
-
-            {/* Metric 2: Actual Collected This Month */}
-            <div className="bg-slate-800/80 backdrop-blur-xs rounded-2xl p-3.5 border border-slate-700/70 flex flex-col justify-between">
-              <span className="text-[11px] font-bold text-slate-400">
-                {isArabic ? "💵 المحصل الفعلي حتى الآن" : "Collected This Month"}
-              </span>
-              <div className="text-xl sm:text-2xl font-black text-white my-1 truncate">
-                {expectedMonthlySummary.totalActualCollectedThisMonth.toLocaleString()} <span className="text-xs font-normal text-slate-300">{isArabic ? "ج.م" : "EGP"}</span>
-              </div>
-              <span className="text-[10px] text-emerald-400 font-bold">
-                {isArabic ? `نسبة التحصيل: ${expectedMonthlySummary.overallCollectionPercent}%` : `${expectedMonthlySummary.overallCollectionPercent}% collected`}
-              </span>
-            </div>
-
-            {/* Metric 3: Remaining to Collect */}
-            <div className="bg-slate-800/80 backdrop-blur-xs rounded-2xl p-3.5 border border-slate-700/70 flex flex-col justify-between">
-              <span className="text-[11px] font-bold text-slate-400">
-                {isArabic ? "⏳ المتبقي لتحقيقه" : "Remaining Target"}
-              </span>
-              <div className="text-xl sm:text-2xl font-black text-amber-300 my-1 truncate">
-                {expectedMonthlySummary.totalRemainingToCollect.toLocaleString()} <span className="text-xs font-normal text-slate-300">{isArabic ? "ج.م" : "EGP"}</span>
-              </div>
-              <span className="text-[10px] text-slate-400 font-medium">
-                {isArabic ? "متبقي متوقع تحصيله هذا الشهر" : "Expected to be collected"}
-              </span>
-            </div>
-
-            {/* Metric 4: Expected Lessons */}
-            <div className="bg-slate-800/80 backdrop-blur-xs rounded-2xl p-3.5 border border-slate-700/70 flex flex-col justify-between">
-              <span className="text-[11px] font-bold text-slate-400">
-                {isArabic ? "📅 الحصص المجدولة بالشهر" : "Scheduled Lessons"}
-              </span>
-              <div className="text-xl sm:text-2xl font-black text-sky-400 my-1 truncate">
-                {expectedMonthlySummary.totalExpectedLessons} <span className="text-xs font-normal text-slate-300">{isArabic ? "حصة متوقعة" : "lessons"}</span>
-              </div>
-              <span className="text-[10px] text-sky-300 font-medium">
-                {isArabic ? `نفذ منها: ${expectedMonthlySummary.totalAttendedThisMonth} حصة` : `Attended: ${expectedMonthlySummary.totalAttendedThisMonth}`}
-              </span>
-            </div>
-          </div>
-
-          {/* Target Progress Bar */}
-          <div className="space-y-1.5 pt-1">
-            <div className="flex items-center justify-between text-[11px] font-bold text-slate-300">
-              <span>{isArabic ? "نسبة إنجاز الهدف المالي الشهري" : "Monthly Target Progress"}</span>
-              <span className="text-emerald-400 font-mono font-black">{expectedMonthlySummary.overallCollectionPercent}%</span>
-            </div>
-            <div className="w-full h-2.5 bg-slate-700/80 rounded-full overflow-hidden p-0.5 border border-slate-600/60">
-              <div
-                className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 rounded-full transition-all duration-500"
-                style={{ width: `${Math.min(100, Math.max(0, expectedMonthlySummary.overallCollectionPercent))}%` }}
-              ></div>
-            </div>
-          </div>
-
-          {/* Expandable Breakdown Drawer by Billing Type */}
-          {showExpectedRevenueBreakdown && (
-            <div className="mt-4 pt-4 border-t border-slate-700/80 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 animate-in fade-in">
-              {/* 1. Flat Monthly Subscription */}
-              <div className="bg-slate-800/90 rounded-2xl p-3 border border-purple-500/30 space-y-1">
-                <div className="flex items-center justify-between text-purple-300 font-bold text-xs">
-                  <span>📅 {isArabic ? "اشتراك شهري ثابت" : "Monthly Plan"}</span>
-                  <span className="text-[10px] bg-purple-500/20 px-1.5 py-0.5 rounded text-purple-200">
-                    {expectedMonthlySummary.byBillingType.monthly.studentsCount} {isArabic ? "طالب" : "std"}
-                  </span>
-                </div>
-                <div className="text-base font-black text-white">
-                  {expectedMonthlySummary.byBillingType.monthly.expectedRevenue.toLocaleString()} <span className="text-[10px] font-normal text-slate-300">{isArabic ? "ج.م" : "EGP"}</span>
-                </div>
-                <p className="text-[10px] text-slate-400">
-                  {isArabic ? `محصل منها: ${expectedMonthlySummary.byBillingType.monthly.collectedThisMonth} ج.م` : `Collected: ${expectedMonthlySummary.byBillingType.monthly.collectedThisMonth}`}
-                </p>
-              </div>
-
-              {/* 2. Fixed Lesson Packages */}
-              <div className="bg-slate-800/90 rounded-2xl p-3 border border-blue-500/30 space-y-1">
-                <div className="flex items-center justify-between text-blue-300 font-bold text-xs">
-                  <span>🎟️ {isArabic ? "باقة حصص محددة" : "Lesson Package"}</span>
-                  <span className="text-[10px] bg-blue-500/20 px-1.5 py-0.5 rounded text-blue-200">
-                    {expectedMonthlySummary.byBillingType.monthly_fixed_lessons.studentsCount} {isArabic ? "طالب" : "std"}
-                  </span>
-                </div>
-                <div className="text-base font-black text-white">
-                  {expectedMonthlySummary.byBillingType.monthly_fixed_lessons.expectedRevenue.toLocaleString()} <span className="text-[10px] font-normal text-slate-300">{isArabic ? "ج.م" : "EGP"}</span>
-                </div>
-                <p className="text-[10px] text-slate-400">
-                  {isArabic ? `إجمالي ${expectedMonthlySummary.byBillingType.monthly_fixed_lessons.totalLessons} حصة باقة` : `${expectedMonthlySummary.byBillingType.monthly_fixed_lessons.totalLessons} package lessons`}
-                </p>
-              </div>
-
-              {/* 3. Per Lesson by Schedule */}
-              <div className="bg-slate-800/90 rounded-2xl p-3 border border-emerald-500/30 space-y-1">
-                <div className="flex items-center justify-between text-emerald-300 font-bold text-xs">
-                  <span>🗓️ {isArabic ? "بالحصة وفق الجدول" : "Per Lesson Schedule"}</span>
-                  <span className="text-[10px] bg-emerald-500/20 px-1.5 py-0.5 rounded text-emerald-200">
-                    {expectedMonthlySummary.byBillingType.per_lesson.studentsCount} {isArabic ? "طالب" : "std"}
-                  </span>
-                </div>
-                <div className="text-base font-black text-white">
-                  {expectedMonthlySummary.byBillingType.per_lesson.expectedRevenue.toLocaleString()} <span className="text-[10px] font-normal text-slate-300">{isArabic ? "ج.م" : "EGP"}</span>
-                </div>
-                <p className="text-[10px] text-slate-400">
-                  {isArabic ? `إجمالي ${expectedMonthlySummary.byBillingType.per_lesson.totalLessons} حصة مجدولة` : `${expectedMonthlySummary.byBillingType.per_lesson.totalLessons} scheduled lessons`}
-                </p>
-              </div>
-
-              {/* 4. Elapsed Lessons */}
-              <div className="bg-slate-800/90 rounded-2xl p-3 border border-amber-500/30 space-y-1">
-                <div className="flex items-center justify-between text-amber-300 font-bold text-xs">
-                  <span>⏱️ {isArabic ? "محاسبة الحصص المنقضية" : "Elapsed Lessons"}</span>
-                  <span className="text-[10px] bg-amber-500/20 px-1.5 py-0.5 rounded text-amber-200">
-                    {expectedMonthlySummary.byBillingType.monthly_elapsed_lessons.studentsCount} {isArabic ? "طالب" : "std"}
-                  </span>
-                </div>
-                <div className="text-base font-black text-white">
-                  {expectedMonthlySummary.byBillingType.monthly_elapsed_lessons.expectedRevenue.toLocaleString()} <span className="text-[10px] font-normal text-slate-300">{isArabic ? "ج.م" : "EGP"}</span>
-                </div>
-                <p className="text-[10px] text-slate-400">
-                  {isArabic ? "وفق أيام الجدول المنقضية" : "Calculated from elapsed calendar"}
-                </p>
-              </div>
-            </div>
-          )}
         </div>
       </div>
 
-      {/* Unified Financial Summary Cards (Non-repetitive, high-clarity) */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3.5">
-        {/* KPI 1: إجمالي المتوقع هذا الشهر */}
-        <div className="bg-white border border-emerald-200/90 rounded-2xl p-3.5 sm:p-4 shadow-2xs flex flex-col justify-between">
+      {/* Unified Financial Summary Cards (5 Professional KPIs aligned with Accounting Standards) */}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-2.5 sm:gap-3">
+        {/* KPI 1: إجمالي المتوقع لهذا الشهر */}
+        <div className="bg-white border border-emerald-200/90 rounded-2xl p-3.5 shadow-2xs flex flex-col justify-between">
           <div className="flex items-center justify-between mb-1">
             <span className="text-[11px] font-bold text-emerald-800 truncate">
-              {isArabic ? "الإيرادات المتوقعة للشهر" : "Expected Revenue"}
+              {isArabic ? "الإيراد المتوقع للشهر" : "Target Expected Revenue"}
             </span>
             <div className="w-7 h-7 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold shrink-0">
               <Target className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-lg sm:text-2xl font-black text-emerald-600 truncate">
-            {expectedMonthlySummary.totalExpectedRevenue.toLocaleString()} <span className="text-xs font-normal text-slate-500">{isArabic ? "ج.م" : "EGP"}</span>
+          <div className="text-base sm:text-xl font-black text-emerald-600 truncate">
+            {(expectedMonthlySummary?.totalExpectedRevenue ?? 0).toLocaleString()} <span className="text-xs font-normal text-slate-500">{isArabic ? "ج.م" : "EGP"}</span>
           </div>
-          <div className="mt-1.5 flex items-center justify-between text-[10px] text-slate-500 font-semibold">
-            <span>{isArabic ? `${expectedMonthlySummary.activeStudentsCount} طالب نشط` : `${expectedMonthlySummary.activeStudentsCount} active students`}</span>
-            <span className="text-emerald-700 font-bold">{expectedMonthlySummary.totalExpectedLessons} {isArabic ? "حصة" : "lessons"}</span>
+          <div className="mt-1 flex items-center justify-between text-[10px] text-slate-500 font-semibold">
+            <span>{expectedMonthlySummary?.activeStudentsCount ?? 0} {isArabic ? "طالب نشط" : "students"}</span>
+            <span className="text-emerald-700 font-bold">{expectedMonthlySummary?.totalExpectedLessons ?? 0} {isArabic ? "حصة متوقعة" : "lessons"}</span>
           </div>
         </div>
 
-        {/* KPI 2: المحصل الفعلي */}
-        <div className="bg-white border border-slate-200/90 rounded-2xl p-3.5 sm:p-4 shadow-2xs flex flex-col justify-between">
+        {/* KPI 2: التحصيل الفعلي النقدي هذا الشهر */}
+        <div className="bg-white border border-blue-200/90 rounded-2xl p-3.5 shadow-2xs flex flex-col justify-between">
           <div className="flex items-center justify-between mb-1">
-            <span className="text-[11px] font-bold text-slate-600 truncate">
-              {isArabic ? "المحصل الفعلي هذا الشهر" : "Collected This Month"}
+            <span className="text-[11px] font-bold text-blue-800 truncate">
+              {isArabic ? "التحصيل الفعلي النقدي" : "Cash Collected"}
             </span>
             <div className="w-7 h-7 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold shrink-0">
               <TrendingUp className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-lg sm:text-2xl font-black text-slate-900 truncate">
-            {monthRevenue.toLocaleString()} <span className="text-xs font-normal text-slate-500">{isArabic ? "ج.م" : "EGP"}</span>
+          <div className="text-base sm:text-xl font-black text-blue-600 truncate">
+            {(monthRevenue ?? 0).toLocaleString()} <span className="text-xs font-normal text-slate-500">{isArabic ? "ج.م" : "EGP"}</span>
           </div>
-          <div className="mt-1.5 flex items-center justify-between text-[10px] font-semibold">
-            <span className="text-blue-600">{isArabic ? `نسبة التحصيل:` : "Collection Rate:"} {expectedMonthlySummary.overallCollectionPercent}%</span>
-            <span className="text-slate-400">{expectedMonthlySummary.totalAttendedThisMonth} {isArabic ? "حصة منفذة" : "attended"}</span>
+          <div className="mt-1 flex items-center justify-between text-[10px] font-semibold">
+            <span className="text-blue-700">{isArabic ? "مقبوضات نقية هذا الشهر" : "Net Cash Collected"}</span>
+            <span className="text-blue-600 font-bold">{expectedMonthlySummary?.overallCollectionPercent ?? 0}% {isArabic ? "تحصيل" : "rate"}</span>
           </div>
         </div>
 
-        {/* KPI 3: إجمالي المستحقات المطلوبة */}
-        <div className="bg-white border border-rose-200 rounded-2xl p-3.5 sm:p-4 shadow-2xs flex flex-col justify-between">
+        {/* KPI 3: الإيراد المحقق الفعلي (Accrued Earned Revenue) */}
+        <div className="bg-white border border-indigo-200/90 rounded-2xl p-3.5 shadow-2xs flex flex-col justify-between">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[11px] font-bold text-indigo-800 truncate">
+              {isArabic ? "الإيراد المحقق (المنفذ)" : "Recognized Revenue"}
+            </span>
+            <div className="w-7 h-7 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold shrink-0">
+              <CheckCircle2 className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="text-base sm:text-xl font-black text-indigo-600 truncate">
+            {(expectedMonthlySummary?.totalEarnedRevenueThisMonth ?? 0).toLocaleString()} <span className="text-xs font-normal text-slate-500">{isArabic ? "ج.م" : "EGP"}</span>
+          </div>
+          <div className="mt-1 flex items-center justify-between text-[10px] text-slate-500 font-semibold">
+            <span>{isArabic ? "قيمة الحصص المنفذة" : "Delivered Services"}</span>
+            <span className="text-indigo-700 font-bold">{expectedMonthlySummary?.totalAttendedThisMonth ?? 0} {isArabic ? "حصة حضور" : "attended"}</span>
+          </div>
+        </div>
+
+        {/* KPI 4: إجمالي المستحقات المطلوبة (Receivables Due) */}
+        <div className="bg-white border border-rose-200 rounded-2xl p-3.5 shadow-2xs flex flex-col justify-between">
           <div className="flex items-center justify-between mb-1">
             <span className="text-[11px] font-bold text-rose-700 truncate">
               {isArabic ? "إجمالي المستحقات المطلوبة" : "Receivables Due"}
@@ -580,8 +551,8 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
               <AlertTriangle className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-lg sm:text-2xl font-black text-rose-600 truncate">
-            {totalAmountDue.toLocaleString()} <span className="text-xs font-normal text-rose-500">{isArabic ? "ج.م" : "EGP"}</span>
+          <div className="text-base sm:text-xl font-black text-rose-600 truncate">
+            {(totalAmountDue ?? 0).toLocaleString()} <span className="text-xs font-normal text-rose-500">{isArabic ? "ج.م" : "EGP"}</span>
           </div>
           <p className="text-[10px] text-rose-700 font-semibold mt-1">
             {isArabic
@@ -590,23 +561,91 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
           </p>
         </div>
 
-        {/* KPI 4: الأرصدة المتبقية الفائضة */}
-        <div className="bg-white border border-sky-200/90 rounded-2xl p-3.5 sm:p-4 shadow-2xs flex flex-col justify-between">
+        {/* KPI 5: الأرصدة المتبقية الفائضة (Prepaid Credit) */}
+        <div className="bg-white border border-sky-200/90 rounded-2xl p-3.5 shadow-2xs flex flex-col justify-between col-span-2 lg:col-span-1">
           <div className="flex items-center justify-between mb-1">
             <span className="text-[11px] font-bold text-sky-700 truncate">
-              {isArabic ? "الأرصدة المتبقية (فائض)" : "Prepaid Credit"}
+              {isArabic ? "الأرصدة المدفوعة مقدماً" : "Prepaid Credit"}
             </span>
             <div className="w-7 h-7 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center font-bold shrink-0">
               <Clock className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-lg sm:text-2xl font-black text-sky-700 truncate">
-            {totalCreditRemaining.toLocaleString()} <span className="text-xs font-normal text-slate-500">{isArabic ? "ج.م" : "EGP"}</span>
+          <div className="text-base sm:text-xl font-black text-sky-700 truncate">
+            {(totalCreditRemaining ?? 0).toLocaleString()} <span className="text-xs font-normal text-slate-500">{isArabic ? "ج.م" : "EGP"}</span>
           </div>
           <p className="text-[10px] text-sky-700 font-semibold mt-1">
-            {isArabic ? "رصيد فائض مدفوع مقدماً" : "Prepaid credit on account"}
+            {isArabic ? "رصيد دائن مدفوع مقدماً" : "Prepaid credit on account"}
           </p>
         </div>
+      </div>
+
+      {/* Accounting Standard Banner Toggle */}
+      <div className="bg-slate-900 text-white rounded-2xl p-3.5 shadow-xs">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xs">
+              <FileText className="w-3.5 h-3.5" />
+            </div>
+            <div>
+              <h4 className="text-xs font-bold text-white">
+                {isArabic ? "دليل المعايير المحاسبية المعتمدة في النظام (IFRS 15)" : "Educational Platform Accounting Standard (IFRS 15)"}
+              </h4>
+              <p className="text-[10px] text-slate-400">
+                {isArabic ? "كيف يتم حساب مستحقات وإيرادات الطلاب بالحصة وبالاشتراك الشهري؟" : "How student balances and revenues are recognized accurately"}
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setShowAccountingGuide(!showAccountingGuide)}
+            className="px-2.5 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition flex items-center gap-1"
+          >
+            <span>{showAccountingGuide ? (isArabic ? "إخفاء التفاصيل" : "Hide Details") : (isArabic ? "عرض المعايير" : "View Rules")}</span>
+            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showAccountingGuide ? "rotate-180" : ""}`} />
+          </button>
+        </div>
+
+        {showAccountingGuide && (
+          <div className="mt-3 pt-3 border-t border-slate-800 grid grid-cols-1 md:grid-cols-3 gap-3 text-xs text-slate-300">
+            <div className="bg-slate-800/60 p-2.5 rounded-xl border border-slate-700/60">
+              <h5 className="font-bold text-emerald-400 mb-1 flex items-center gap-1">
+                <span>🎯</span>
+                <span>{isArabic ? "نظام الحصة / الباقات (Accrual Basis)" : "Per Lesson / Packages"}</span>
+              </h5>
+              <p className="text-[11px] text-slate-300 leading-relaxed">
+                {isArabic
+                  ? "يتم الاعتراف بالالتزام أو الإيراد بناءً على الحصص المنفذة فعلياً فقط. انقضاء الأشهر التقويمية لا يُنشئ أي ديون أو تكرارات وهمية على الطلاب بالحصة."
+                  : "Revenue and debt are accrued strictly upon actual lesson delivery. Calendar months never generate false recurring charges."}
+              </p>
+            </div>
+
+            <div className="bg-slate-800/60 p-2.5 rounded-xl border border-slate-700/60">
+              <h5 className="font-bold text-blue-400 mb-1 flex items-center gap-1">
+                <span>📅</span>
+                <span>{isArabic ? "الاشتراك الشهري (Subscription Basis)" : "Monthly Subscription"}</span>
+              </h5>
+              <p className="text-[11px] text-slate-300 leading-relaxed">
+                {isArabic
+                  ? "للطلاب على نظام الاشتراك الشهري الثابت، يحسب الاشتراك عن كل شهر تقويمي مقيد فيه الطالب كقيمة محددة مسبقاً."
+                  : "For flat monthly subscription students, fixed monthly fee is billed per enrolled calendar month."}
+              </p>
+            </div>
+
+            <div className="bg-slate-800/60 p-2.5 rounded-xl border border-slate-700/60">
+              <h5 className="font-bold text-purple-400 mb-1 flex items-center gap-1">
+                <span>💵</span>
+                <span>{isArabic ? "التحصيل الفعلي النقدي (Cash Flow)" : "Actual Cash Flow"}</span>
+              </h5>
+              <p className="text-[11px] text-slate-300 leading-relaxed">
+                {isArabic
+                  ? "خانه التحصيل الفعلي تحسب المبالغ النقدية التي تم قبضها وإدخالها للخزينة خلال الشهر المحدد دون خلط مع الإيرادات المتوقعة."
+                  : "Actual collection displays net payments received in the register during the chosen month."}
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Main Section 1: قائمة الطلاب وبطاقاتهم المالية */}
@@ -627,61 +666,8 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
             </div>
 
             <div className="flex items-center justify-between md:justify-end gap-2 flex-wrap">
-              {/* Status & Billing Filter Pills */}
+              {/* Status Filter Pills */}
               <div className="flex items-center gap-1 overflow-x-auto pb-1 md:pb-0 scrollbar-none flex-wrap">
-                {/* Billing Type Selector */}
-                <div className="inline-flex p-0.5 rounded-xl bg-slate-100 border border-slate-200 text-xs font-bold mr-1">
-                  <button
-                    type="button"
-                    onClick={() => setBillingTypeFilter("all")}
-                    className={`px-2 py-1 rounded-lg transition ${
-                      billingTypeFilter === "all"
-                        ? "bg-white text-slate-900 shadow-2xs font-black"
-                        : "text-slate-600 hover:text-slate-900"
-                    }`}
-                  >
-                    {isArabic ? "الكل" : "All Plans"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setBillingTypeFilter("monthly")}
-                    className={`px-2 py-1 rounded-lg transition flex items-center gap-1 ${
-                      billingTypeFilter === "monthly"
-                        ? "bg-white text-purple-700 shadow-2xs font-black"
-                        : "text-slate-600 hover:text-slate-900"
-                    }`}
-                  >
-                    <span>📅</span>
-                    <span>{isArabic ? "شهر كامل" : "Full Month"}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setBillingTypeFilter("monthly_elapsed_lessons")}
-                    className={`px-2 py-1 rounded-lg transition flex items-center gap-1 ${
-                      billingTypeFilter === "monthly_elapsed_lessons"
-                        ? "bg-white text-indigo-700 shadow-2xs font-black"
-                        : "text-slate-600 hover:text-slate-900"
-                    }`}
-                  >
-                    <span>🗓️</span>
-                    <span>{isArabic ? "حصص التقويم" : "Elapsed Month"}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setBillingTypeFilter("monthly_fixed_lessons")}
-                    className={`px-2 py-1 rounded-lg transition flex items-center gap-1 ${
-                      billingTypeFilter === "monthly_fixed_lessons"
-                        ? "bg-white text-amber-700 shadow-2xs font-black"
-                        : "text-slate-600 hover:text-slate-900"
-                    }`}
-                  >
-                    <span>🎯</span>
-                    <span>{isArabic ? "باقة حصص" : "Fixed Pkg"}</span>
-                  </button>
-                </div>
-
-                <div className="h-4 w-px bg-slate-200 mx-0.5 hidden sm:block"></div>
-
                 <button
                   type="button"
                   onClick={() => setStatusFilter("all")}
@@ -691,7 +677,7 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                       : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                   }`}
                 >
-                  {isArabic ? "كل الحالات" : "All Status"} ({allProfiles.length})
+                  {isArabic ? "الكل" : "All"} ({allProfiles.length})
                 </button>
 
                 {/* 🔴 مستحق عليه */}
@@ -705,7 +691,7 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                   }`}
                 >
                   <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0"></span>
-                  <span>{isArabic ? "🔴 مستحق عليه" : "Due"}</span>
+                  <span>{isArabic ? "مستحق" : "Due"}</span>
                   <span className="text-[10px] opacity-80">
                     ({allProfiles.filter(p => p.amountDue > 0).length})
                   </span>
@@ -722,7 +708,7 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                   }`}
                 >
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>
-                  <span>{isArabic ? "🟢 رصيد متبقي" : "Credit"}</span>
+                  <span>{isArabic ? "رصيد فائض" : "Credit"}</span>
                   <span className="text-[10px] opacity-80">
                     ({allProfiles.filter(p => p.creditRemaining > 0).length})
                   </span>
@@ -734,29 +720,14 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                   onClick={() => setStatusFilter("settled")}
                   className={`px-2.5 py-1.5 rounded-xl font-bold text-xs transition whitespace-nowrap flex items-center gap-1 ${
                     statusFilter === "settled"
-                      ? "bg-emerald-700 text-white shadow-xs"
-                      : "bg-emerald-50 text-emerald-900 border border-emerald-200 hover:bg-emerald-100"
+                      ? "bg-slate-800 text-white shadow-xs"
+                      : "bg-slate-100 text-slate-700 hover:bg-slate-200"
                   }`}
                 >
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 shrink-0"></span>
-                  <span>{isArabic ? "🟢 مسدد" : "Settled"}</span>
+                  <span>{isArabic ? "مسدد" : "Settled"}</span>
                   <span className="text-[10px] opacity-80">
                     ({allProfiles.filter(p => p.status.type === "settled").length})
                   </span>
-                </button>
-
-                {/* ⚪ لا توجد حركة */}
-                <button
-                  type="button"
-                  onClick={() => setStatusFilter("no_activity")}
-                  className={`px-2.5 py-1.5 rounded-xl font-bold text-xs transition whitespace-nowrap flex items-center gap-1 ${
-                    statusFilter === "no_activity"
-                      ? "bg-slate-700 text-white shadow-xs"
-                      : "bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-200"
-                  }`}
-                >
-                  <span className="w-1.5 h-1.5 rounded-full bg-slate-400 shrink-0"></span>
-                  <span>{isArabic ? "⚪ لا توجد حركة" : "Idle"}</span>
                 </button>
               </div>
 
@@ -891,9 +862,14 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                                 {profile.monthlyCost} <span className="text-[10px] text-purple-600">{isArabic ? "ج.م/شهر" : "EGP/mo"}</span>
                               </span>
                             ) : profile.rateType === "per_hour" ? (
-                              <span>
-                                {profile.hourlyCost} <span className="text-[10px] text-sky-600 font-semibold">{isArabic ? "ج.م/ساعة" : "EGP/hr"}</span>
-                              </span>
+                              <div className="leading-tight">
+                                <span className="font-bold text-slate-800">
+                                  {profile.hourlyCost} <span className="text-[10px] text-sky-600 font-semibold">{isArabic ? "ج.م/س" : "EGP/hr"}</span>
+                                </span>
+                                <span className="text-[9.5px] text-slate-400 block font-normal">
+                                  ({profile.lessonCost} {isArabic ? "ج.م/ح" : "EGP/lss"})
+                                </span>
+                              </div>
                             ) : (
                               <span>
                                 {profile.lessonCost} <span className="text-[10px] text-slate-400">{isArabic ? "ج.م/حصة" : "EGP/lss"}</span>
@@ -1043,7 +1019,7 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                           {profile.isMonthly ? (isArabic ? "الشهور المحتسبة" : "Billed Months") : (isArabic ? "الحصص المنفذة" : "Attended")}
                         </span>
                         <span className="text-xs font-black text-blue-700 block">
-                          {profile.isMonthly ? `${profile.billedMonthsCount} شهر` : `${profile.attendedLessonsCount} حصة`}
+                          {profile.isMonthly ? `${profile.billedMonthsCount} شهر` : `${profile.attendedLessonsCount} حصة • ${profile.totalTaughtHours} س`}
                         </span>
                         <span className="text-[9.5px] font-bold text-slate-400 block mt-0.5">
                           {profile.attendedLessonsCost} ج.م
@@ -1204,48 +1180,91 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setStatementModalProfile(null)}
-                className="text-slate-400 hover:text-slate-700 p-1.5 rounded-xl hover:bg-slate-200/60 transition"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => handleCopyStatement(statementModalProfile)}
+                  className="p-2 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 transition shadow-2xs flex items-center gap-1 text-xs font-bold"
+                  title={isArabic ? "نسخ كشف الحساب" : "Copy Statement"}
+                >
+                  {copiedStatementId === statementModalProfile.studentId ? (
+                    <Check className="w-4 h-4 text-emerald-600" />
+                  ) : (
+                    <Copy className="w-4 h-4 text-slate-500" />
+                  )}
+                  <span className="hidden sm:inline">{copiedStatementId === statementModalProfile.studentId ? (isArabic ? "تم النسخ" : "Copied") : (isArabic ? "نسخ" : "Copy")}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handlePrintStatement}
+                  className="p-2 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 transition shadow-2xs flex items-center gap-1 text-xs font-bold"
+                  title={isArabic ? "طباعة كشف الحساب / حفظ PDF" : "Print Statement / Save PDF"}
+                >
+                  <Printer className="w-4 h-4 text-slate-600" />
+                  <span className="hidden sm:inline">{isArabic ? "طباعة" : "Print"}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleShareStatementWhatsApp(statementModalProfile)}
+                  className="p-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white transition shadow-2xs flex items-center gap-1 text-xs font-bold"
+                  title={isArabic ? "إرسال كشف الحساب لواتساب ولي الأمر" : "Share Statement via WhatsApp"}
+                >
+                  <Share2 className="w-4 h-4" />
+                  <span className="hidden sm:inline">{isArabic ? "واتساب" : "WhatsApp"}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setStatementModalProfile(null)}
+                  className="text-slate-400 hover:text-slate-700 p-1.5 rounded-xl hover:bg-slate-200/60 transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             {/* Modal Body */}
             <div className="p-4 sm:p-5 space-y-4 max-h-[70vh] overflow-y-auto">
               {/* Summary Stats Grid */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-slate-50 p-3 rounded-2xl border border-slate-200/80 text-center">
-                <div className="bg-white p-2 rounded-xl border border-slate-100">
+                <div className="bg-white p-2.5 rounded-xl border border-slate-100 flex flex-col justify-between">
                   <span className="text-[10px] font-bold text-slate-400 block">
                     {statementModalProfile.isMonthly ? (isArabic ? "الشهور المحتسبة" : "Billed Months") : (isArabic ? "الحصص المنفذة" : "Attended")}
                   </span>
-                  <span className="text-sm font-black text-blue-700">
+                  <span className="text-sm font-black text-blue-700 my-0.5">
                     {statementModalProfile.isMonthly ? `${statementModalProfile.billedMonthsCount} شهر` : `${statementModalProfile.attendedLessonsCount} حصة`}
                   </span>
                   <span className="text-[9.5px] text-slate-400 block">({statementModalProfile.attendedLessonsCost} ج.م)</span>
                 </div>
 
-                <div className="bg-white p-2 rounded-xl border border-slate-100">
-                  <span className="text-[10px] font-bold text-slate-400 block">{isArabic ? "الساعات المنفذة" : "Taught Hours"}</span>
-                  <span className="text-sm font-black text-sky-700">{statementModalProfile.totalTaughtHours} ساعة</span>
-                  <span className="text-[9.5px] text-slate-400 block">
-                    {statementModalProfile.rateType === "per_hour" ? `${statementModalProfile.hourlyCost} ج.م/س` : `${statementModalProfile.lessonCost} ج.م/ح`}
+                {/* FEATURE: عدد الساعات التي درسها */}
+                <div className="bg-gradient-to-b from-sky-50/60 to-white p-2.5 rounded-xl border border-sky-200/80 flex flex-col justify-between shadow-2xs">
+                  <span className="text-[10px] font-black text-sky-800 flex items-center justify-center gap-1">
+                    <Clock className="w-3 h-3 text-sky-600" />
+                    <span>{isArabic ? "عدد الساعات التي درسها" : "Hours Studied"}</span>
+                  </span>
+                  <span className="text-sm font-black text-sky-700 my-0.5">
+                    {statementModalProfile.totalTaughtHours} {isArabic ? "ساعة" : "hrs"}
+                  </span>
+                  <span className="text-[9px] font-bold text-slate-500 block truncate" title={formatHoursHuman(statementModalProfile.totalTaughtHours, isArabic)}>
+                    {formatHoursHuman(statementModalProfile.totalTaughtHours, isArabic)}
                   </span>
                 </div>
 
-                <div className="bg-white p-2 rounded-xl border border-slate-100">
+                <div className="bg-white p-2.5 rounded-xl border border-slate-100 flex flex-col justify-between">
                   <span className="text-[10px] font-bold text-slate-400 block">{isArabic ? "إجمالي المدفوع" : "Paid"}</span>
-                  <span className="text-sm font-black text-emerald-600">{statementModalProfile.totalPaidAmount} ج.م</span>
+                  <span className="text-sm font-black text-emerald-600 my-0.5">{statementModalProfile.totalPaidAmount} ج.م</span>
+                  <span className="text-[9.5px] text-slate-400 block">{statementModalProfile.paymentHistory.length} {isArabic ? "دفعات" : "payments"}</span>
                 </div>
 
-                <div className="bg-white p-2 rounded-xl border border-slate-100">
+                <div className="bg-white p-2.5 rounded-xl border border-slate-100 flex flex-col justify-between">
                   <span className="text-[10px] font-bold text-slate-400 block">
-                    {statementModalProfile.amountDue > 0 ? (isArabic ? "المستحق" : "Due") : (isArabic ? "الرصيد" : "Credit")}
+                    {statementModalProfile.amountDue > 0 ? (isArabic ? "المستحق للسداد" : "Due") : (isArabic ? "الرصيد المتبقي" : "Credit")}
                   </span>
                   <span
-                    className={`text-sm font-black ${
+                    className={`text-sm font-black my-0.5 ${
                       statementModalProfile.amountDue > 0 ? "text-rose-600" : "text-emerald-600"
                     }`}
                   >
@@ -1253,7 +1272,44 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                       ? `${statementModalProfile.amountDue} ج.م`
                       : `+${statementModalProfile.creditRemaining} ج.م`}
                   </span>
+                  <span className="text-[9.5px] text-slate-400 block">
+                    {statementModalProfile.amountDue > 0 ? (isArabic ? "مطلوب سداده" : "Due balance") : (isArabic ? "رصيد دائن" : "Surplus")}
+                  </span>
                 </div>
+              </div>
+
+              {/* DEDICATED STUDY HOURS SUMMARY BANNER */}
+              <div className="p-3 rounded-2xl bg-gradient-to-r from-sky-50 via-blue-50/70 to-indigo-50/50 border border-sky-200/90 shadow-2xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-2xl bg-sky-600 text-white flex items-center justify-center font-bold shrink-0 shadow-xs">
+                    <Clock className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-black text-slate-900 text-xs">
+                        {isArabic ? "ساعات التدريس الفعلي للطالب:" : "Actual Study Hours Completed:"}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-lg bg-sky-600 text-white font-black text-xs shadow-2xs">
+                        ⏱️ {statementModalProfile.totalTaughtHours} {isArabic ? "ساعة درسها" : "hours studied"}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-600 font-medium mt-0.5">
+                      {isArabic
+                        ? `درس الطالب ما مجموعه (${formatHoursHuman(statementModalProfile.totalTaughtHours, true)}) بما يعادل ${Math.round((statementModalProfile.totalTaughtHours || 0) * 60)} دقيقة موزعة على ${statementModalProfile.attendedLessonsCount} حصة حضور فعلية.`
+                        : `The student completed (${formatHoursHuman(statementModalProfile.totalTaughtHours, false)}) totaling ${Math.round((statementModalProfile.totalTaughtHours || 0) * 60)} minutes across ${statementModalProfile.attendedLessonsCount} attended lessons.`}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleShareStatementWhatsApp(statementModalProfile)}
+                  className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold shadow-2xs flex items-center gap-1.5 self-end sm:self-auto shrink-0 transition"
+                  title={isArabic ? "إرسال كشف الحساب وتفاصيل الساعات عبر واتساب" : "Share via WhatsApp"}
+                >
+                  <Share2 className="w-3.5 h-3.5" />
+                  <span>{isArabic ? "إرسال بالواتساب" : "Send WhatsApp"}</span>
+                </button>
               </div>
 
               {/* Expected Monthly Revenue Box */}
@@ -1272,10 +1328,10 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                   </div>
                   <div className="text-left shrink-0">
                     <span className="text-sm font-black text-emerald-700 block">
-                      {statementModalProfile.expectedRevenueInfo.expectedRevenue.toLocaleString()} {isArabic ? "ج.م" : "EGP"}
+                      {(statementModalProfile.expectedRevenueInfo.expectedRevenue ?? 0).toLocaleString()} {isArabic ? "ج.م" : "EGP"}
                     </span>
                     <span className="text-[10px] text-slate-500 font-medium">
-                      {statementModalProfile.expectedRevenueInfo.expectedLessonsCount} {isArabic ? "حصة متوقعة" : "lessons"}
+                      {statementModalProfile.expectedRevenueInfo.expectedLessonsCount ?? 0} {isArabic ? "حصة متوقعة" : "lessons"}
                     </span>
                   </div>
                 </div>
@@ -1302,13 +1358,13 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                 <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
                   <h4 className="font-black text-slate-900 text-xs flex items-center gap-1.5">
                     <Layers className="w-3.5 h-3.5 text-blue-600" />
-                    <span>{isArabic ? "تفصيل الحساب المالي لكل مادة مسجلة:" : "Financial Breakdown by Subject:"}</span>
+                    <span>{isArabic ? "تفصيل الحساب المالي وساعات الدراسة لكل مادة:" : "Financial & Hours Breakdown by Subject:"}</span>
                   </h4>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {statementModalProfile.subjectBreakdown.map(sub => (
                       <div
                         key={sub.subjectId || sub.subjectName}
-                        className="bg-white p-2.5 rounded-xl border border-slate-200/80 space-y-1 text-xs"
+                        className="bg-white p-2.5 rounded-xl border border-slate-200/80 space-y-1.5 text-xs shadow-2xs"
                       >
                         <div className="flex items-center justify-between font-black">
                           <span className="text-slate-900">{sub.subjectName}</span>
@@ -1316,6 +1372,18 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                             {sub.studyTypeLabel}
                           </span>
                         </div>
+
+                        {/* ساعات دراسة المادة */}
+                        <div className="flex items-center justify-between text-[11px] font-bold text-sky-800 bg-sky-50/80 px-2 py-1 rounded-lg border border-sky-100">
+                          <span className="flex items-center gap-1">
+                            <Clock className="w-3 h-3 text-sky-600" />
+                            <span>{isArabic ? "عدد الساعات التي درسها:" : "Hours Studied:"}</span>
+                          </span>
+                          <span className="font-black text-sky-900">
+                            {sub.totalTaughtHours} {isArabic ? "ساعة" : "hrs"} ({sub.attendedCount} {isArabic ? "حصة" : "lss"})
+                          </span>
+                        </div>
+
                         <div className="flex items-center justify-between text-[11px] text-slate-500">
                           <span>{isArabic ? "المحسوب:" : "Accrued:"} {sub.attendedCost} ج.م</span>
                           <span>{isArabic ? "المسدد:" : "Paid:"} {sub.paidAmount} ج.م</span>
@@ -1361,16 +1429,21 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                 )}
               </div>
 
-              {/* 2. سجل الحصص المنفذة */}
+              {/* 2. سجل الحصص المنفذة وساعات التدريس */}
               <div className="space-y-2">
-                <h4 className="font-black text-slate-900 text-xs flex items-center gap-1.5">
-                  <Layers className="w-3.5 h-3.5 text-blue-600" />
-                  <span>
-                    {statementModalProfile.isMonthly
-                      ? (isArabic ? "سجل الحضور التربوي والأكاديمي:" : "Attendance History (Educational):")
-                      : (isArabic ? "سجل الحصص المنفذة المسجلة بالحضور:" : "Attended Lessons History:")}
+                <div className="flex items-center justify-between">
+                  <h4 className="font-black text-slate-900 text-xs flex items-center gap-1.5">
+                    <Layers className="w-3.5 h-3.5 text-blue-600" />
+                    <span>
+                      {statementModalProfile.isMonthly
+                        ? (isArabic ? "سجل الحضور التربوي والأكاديمي:" : "Attendance History (Educational):")
+                        : (isArabic ? "سجل الحصص المنفذة وساعات التدريس:" : "Attended Lessons & Hours History:")}
+                    </span>
+                  </h4>
+                  <span className="text-[10px] font-black text-sky-800 bg-sky-50 px-2 py-0.5 rounded-lg border border-sky-200/70">
+                    ⏱️ {statementModalProfile.totalTaughtHours} {isArabic ? "ساعة درسها" : "hours studied"}
                   </span>
-                </h4>
+                </div>
 
                 {statementModalProfile.attendanceHistory.length === 0 ? (
                   <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-center text-xs text-slate-400 font-medium">
@@ -1378,55 +1451,323 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                   </div>
                 ) : (
                   <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
-                    {statementModalProfile.attendanceHistory.map((ar, aIdx) => (
-                      <div
-                        key={ar.id || aIdx}
-                        className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between text-xs"
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-black text-[10px]">
-                            #{ar.lessonNumber || (aIdx + 1)}
-                          </span>
-                          <div>
-                            <p className="font-bold text-slate-800">{ar.subject || statementModalProfile.subjectName}</p>
-                            <p className="text-[10px] text-slate-400">{ar.teacherNotes || (ar.attendance === "present" ? "حضور مؤكد" : "غياب مع احتساب الحصة")}</p>
+                    {statementModalProfile.attendanceHistory.map((ar, aIdx) => {
+                      let arDur = ar.durationMinutes;
+                      if (!arDur && ar.lessonDuration) {
+                        const m = ar.lessonDuration.match(/(\d+)/);
+                        if (m) arDur = parseInt(m[1], 10);
+                      }
+                      if (!arDur) arDur = statementModalProfile.defaultDurationMinutes || 60;
+
+                      const itemDeduction = statementModalProfile.rateType === "per_hour"
+                        ? Number(((statementModalProfile.hourlyCost * arDur) / 60).toFixed(2))
+                        : statementModalProfile.lessonCost;
+
+                      return (
+                        <div
+                          key={ar.id || aIdx}
+                          className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between text-xs"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-black text-[10px]">
+                              #{ar.lessonNumber || (aIdx + 1)}
+                            </span>
+                            <div>
+                              <p className="font-bold text-slate-800">{ar.subject || statementModalProfile.subjectName}</p>
+                              <p className="text-[10px] text-slate-400">{ar.teacherNotes || (ar.attendance === "present" ? "حضور مؤكد" : "غياب مع احتساب الحصة")}</p>
+                            </div>
+                          </div>
+                          <div className="text-left">
+                            <span className="font-bold text-slate-900 block">
+                              {statementModalProfile.isMonthly ? (isArabic ? "حضور" : "Attended") : `-${itemDeduction} ج.م`}
+                            </span>
+                            <span className="text-[10px] text-sky-700 font-bold block">
+                              ⏱️ {arDur} دقيقة ({formatHoursHuman(arDur / 60, isArabic)})
+                            </span>
+                            <span className="text-[9.5px] text-slate-400 block">{ar.date}</span>
                           </div>
                         </div>
-                        <div className="text-left">
-                          <span className="font-bold text-slate-900 block">
-                            {statementModalProfile.isMonthly ? (isArabic ? "حضور" : "Attended") : `-${statementModalProfile.lessonCost} ج.م`}
-                          </span>
-                          <span className="text-[10px] text-slate-400">{ar.date}</span>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
             </div>
 
             {/* Modal Footer */}
-            <div className="p-4 border-t border-slate-100 flex items-center justify-between bg-slate-50/60">
-              <button
-                type="button"
-                onClick={() => setStatementModalProfile(null)}
-                className="px-4 py-2 rounded-xl bg-slate-200 text-slate-700 font-bold text-xs"
-              >
-                {isArabic ? "إغلاق" : "Close"}
-              </button>
+            <div className="p-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 bg-slate-50/60">
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setStatementModalProfile(null)}
+                  className="px-3.5 py-2 rounded-xl bg-slate-200 text-slate-700 font-bold text-xs hover:bg-slate-300 transition"
+                >
+                  {isArabic ? "إغلاق" : "Close"}
+                </button>
 
-              <button
-                type="button"
-                onClick={() => {
-                  const p = statementModalProfile;
-                  setStatementModalProfile(null);
-                  handleOpenPayment(p);
-                }}
-                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md shadow-emerald-600/30 flex items-center gap-1.5"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>{isArabic ? "تسجيل دفعة لهذا الطالب" : "Record Payment"}</span>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => handleCopyStatement(statementModalProfile)}
+                  className="px-3 py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-bold text-xs transition flex items-center gap-1.5 shadow-2xs"
+                >
+                  {copiedStatementId === statementModalProfile.studentId ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-600" />
+                      <span className="text-emerald-700">{isArabic ? "تم النسخ" : "Copied"}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5 text-slate-500" />
+                      <span>{isArabic ? "نسخ الكشف" : "Copy"}</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={handlePrintStatement}
+                  className="px-3 py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-bold text-xs transition flex items-center gap-1.5 shadow-2xs"
+                  title={isArabic ? "طباعة كشف الحساب / حفظ PDF" : "Print Statement / Save PDF"}
+                >
+                  <Printer className="w-3.5 h-3.5 text-slate-600" />
+                  <span>{isArabic ? "طباعة الكشف" : "Print"}</span>
+                </button>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => handleShareStatementWhatsApp(statementModalProfile)}
+                  className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md shadow-emerald-600/30 flex items-center gap-1.5 transition"
+                >
+                  <Share2 className="w-3.5 h-3.5" />
+                  <span>{isArabic ? "مشاركة عبر واتساب" : "Share via WhatsApp"}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const p = statementModalProfile;
+                    setStatementModalProfile(null);
+                    handleOpenPayment(p);
+                  }}
+                  className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md shadow-blue-600/30 flex items-center gap-1.5 transition"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>{isArabic ? "تسجيل دفعة" : "Pay"}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Official Printable Statement Voucher for @media print */}
+            <div id="student-statement-printable" className="hidden print:block text-slate-900 bg-white font-sans text-xs" dir={isArabic ? "rtl" : "ltr"}>
+              {/* Printable Header */}
+              <div className="border-b-2 border-slate-900 pb-3 mb-4 flex items-center justify-between">
+                <div>
+                  <h1 className="text-xl font-black text-slate-900 tracking-tight">
+                    {settings.teacherName || (isArabic ? "المنصة التعليمية اليومية" : "Educational Platform")}
+                  </h1>
+                  <h2 className="text-sm font-bold text-slate-700 mt-0.5">
+                    {isArabic ? "كشف الحساب المالي وساعات الدراسة المعتمد للطالب" : "Official Student Financial Statement & Hours"}
+                  </h2>
+                </div>
+                <div className="text-left font-mono text-[10px] text-slate-500">
+                  <p>{isArabic ? "تاريخ الإصدار:" : "Issue Date:"} {new Date().toLocaleDateString(isArabic ? "ar-EG" : "en-US", { year: "numeric", month: "long", day: "numeric" })}</p>
+                  <p className="font-bold text-slate-700 mt-0.5">IFRS Accounting Standard</p>
+                </div>
+              </div>
+
+              {/* Student Details Card */}
+              <div className="grid grid-cols-3 gap-2 p-3 bg-slate-50 border border-slate-300 rounded-xl mb-3 text-xs">
+                <div>
+                  <span className="text-[10px] text-slate-500 font-bold block">{isArabic ? "اسم الطالب:" : "Student Name:"}</span>
+                  <span className="font-black text-sm text-slate-900">{statementModalProfile.fullName}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-500 font-bold block">{isArabic ? "المادة الدراسية:" : "Subject:"}</span>
+                  <span className="font-bold text-slate-800">{statementModalProfile.subjectName} ({statementModalProfile.studyTypeLabel})</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-500 font-bold block">{isArabic ? "حالة الحساب:" : "Account Status:"}</span>
+                  <span className={`font-black ${statementModalProfile.amountDue > 0 ? "text-rose-700" : "text-emerald-700"}`}>
+                    {isArabic ? statementModalProfile.status.labelAr : statementModalProfile.status.labelEn}
+                  </span>
+                </div>
+              </div>
+
+              {/* STUDY HOURS HIGHLIGHT BANNER */}
+              <div className="p-3.5 rounded-xl bg-sky-50 border-2 border-sky-600 mb-3.5 flex items-center justify-between">
+                <div>
+                  <span className="text-[11px] font-black text-sky-950 block">
+                    {isArabic ? "⏱️ إجمالي عدد الساعات التي درسها الطالب:" : "⏱️ Actual Study Hours Completed:"}
+                  </span>
+                  <p className="text-[10.5px] text-slate-700 font-medium mt-0.5">
+                    {isArabic
+                      ? `أتم الطالب ما مجموعه (${formatHoursHuman(statementModalProfile.totalTaughtHours, true)}) بما يعادل ${Math.round((statementModalProfile.totalTaughtHours || 0) * 60)} دقيقة تدريس فعلي موزعة على ${statementModalProfile.attendedLessonsCount} حصة حضور مسجلة.`
+                      : `The student completed (${formatHoursHuman(statementModalProfile.totalTaughtHours, false)}) totaling ${Math.round((statementModalProfile.totalTaughtHours || 0) * 60)} minutes across ${statementModalProfile.attendedLessonsCount} attended lessons.`}
+                  </p>
+                </div>
+                <div className="text-left font-black text-xl text-sky-900 bg-white px-3 py-1.5 rounded-lg border border-sky-300 shrink-0">
+                  {statementModalProfile.totalTaughtHours} {isArabic ? "ساعة" : "hrs"}
+                </div>
+              </div>
+
+              {/* Summary Stats Grid */}
+              <div className="grid grid-cols-4 gap-2 mb-3.5 text-center text-xs">
+                <div className="p-2.5 bg-slate-50 border border-slate-300 rounded-xl">
+                  <span className="text-[10px] font-bold text-slate-500 block">
+                    {statementModalProfile.isMonthly ? (isArabic ? "الشهور المحتسبة" : "Billed Months") : (isArabic ? "الحصص المنفذة" : "Attended")}
+                  </span>
+                  <span className="text-sm font-black text-blue-900 block mt-0.5">
+                    {statementModalProfile.isMonthly ? `${statementModalProfile.billedMonthsCount} شهر` : `${statementModalProfile.attendedLessonsCount} حصة`}
+                  </span>
+                </div>
+                <div className="p-2.5 bg-slate-50 border border-slate-300 rounded-xl">
+                  <span className="text-[10px] font-bold text-slate-500 block">{isArabic ? "إجمالي التكلفة" : "Accrued Cost"}</span>
+                  <span className="text-sm font-black text-slate-900 block mt-0.5">{statementModalProfile.attendedLessonsCost} ج.م</span>
+                </div>
+                <div className="p-2.5 bg-slate-50 border border-slate-300 rounded-xl">
+                  <span className="text-[10px] font-bold text-slate-500 block">{isArabic ? "إجمالي المسدد" : "Total Paid"}</span>
+                  <span className="text-sm font-black text-emerald-800 block mt-0.5">{statementModalProfile.totalPaidAmount} ج.م</span>
+                </div>
+                <div className="p-2.5 bg-slate-50 border border-slate-300 rounded-xl">
+                  <span className="text-[10px] font-bold text-slate-500 block">
+                    {statementModalProfile.amountDue > 0 ? (isArabic ? "المستحق للسداد" : "Due Balance") : (isArabic ? "الرصيد الفائض" : "Credit Balance")}
+                  </span>
+                  <span className={`text-sm font-black block mt-0.5 ${statementModalProfile.amountDue > 0 ? "text-rose-700" : "text-emerald-800"}`}>
+                    {statementModalProfile.amountDue > 0 ? `${statementModalProfile.amountDue} ج.م` : `+${statementModalProfile.creditRemaining} ج.م`}
+                  </span>
+                </div>
+              </div>
+
+              {/* Multi-Subject Breakdown Table if exists */}
+              {statementModalProfile.subjectBreakdown && statementModalProfile.subjectBreakdown.length > 1 && (
+                <div className="mb-3.5">
+                  <h3 className="font-black text-xs text-slate-900 mb-1.5">{isArabic ? "تفصيل الساعات والحساب لكل مادة دراسية:" : "Subject Breakdown:"}</h3>
+                  <table className="w-full text-right border-collapse border border-slate-300 text-[11px]">
+                    <thead>
+                      <tr className="bg-slate-100 text-slate-800 font-bold border-b border-slate-300">
+                        <th className="p-1.5 border-r border-slate-300">المادة الدراسية</th>
+                        <th className="p-1.5 border-r border-slate-300 text-center">ساعات الدراسة</th>
+                        <th className="p-1.5 border-r border-slate-300 text-center">عدد الحصص</th>
+                        <th className="p-1.5 border-r border-slate-300 text-center">المحسوب</th>
+                        <th className="p-1.5 border-r border-slate-300 text-center">المسدد</th>
+                        <th className="p-1.5 text-center">الموقف المالي</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {statementModalProfile.subjectBreakdown.map((s, idx) => (
+                        <tr key={idx} className="border-b border-slate-200">
+                          <td className="p-1.5 border-r border-slate-300 font-bold">{s.subjectName} ({s.studyTypeLabel})</td>
+                          <td className="p-1.5 border-r border-slate-300 text-center font-black text-sky-900">⏱️ {s.totalTaughtHours} ساعة</td>
+                          <td className="p-1.5 border-r border-slate-300 text-center">{s.attendedCount} حصة</td>
+                          <td className="p-1.5 border-r border-slate-300 text-center font-mono">{s.accruedCost} ج.م</td>
+                          <td className="p-1.5 border-r border-slate-300 text-center font-mono text-emerald-800">{s.paidAmount} ج.م</td>
+                          <td className="p-1.5 text-center font-bold">
+                            {s.amountDue > 0 ? <span className="text-rose-700 font-black">{s.amountDue} ج.م مستحق</span> : <span className="text-emerald-700">مسدد بالكامل</span>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* Attended Lessons History Table */}
+              <div className="mb-3.5">
+                <h3 className="font-black text-xs text-slate-900 mb-1.5">
+                  {isArabic ? `سجل الحصص المنفذة وساعات التدريس الفعلي (${statementModalProfile.attendedLessonsCount} حصة • ${statementModalProfile.totalTaughtHours} ساعة):` : `Attended Lessons & Hours Log:`}
+                </h3>
+                <table className="w-full text-right border-collapse border border-slate-300 text-[10.5px]">
+                  <thead>
+                    <tr className="bg-slate-100 text-slate-800 font-bold border-b border-slate-300">
+                      <th className="p-1.5 border-r border-slate-300 w-8 text-center">#</th>
+                      <th className="p-1.5 border-r border-slate-300">التاريخ</th>
+                      <th className="p-1.5 border-r border-slate-300">المادة</th>
+                      <th className="p-1.5 border-r border-slate-300 text-center">مدة الحصة والساعات</th>
+                      <th className="p-1.5 border-r border-slate-300 text-center">التكلفة</th>
+                      <th className="p-1.5">الملاحظات</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {statementModalProfile.attendanceHistory.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="p-2 text-center text-slate-400">لا توجد حصص مسجلة بالحضور بعد.</td>
+                      </tr>
+                    ) : (
+                      statementModalProfile.attendanceHistory.map((ar, idx) => {
+                        let dur = ar.durationMinutes;
+                        if (!dur && ar.lessonDuration) {
+                          const m = ar.lessonDuration.match(/(\d+)/);
+                          if (m) dur = parseInt(m[1], 10);
+                        }
+                        if (!dur) dur = statementModalProfile.defaultDurationMinutes || 60;
+
+                        const itemDeduction = statementModalProfile.rateType === "per_hour"
+                          ? Number(((statementModalProfile.hourlyCost * dur) / 60).toFixed(2))
+                          : statementModalProfile.lessonCost;
+
+                        return (
+                          <tr key={idx} className="border-b border-slate-200">
+                            <td className="p-1.5 border-r border-slate-300 text-center font-bold">{ar.lessonNumber || (idx + 1)}</td>
+                            <td className="p-1.5 border-r border-slate-300 font-mono">{ar.date}</td>
+                            <td className="p-1.5 border-r border-slate-300 font-bold">{ar.subject || statementModalProfile.subjectName}</td>
+                            <td className="p-1.5 border-r border-slate-300 text-center font-black text-sky-900">
+                              ⏱️ {dur} دقيقة ({formatHoursHuman(dur / 60, isArabic)})
+                            </td>
+                            <td className="p-1.5 border-r border-slate-300 text-center font-mono">
+                              {statementModalProfile.isMonthly ? "حضور" : `${itemDeduction} ج.م`}
+                            </td>
+                            <td className="p-1.5 text-slate-600">{ar.teacherNotes || (ar.attendance === "present" ? "حضور مؤكد" : "غياب مع الاحتساب")}</td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Payment History Table */}
+              <div className="mb-4">
+                <h3 className="font-black text-xs text-slate-900 mb-1.5">{isArabic ? "سجل الدفعات المسددة:" : "Payment History:"}</h3>
+                <table className="w-full text-right border-collapse border border-slate-300 text-[10.5px]">
+                  <thead>
+                    <tr className="bg-slate-100 text-slate-800 font-bold border-b border-slate-300">
+                      <th className="p-1.5 border-r border-slate-300 w-8 text-center">#</th>
+                      <th className="p-1.5 border-r border-slate-300">التاريخ</th>
+                      <th className="p-1.5 border-r border-slate-300 text-center">المبلغ المسدد</th>
+                      <th className="p-1.5">ملاحظات التحصيل</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {statementModalProfile.paymentHistory.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="p-2 text-center text-slate-400">لم تسجل دفعات بعد.</td>
+                      </tr>
+                    ) : (
+                      statementModalProfile.paymentHistory.map((pt, idx) => (
+                        <tr key={idx} className="border-b border-slate-200">
+                          <td className="p-1.5 border-r border-slate-300 text-center font-bold">{idx + 1}</td>
+                          <td className="p-1.5 border-r border-slate-300 font-mono">{pt.date}</td>
+                          <td className="p-1.5 border-r border-slate-300 text-center font-black text-emerald-800 font-mono">+{pt.amount} ج.م</td>
+                          <td className="p-1.5 text-slate-600">{pt.notes || "سداد نقدي معتمد"}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Printable Footer & Signature */}
+              <div className="pt-3 border-t-2 border-slate-900 flex items-center justify-between text-xs font-bold text-slate-700">
+                <div>
+                  <p>تم استخراج هذا الكشف وتدقيقه محاسبياً وأكاديمياً.</p>
+                  <p className="text-[10px] text-slate-500 font-normal mt-0.5">صادر عن منظومة إدارة المعلم الإسلامي والتعليمي اليومية</p>
+                </div>
+                <div className="text-center min-w-[150px]">
+                  <p className="border-b border-slate-400 pb-4 mb-1">توقيع المعلم / الإدارة</p>
+                  <span className="text-[10px] text-slate-500">معتمد</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>

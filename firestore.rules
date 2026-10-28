@@ -1,19 +1,67 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Default-deny global safety net
-    match /{document=**} {
-      allow read, write: if false;
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
     }
 
-    // Strict User Workspace Isolation:
-    // Authenticated users can ONLY read and write their own user profile, settings, AI rules, and data
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == "fathy93091@gmail.com"
+      );
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && (
+        request.auth.uid == userId || isAdmin()
+      );
+    }
+
+    // Connection probe test document
+    match /test/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Primary User Workspace: Each authenticated teacher has access to their isolated root doc and subcollections
     match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read, write: if isOwner(userId);
+
+      match /{allChildren=**} {
+        allow read, write: if isOwner(userId);
+      }
     }
 
-    match /users/{userId}/{document=**} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+    // Students collection
+    match /students/{studentId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // Sessions collection
+    match /sessions/{sessionId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // Daily Reports collection
+    match /dailyReports/{reportId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // Monthly Reports collection
+    match /monthlyReports/{monthlyReportId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // Student Memories collection
+    match /studentMemories/{studentMemoryId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // Settings collection
+    match /settings/{settingsId} {
+      allow read, write: if isSignedIn();
     }
   }
 }

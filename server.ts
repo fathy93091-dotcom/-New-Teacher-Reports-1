@@ -2,10 +2,13 @@ import express from "express";
 import path from "path";
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
-import { app } from "./server/app";
+
+const appDir = typeof __dirname !== "undefined" ? __dirname : process.cwd();
 
 async function startServer() {
   const PORT = 3000;
+
+  const { app } = await import("./server/app");
 
   // --- VITE / STATIC SERVING ---
   if (process.env.NODE_ENV !== "production") {
@@ -17,16 +20,21 @@ async function startServer() {
   } else {
     const candidates = [
       path.join(process.cwd(), "dist"),
-      path.join(__dirname),
+      path.join(process.cwd(), "build"),
+      typeof appDir === "string" ? appDir : "",
       path.resolve(process.cwd(), "dist"),
-      path.resolve(__dirname, "../dist")
-    ];
+      path.resolve(process.cwd(), "build"),
+      typeof appDir === "string" ? path.resolve(appDir, "..") : ""
+    ].filter(Boolean);
 
-    let distPath = candidates[0];
+    let distPath = path.join(process.cwd(), "dist");
     for (const candidate of candidates) {
-      if (fs.existsSync(path.join(candidate, "index.html"))) {
-        distPath = candidate;
-        break;
+      if (candidate && typeof candidate === "string") {
+        const indexCandidate = path.join(candidate, "index.html");
+        if (fs.existsSync(indexCandidate)) {
+          distPath = candidate;
+          break;
+        }
       }
     }
 
@@ -37,8 +45,8 @@ async function startServer() {
       if (req.path.startsWith("/api")) {
         return res.status(404).json({ error: "API route not found" });
       }
-      const indexPath = path.join(distPath, "index.html");
-      if (fs.existsSync(indexPath)) {
+      const indexPath = distPath ? path.join(distPath, "index.html") : path.join(process.cwd(), "dist", "index.html");
+      if (typeof indexPath === "string" && indexPath.length > 0 && fs.existsSync(indexPath)) {
         res.sendFile(indexPath);
       } else {
         res.status(200).send("GoStars Assistant - Application is running.");
@@ -67,4 +75,3 @@ startServer().catch(err => {
   console.error("[GoStars Server] Fatal startup error:", err);
   process.exit(1);
 });
-

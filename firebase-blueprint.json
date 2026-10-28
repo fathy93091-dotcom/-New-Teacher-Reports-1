@@ -163,7 +163,26 @@
       "schema": { "$ref": "#/entities/UserWorkspace" },
       "description": "Authenticated teacher workspace and synced database"
     },
+    "/users/{userId}/students/{studentId}": {
+      "schema": { "$ref": "#/entities/Student" },
+      "description": "Teacher isolated student records"
+    },
+    "/users/{userId}/reports/{reportId}": {
+      "schema": { "$ref": "#/entities/DailyReport" },
+      "description": "Teacher isolated generated reports"
+    },
+    "/users/{userId}/attendance/{attendanceId}": {
+      "schema": { "$ref": "#/entities/Session" },
+      "description": "Teacher isolated attendance records"
+    },
+    "/users/{userId}/settings/{settingsId}": {
+      "schema": { "$ref": "#/entities/AppSettings" },
+      "description": "Teacher isolated app settings"
+    },
     "/students/{studentId}": {
+      "schema": { "$ref": "#/entities/Student" },
+      "description": "Student records collection"
+    },
       "schema": { "$ref": "#/entities/Student" },
       "description": "Student records collection"
     },

@@ -1,7 +1,8 @@
 import React from "react";
-import { Home, Users, GraduationCap, Calendar, DollarSign } from "lucide-react";
+import { Home, Users, GraduationCap, Calendar, DollarSign, FileText } from "lucide-react";
+import { NavTab } from "../types";
 
-export type NavTab = "home" | "groups" | "students" | "schedule" | "finance";
+export type { NavTab };
 
 interface MobileBottomNavProps {
   activeTab: NavTab;
@@ -31,6 +32,11 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
       icon: GraduationCap
     },
     {
+      id: "monthly_report" as NavTab,
+      label: isArabic ? "الشهري" : "Monthly",
+      icon: FileText
+    },
+    {
       id: "schedule" as NavTab,
       label: isArabic ? "الجدول" : "Schedule",
       icon: Calendar
@@ -44,7 +50,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 bg-slate-900/95 backdrop-blur-lg border-t border-slate-800/90 text-slate-300 px-2 sm:px-4 pt-1.5 pb-[max(0.5rem,env(safe-area-inset-bottom))] shadow-2xl">
-      <div className="max-w-md sm:max-w-xl mx-auto grid grid-cols-5 gap-1.5 sm:gap-2 items-center">
+      <div className="max-w-md sm:max-w-xl mx-auto grid grid-cols-6 gap-1 sm:gap-1.5 items-center">
         {tabs.map(tab => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;

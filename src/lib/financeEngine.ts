@@ -2,6 +2,7 @@ import {
   Student,
   AttendanceRecord,
   PaymentTransaction,
+  GeneratedReport,
   BillingType,
   RateType,
   StudyType,
@@ -10,6 +11,8 @@ import {
   PrivateLesson,
   ScheduleSlot
 } from "../types";
+import { StorageEngine } from "./storage";
+import { getActiveCycleInfo } from "./reportArchiveEngine";
 
 /**
  * Counts occurrences of specific weekdays in a given calendar month
@@ -61,6 +64,7 @@ export function getWeekdayOccurrencesInMonth(
 export interface StudentExpectedRevenueInfo {
   studentId: string;
   expectedMonthlyRevenue: number;
+  expectedRevenue?: number;
   expectedLessonsCount: number;
   actualPaidThisMonth: number;
   actualAttendedThisMonth: number;
@@ -69,6 +73,7 @@ export interface StudentExpectedRevenueInfo {
   billingType: BillingType;
   rateType: RateType;
   scheduleSummary: string;
+  scheduleDescription?: string;
   formulaDescription: string;
   breakdownBySubject: {
     subject: string;
@@ -90,16 +95,17 @@ export interface ExpectedMonthlyRevenueSummary {
   monthNameEn: string;
   totalExpectedRevenue: number;
   totalActualCollectedThisMonth: number;
+  totalEarnedRevenueThisMonth: number;
   totalRemainingToCollect: number;
   overallCollectionPercent: number;
   totalExpectedLessons: number;
   totalAttendedThisMonth: number;
   activeStudentsCount: number;
   byBillingType: {
-    monthly: { expectedRevenue: number; studentsCount: number; collectedThisMonth: number };
-    monthly_fixed_lessons: { expectedRevenue: number; studentsCount: number; collectedThisMonth: number; totalLessons: number };
-    per_lesson: { expectedRevenue: number; studentsCount: number; collectedThisMonth: number; totalLessons: number };
-    monthly_elapsed_lessons: { expectedRevenue: number; studentsCount: number; collectedThisMonth: number; totalLessons: number };
+    monthly: { expectedRevenue: number; studentsCount: number; collectedThisMonth: number; earnedThisMonth: number };
+    monthly_fixed_lessons: { expectedRevenue: number; studentsCount: number; collectedThisMonth: number; earnedThisMonth: number; totalLessons: number };
+    per_lesson: { expectedRevenue: number; studentsCount: number; collectedThisMonth: number; earnedThisMonth: number; totalLessons: number };
+    monthly_elapsed_lessons: { expectedRevenue: number; studentsCount: number; collectedThisMonth: number; earnedThisMonth: number; totalLessons: number };
   };
   studentMap: Map<string, StudentExpectedRevenueInfo>;
 }
@@ -302,14 +308,17 @@ export function calculateTotalExpectedMonthlyRevenue(
 
   let totalExpectedRevenue = 0;
   let totalActualCollectedThisMonth = 0;
+  let totalEarnedRevenueThisMonth = 0;
   let totalExpectedLessons = 0;
   let totalAttendedThisMonth = 0;
 
+  const currentMonthStr = `${year}-${String(month).padStart(2, "0")}`;
+
   const byBillingType = {
-    monthly: { expectedRevenue: 0, studentsCount: 0, collectedThisMonth: 0 },
-    monthly_fixed_lessons: { expectedRevenue: 0, studentsCount: 0, collectedThisMonth: 0, totalLessons: 0 },
-    per_lesson: { expectedRevenue: 0, studentsCount: 0, collectedThisMonth: 0, totalLessons: 0 },
-    monthly_elapsed_lessons: { expectedRevenue: 0, studentsCount: 0, collectedThisMonth: 0, totalLessons: 0 }
+    monthly: { expectedRevenue: 0, studentsCount: 0, collectedThisMonth: 0, earnedThisMonth: 0 },
+    monthly_fixed_lessons: { expectedRevenue: 0, studentsCount: 0, collectedThisMonth: 0, earnedThisMonth: 0, totalLessons: 0 },
+    per_lesson: { expectedRevenue: 0, studentsCount: 0, collectedThisMonth: 0, earnedThisMonth: 0, totalLessons: 0 },
+    monthly_elapsed_lessons: { expectedRevenue: 0, studentsCount: 0, collectedThisMonth: 0, earnedThisMonth: 0, totalLessons: 0 }
   };
 
   const studentMap = new Map<string, StudentExpectedRevenueInfo>();
@@ -331,11 +340,34 @@ export function calculateTotalExpectedMonthlyRevenue(
     totalExpectedLessons += info.expectedLessonsCount;
     totalAttendedThisMonth += info.actualAttendedThisMonth;
 
+    // Calculate earned revenue for this student in target month (Accrual basis)
+    let studentEarnedThisMonth = 0;
     const bType = info.billingType;
+    if (bType === "monthly") {
+      studentEarnedThisMonth = info.expectedMonthlyRevenue;
+    } else {
+      // Calculate value of lessons actually attended by student in target month
+      const attendedRecordsThisMonth = attendanceRecords.filter(
+        ar => ar.studentId === st.id && ar.date && ar.date.startsWith(currentMonthStr) && (ar.attendance === "present" || ar.deducted)
+      );
+      attendedRecordsThisMonth.forEach(ar => {
+        const dur = ar.durationMinutes || st.defaultDurationMinutes || 60;
+        const rType = st.rateType || "per_lesson";
+        const lCost = st.lessonCost !== undefined ? st.lessonCost : 100;
+        const hCost = st.hourlyCost !== undefined ? st.hourlyCost : lCost;
+        const rate = rType === "per_hour" ? Number(((hCost * dur) / 60).toFixed(2)) : lCost;
+        studentEarnedThisMonth += rate;
+      });
+    }
+
+    studentEarnedThisMonth = Number(studentEarnedThisMonth.toFixed(2));
+    totalEarnedRevenueThisMonth += studentEarnedThisMonth;
+
     if (byBillingType[bType]) {
       byBillingType[bType].expectedRevenue += info.expectedMonthlyRevenue;
       byBillingType[bType].studentsCount += 1;
       byBillingType[bType].collectedThisMonth += info.actualPaidThisMonth;
+      byBillingType[bType].earnedThisMonth += studentEarnedThisMonth;
       if ("totalLessons" in byBillingType[bType]) {
         (byBillingType[bType] as any).totalLessons += info.expectedLessonsCount;
       }
@@ -344,6 +376,7 @@ export function calculateTotalExpectedMonthlyRevenue(
 
   totalExpectedRevenue = Number(totalExpectedRevenue.toFixed(2));
   totalActualCollectedThisMonth = Number(totalActualCollectedThisMonth.toFixed(2));
+  totalEarnedRevenueThisMonth = Number(totalEarnedRevenueThisMonth.toFixed(2));
   const totalRemainingToCollect = Math.max(0, Number((totalExpectedRevenue - totalActualCollectedThisMonth).toFixed(2)));
   const overallCollectionPercent = totalExpectedRevenue > 0
     ? Math.min(100, Math.round((totalActualCollectedThisMonth / totalExpectedRevenue) * 100))
@@ -356,6 +389,7 @@ export function calculateTotalExpectedMonthlyRevenue(
     monthNameEn,
     totalExpectedRevenue,
     totalActualCollectedThisMonth,
+    totalEarnedRevenueThisMonth,
     totalRemainingToCollect,
     overallCollectionPercent,
     totalExpectedLessons,
@@ -527,51 +561,358 @@ export function getFinancialStatus(
  * 3. إجمالي المدفوعات = مجموع كافة الدفعات المسجلة للطالب
  * 4. الرصيد = المدفوع - المستحق (موجب = رصيد، سالب = مستحق)
  */
+/**
+ * Sanitizes and auto-corrects student financial fields.
+ * Fixes any existing legacy student record where hourly rate was set or where
+ * rateType is "per_hour" but lessonCost was stored incorrectly as full hour price.
+ */
+export function sanitizeStudent(rawStudent: Student): Student {
+  if (!rawStudent) return rawStudent;
+
+  const defaultDuration = rawStudent.defaultDurationMinutes || (rawStudent.subjects && rawStudent.subjects[0]?.defaultDurationMinutes) || 60;
+  const rootBillingType: BillingType = rawStudent.billingType || (rawStudent.subjects && rawStudent.subjects[0]?.billingType) || "monthly_elapsed_lessons";
+
+  let sanitizedSubjects = rawStudent.subjects;
+  if (sanitizedSubjects && sanitizedSubjects.length > 0) {
+    sanitizedSubjects = sanitizedSubjects.map((sub, idx) => {
+      const dur = sub.defaultDurationMinutes || defaultDuration || 60;
+      const rType: RateType = sub.rateType === "per_hour" ? "per_hour" : "per_lesson";
+      const bType: BillingType = sub.billingType || rootBillingType || "monthly_elapsed_lessons";
+      
+      // If primary subject, also consider rawStudent root values if they were updated directly
+      let lCost = sub.lessonCost !== undefined ? Number(sub.lessonCost) : (idx === 0 && rawStudent.lessonCost !== undefined ? Number(rawStudent.lessonCost) : 100);
+      let hCost = sub.hourlyCost !== undefined ? Number(sub.hourlyCost) : (idx === 0 && rawStudent.hourlyCost !== undefined ? Number(rawStudent.hourlyCost) : lCost);
+
+      if (rType === "per_hour") {
+        lCost = Math.max(0, Number(((hCost * dur) / 60).toFixed(2)));
+      } else {
+        hCost = Math.max(0, Number(((lCost / dur) * 60).toFixed(2)));
+      }
+
+      const mCost = sub.monthlyCost !== undefined
+        ? Number(sub.monthlyCost)
+        : (idx === 0 && rawStudent.monthlyCost !== undefined ? Number(rawStudent.monthlyCost) : (bType === "monthly" ? 400 : 0));
+
+      const lPerMonth = sub.lessonsPerMonth !== undefined
+        ? Number(sub.lessonsPerMonth)
+        : (idx === 0 && rawStudent.lessonsPerMonth !== undefined ? Number(rawStudent.lessonsPerMonth) : 8);
+
+      return {
+        ...sub,
+        billingType: bType,
+        defaultDurationMinutes: dur,
+        rateType: rType,
+        hourlyCost: hCost,
+        lessonCost: lCost,
+        monthlyCost: mCost,
+        lessonsPerMonth: lPerMonth
+      };
+    });
+  }
+
+  const primarySub = sanitizedSubjects && sanitizedSubjects.length > 0 ? sanitizedSubjects[0] : null;
+
+  const rateType: RateType = primarySub 
+    ? primarySub.rateType!
+    : (rawStudent.rateType === "per_hour" ? "per_hour" : "per_lesson");
+
+  const billingType: BillingType = primarySub
+    ? (primarySub.billingType || rootBillingType)
+    : rootBillingType;
+
+  const defaultDurationMinutes = primarySub ? primarySub.defaultDurationMinutes! : defaultDuration;
+  const lessonCost = primarySub ? primarySub.lessonCost : (rawStudent.lessonCost !== undefined ? Number(rawStudent.lessonCost) : 100);
+  const hourlyCost = primarySub ? primarySub.hourlyCost : (rawStudent.hourlyCost !== undefined ? Number(rawStudent.hourlyCost) : lessonCost);
+  const monthlyCost = primarySub ? (primarySub.monthlyCost ?? 0) : (rawStudent.monthlyCost !== undefined ? Number(rawStudent.monthlyCost) : (billingType === "monthly" ? 400 : 0));
+  const lessonsPerMonth = primarySub ? (primarySub.lessonsPerMonth || 8) : (rawStudent.lessonsPerMonth || 8);
+
+  return {
+    ...rawStudent,
+    billingType,
+    defaultDurationMinutes,
+    rateType,
+    hourlyCost,
+    lessonCost,
+    monthlyCost,
+    lessonsPerMonth,
+    subjects: sanitizedSubjects
+  };
+}
+
+// Normalize Arabic text for robust fuzzy name matching (handling alef, taa marbuta, yaa, diacritics, spaces)
+export function normalizeArabicText(text?: string): string {
+  if (!text) return "";
+  return text
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[أإآٱ]/g, "ا")
+    .replace(/ة/g, "ه")
+    .replace(/ى/g, "ي")
+    .replace(/[\u064B-\u065F\u0670]/g, "") // remove harakat/tashkeel
+    .replace(/\s+/g, " ");
+}
+
+// Helper to check if an attendance record represents an attended or deducted lesson
+export function isAttendedOrDeductedRecord(ar: AttendanceRecord): boolean {
+  if (!ar) return false;
+  if (ar.deducted === true) return true;
+  const status = (ar.attendance || "").toString().trim().toLowerCase();
+  // If explicitly marked as absent, cancelled, or excused without deduction, ignore
+  if (
+    status === "absent" ||
+    status === "غائب" ||
+    status === "غياب" ||
+    status === "cancelled" ||
+    status === "ملغي" ||
+    status === "excused" ||
+    status === "معتذر"
+  ) {
+    return false;
+  }
+  // Attended statuses
+  return (
+    status === "present" ||
+    status === "late" ||
+    status === "attended" ||
+    status === "حاضر" ||
+    status === "متأخر" ||
+    status === "حضور"
+  );
+}
+
+// Helper to check if record belongs to student by ID or exact Name
+export function matchesStudentRecord(
+  rec: { studentId?: string; studentName?: string },
+  student: Student
+): boolean {
+  if (!rec || !student) return false;
+  const sId = String(student.id || "").trim();
+  const rId = String(rec.studentId || "").trim();
+
+  // If record has an explicit valid student ID, strictly compare ID
+  if (rId && rId !== "group" && rId !== "all") {
+    return sId === rId;
+  }
+
+  // If record has no valid ID, only match if normalized full name is exact match
+  const sName = normalizeArabicText(student.fullName);
+  const rName = normalizeArabicText(rec.studentName);
+  if (sName && rName && rName !== "المجموعة" && rName !== "مجموعة") {
+    return sName === rName;
+  }
+
+  return false;
+}
+
 export function calculateStudentFinancialProfile(
-  student: Student,
+  rawStudent: Student,
   attendanceRecords: AttendanceRecord[] = [],
   paymentTransactions: PaymentTransaction[] = [],
   groups: Group[] = [],
-  privateLessons: PrivateLesson[] = []
+  privateLessons: PrivateLesson[] = [],
+  reports: GeneratedReport[] = []
 ): StudentFinancialProfile {
-  // Filter student-specific attendance records
-  const studentAttendance = attendanceRecords.filter(
-    ar => ar.studentId === student.id && (ar.attendance === "present" || ar.deducted)
-  );
+  const student = sanitizeStudent(rawStudent);
 
-  // Filter student-specific payments
-  const studentPayments = paymentTransactions.filter(
-    pt => pt.studentId === student.id
-  );
+  // Active Cycle Isolation:
+  // When a month/package ends and is archived, only newly executed lessons and reports in the active cycle appear.
+  // Past archived cycles/reports/attendance are completely excluded from active counts and finances.
+  const activeCycle = getActiveCycleInfo(student);
+  const cycleStartDate = activeCycle.startDate;
 
-  // Real attended lessons count
-  const attendedLessonsCount = Math.max(studentAttendance.length, student.totalAttendedLessons || 0);
+  // Load saved reports if not directly provided
+  const effectiveReports = (Array.isArray(reports) && reports.length > 0)
+    ? reports
+    : (typeof window !== "undefined" ? StorageEngine.getReports() : []);
 
-  // Calculate total taught hours from attendance durations or default
-  const defaultDurationMinutes = student.defaultDurationMinutes || 60;
-  const totalTaughtMinutes = studentAttendance.reduce(
-    (sum, ar) => sum + (ar.durationMinutes && ar.durationMinutes > 0 ? ar.durationMinutes : defaultDurationMinutes),
-    0
-  );
-  // If no detailed records but student has attendedLessonsCount, estimate hours using defaultDurationMinutes
-  const totalTaughtHours = totalTaughtMinutes > 0
-    ? Number((totalTaughtMinutes / 60).toFixed(1))
-    : Number(((attendedLessonsCount * defaultDurationMinutes) / 60).toFixed(1));
+  // Collect all archived report identifiers to eliminate ghost attendance records
+  const archivedReportIds = new Set<string>();
+  const archivedLessonIds = new Set<string>();
+  const archivedDateSubjKeys = new Set<string>();
+  const activeDateSubjKeys = new Set<string>();
 
-  // Sum of all payments
+  effectiveReports.forEach(r => {
+    if (!r || !matchesStudentRecord(r, student) || r.reportType === "monthly_comprehensive") return;
+    const rDate = r.date || (r.createdAt ? r.createdAt.slice(0, 10) : "");
+    const isArchived = r.archived === true || Boolean(cycleStartDate && rDate && rDate < cycleStartDate);
+    if (isArchived) {
+      if (r.id) archivedReportIds.add(r.id);
+      if (r.lessonId) archivedLessonIds.add(r.lessonId);
+      if (rDate) {
+        archivedDateSubjKeys.add(`${rDate}_${normalizeArabicText(r.subject || "")}`);
+        archivedDateSubjKeys.add(`${rDate}_all`);
+      }
+    } else if (rDate) {
+      activeDateSubjKeys.add(`${rDate}_${normalizeArabicText(r.subject || "")}`);
+      activeDateSubjKeys.add(`${rDate}_all`);
+    }
+  });
+
+  // Filter student-specific attendance records for the active cycle (strictly excluding archived)
+  const studentAttendance = attendanceRecords.filter(ar => {
+    if (!ar || !matchesStudentRecord(ar, student) || !isAttendedOrDeductedRecord(ar)) return false;
+    if ((ar as any).archived === true) return false;
+    const arDate = ar.date ? ar.date.slice(0, 10) : "";
+    if (cycleStartDate && arDate && arDate < cycleStartDate) return false;
+
+    // Exclude if linked to an archived report
+    if (ar.id && archivedReportIds.has(ar.id)) return false;
+    if (ar.lessonId && archivedLessonIds.has(ar.lessonId)) return false;
+    if (arDate) {
+      const arKey = `${arDate}_${normalizeArabicText(ar.subject || "")}`;
+      const hasActiveOnSameDate = activeDateSubjKeys.has(arKey) || activeDateSubjKeys.has(`${arDate}_all`);
+      if (!hasActiveOnSameDate && (archivedDateSubjKeys.has(arKey) || archivedDateSubjKeys.has(`${arDate}_all`))) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+
+  // Filter student-specific daily saved reports for the active cycle (strictly excluding archived)
+  const studentReports = effectiveReports.filter(r => {
+    if (!r || !matchesStudentRecord(r, student) || r.reportType === "monthly_comprehensive") return false;
+    if (r.archived === true) return false;
+    const rDate = r.date || (r.createdAt ? r.createdAt.slice(0, 10) : "");
+    if (cycleStartDate && rDate && rDate < cycleStartDate) return false;
+    const attStr = (r.attendance || "").toString().trim().toLowerCase();
+    return (
+      attStr !== "absent" &&
+      attStr !== "غائب" &&
+      attStr !== "غياب" &&
+      attStr !== "cancelled" &&
+      attStr !== "ملغي" &&
+      attStr !== "excused" &&
+      attStr !== "معتذر"
+    );
+  });
+
+  // Filter student-specific payments for the active cycle
+  const studentPayments = paymentTransactions.filter(pt => {
+    if (!pt || !matchesStudentRecord(pt, student)) return false;
+    const ptDate = pt.date ? pt.date.slice(0, 10) : "";
+    if (cycleStartDate && ptDate && ptDate < cycleStartDate) return false;
+    return true;
+  });
+
+  const defaultDurationMinutes = student.defaultDurationMinutes || (student.subjects && student.subjects[0]?.defaultDurationMinutes) || 60;
+
+  // Helper to resolve exact record duration
+  const getRecordDur = (rec: { durationMinutes?: number; lessonDuration?: string }, fallbackDur: number): number => {
+    if (rec.durationMinutes && rec.durationMinutes > 0) return rec.durationMinutes;
+    if (rec.lessonDuration) {
+      const match = rec.lessonDuration.match(/(\d+)/);
+      if (match) {
+        const parsed = parseInt(match[1], 10);
+        if (parsed > 0) return parsed;
+      }
+    }
+    return fallbackDur;
+  };
+
+  // Build unified deduplicated list of student's actual attended lesson sessions
+  interface UnifiedLessonSession {
+    id: string;
+    date: string;
+    lessonId?: string;
+    lessonNumber?: number;
+    subject?: string;
+    durationMinutes: number;
+    billedCost?: number;
+    source: "attendance" | "report";
+  }
+
+  const sessionMap = new Map<string, UnifiedLessonSession>();
+
+  // Add from attendance records (each distinct attendance record is an independent session)
+  studentAttendance.forEach(ar => {
+    const key = `att_${ar.id || `${ar.date}_${ar.lessonId || ""}_${ar.subject || ""}`}`;
+    const dur = getRecordDur(ar, defaultDurationMinutes);
+    sessionMap.set(key, {
+      id: ar.id,
+      date: ar.date || "",
+      lessonId: ar.lessonId,
+      lessonNumber: ar.lessonNumber,
+      subject: ar.subject,
+      durationMinutes: dur,
+      billedCost: ar.billedCost,
+      source: "attendance"
+    });
+  });
+
+  // Add from saved daily reports ONLY if not already represented by an existing attendance record
+  studentReports.forEach(r => {
+    const rDate = r.date || (r.createdAt ? r.createdAt.split("T")[0] : "");
+    const rSubjectNorm = normalizeArabicText(r.subject || "");
+
+    // Check if there is already a matching attendance record for this exact session
+    const isAlreadyCovered = Array.from(sessionMap.values()).some(existing => {
+      if (existing.source !== "attendance") return false;
+      if (r.id && existing.id === r.id) return true;
+      if (r.lessonId && existing.lessonId && r.lessonId === existing.lessonId) return true;
+      const sameDate = existing.date === rDate;
+      const sameSubj = !existing.subject || !r.subject || normalizeArabicText(existing.subject) === rSubjectNorm;
+      const sameLessonNum = !r.lessonNumber || !existing.lessonNumber || existing.lessonNumber === r.lessonNumber;
+      return sameDate && sameSubj && sameLessonNum;
+    });
+
+    if (!isAlreadyCovered) {
+      const dur = getRecordDur(r, defaultDurationMinutes);
+      const key = `rep_${r.id || `${rDate}_${r.lessonNumber || ""}_${r.subject || ""}`}`;
+      sessionMap.set(key, {
+        id: r.id,
+        date: rDate,
+        lessonId: r.lessonId,
+        lessonNumber: r.lessonNumber,
+        subject: r.subject,
+        durationMinutes: dur,
+        source: "report"
+      });
+    }
+  });
+
+  const uniqueSessions = Array.from(sessionMap.values());
+
+  // Real attended lessons count: exactly the count of unique attended/reported lessons
+  let attendedLessonsCount = uniqueSessions.length;
+  if (attendedLessonsCount === 0 && (student.totalAttendedLessons || 0) > 0 && attendanceRecords.length === 0 && effectiveReports.length === 0) {
+    attendedLessonsCount = student.totalAttendedLessons || 0;
+  }
+
+  // Calculate total taught hours from unique sessions
+  let totalTaughtMinutes = 0;
+  if (uniqueSessions.length > 0) {
+    totalTaughtMinutes = uniqueSessions.reduce((sum, s) => sum + s.durationMinutes, 0);
+  } else {
+    totalTaughtMinutes = attendedLessonsCount * defaultDurationMinutes;
+  }
+
+  const totalExactHours = totalTaughtMinutes / 60;
+  let totalTaughtHours = Number(totalExactHours.toFixed(2));
+
+  // Sum of all payments in the active cycle
   const sumOfTransactions = studentPayments.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
-  const totalPaidAmount = Math.max(sumOfTransactions, student.totalPaidAmount || 0);
+  const totalPaidAmount = student.currentCycleStartDate
+    ? sumOfTransactions
+    : Math.max(sumOfTransactions, student.totalPaidAmount || 0);
 
   // Determine Billing Type & Rate Type
   const billingType: BillingType = student.billingType || (student.subjects && student.subjects[0]?.billingType) || "per_lesson";
   const rateType: RateType = student.rateType || (student.subjects && student.subjects[0]?.rateType) || "per_lesson";
-  const isMonthly = billingType === "monthly" || billingType === "monthly_fixed_lessons";
+  const isMonthly = billingType === "monthly";
 
-  const lessonCost = Math.max(0, student.lessonCost !== undefined ? student.lessonCost : 100);
-  const hourlyCost = Math.max(0, student.hourlyCost !== undefined ? student.hourlyCost : lessonCost);
+  const rawLessonCost = Math.max(0, student.lessonCost !== undefined ? student.lessonCost : 100);
+  const hourlyCost = Math.max(0, student.hourlyCost !== undefined ? student.hourlyCost : rawLessonCost);
+  const lessonCost = rateType === "per_hour"
+    ? Number(((hourlyCost * defaultDurationMinutes) / 60).toFixed(2))
+    : rawLessonCost;
+
   const monthlyCost = Math.max(0, student.monthlyCost !== undefined ? student.monthlyCost : (student.lessonsPerMonth ? student.lessonsPerMonth * lessonCost : lessonCost * 4));
 
-  const defaultElapsedMonths = getElapsedMonths(student.subscriptionStartDate || student.createdAt);
+  const defaultElapsedMonths = student.currentCycleStartDate
+    ? getElapsedMonths(student.currentCycleStartDate)
+    : getElapsedMonths(student.subscriptionStartDate || student.createdAt);
   const billedMonthsCount = Math.max(1, student.customBilledMonths || defaultElapsedMonths);
 
   let attendedLessonsCost = 0;
@@ -579,34 +920,60 @@ export function calculateStudentFinancialProfile(
 
   // Handle Multi-subject breakdown if defined
   if (student.subjects && student.subjects.length > 0) {
-    subjectBreakdown = student.subjects.map(subj => {
+    subjectBreakdown = student.subjects.map((subj, idx) => {
       const subBilling = subj.billingType || "per_lesson";
       const subRateType = subj.rateType || "per_lesson";
-      const subLessonCost = Math.max(0, subj.lessonCost !== undefined ? subj.lessonCost : 100);
-      const subHourlyCost = Math.max(0, subj.hourlyCost !== undefined ? subj.hourlyCost : subLessonCost);
+      const subDefaultDuration = subj.defaultDurationMinutes || defaultDurationMinutes;
+      const subRawLessonCost = Math.max(0, subj.lessonCost !== undefined ? subj.lessonCost : 100);
+      const subHourlyCost = Math.max(0, subj.hourlyCost !== undefined ? subj.hourlyCost : subRawLessonCost);
+      const subLessonCost = subRateType === "per_hour"
+        ? Number(((subHourlyCost * subDefaultDuration) / 60).toFixed(2))
+        : subRawLessonCost;
+
       const subMonthlyCost = Math.max(0, subj.monthlyCost !== undefined ? subj.monthlyCost : (subj.lessonsPerMonth ? subj.lessonsPerMonth * subLessonCost : subLessonCost * 4));
       const subMonths = Math.max(1, subj.customBilledMonths || billedMonthsCount);
 
-      const subjAttendedRecords = attendanceRecords.filter(
-        ar => ar.studentId === student.id && (ar.subject === subj.subject || (!ar.subject && student.subjects?.length === 1)) && (ar.attendance === "present" || ar.deducted)
-      );
-      const count = Math.max(subjAttendedRecords.length, subj.totalAttendedLessons || 0);
+      const subjSessions = uniqueSessions.filter(s => {
+        if (student.subjects?.length === 1) return true;
+        if (!s.subject || !s.subject.trim()) {
+          return idx === 0;
+        }
+        if (!subj.subject || !subj.subject.trim()) {
+          return idx === 0;
+        }
+        return normalizeArabicText(s.subject) === normalizeArabicText(subj.subject);
+      });
+      const count = subjSessions.length;
 
-      const subMinutes = subjAttendedRecords.reduce((m, ar) => m + (ar.durationMinutes || subj.defaultDurationMinutes || 60), 0);
-      const subHours = subMinutes > 0 ? Number((subMinutes / 60).toFixed(1)) : Number(((count * (subj.defaultDurationMinutes || 60)) / 60).toFixed(1));
+      const subMinutes = subjSessions.reduce((m, s) => m + s.durationMinutes, 0);
+      const subExactHours = subMinutes / 60;
+      const subHours = Number(subExactHours.toFixed(2));
 
       let subAccrued = 0;
       if (subBilling === "monthly") {
         subAccrued = subMonths * subMonthlyCost;
       } else if (subBilling === "monthly_fixed_lessons") {
         const pkgLessons = subj.lessonsPerMonth || 8;
-        const pkgCost = subj.monthlyCost !== undefined ? subj.monthlyCost : (subRateType === "per_hour" ? pkgLessons * subHourlyCost : pkgLessons * subLessonCost);
-        subAccrued = subMonths * pkgCost;
+        const effRate = subj.monthlyCost !== undefined ? (subj.monthlyCost / pkgLessons) : (subRateType === "per_hour" ? Number(((subHourlyCost * (subj.defaultDurationMinutes || 60)) / 60).toFixed(2)) : subLessonCost);
+        subAccrued = Number((count * effRate).toFixed(2));
       } else {
-        if (subRateType === "per_hour") {
-          subAccrued = Number((subHours * subHourlyCost).toFixed(2));
+        const hasCustomBilled = subjSessions.some(s => s.billedCost !== undefined && s.billedCost !== null);
+        if (hasCustomBilled) {
+          let sumRecords = 0;
+          subjSessions.forEach(s => {
+            if (s.billedCost !== undefined && s.billedCost !== null) {
+              sumRecords += Number(s.billedCost);
+            } else {
+              sumRecords += subRateType === "per_hour" ? Number(((s.durationMinutes / 60) * subHourlyCost).toFixed(2)) : subLessonCost;
+            }
+          });
+          subAccrued = Number(sumRecords.toFixed(2));
         } else {
-          subAccrued = Number((count * subLessonCost).toFixed(2));
+          if (subRateType === "per_hour") {
+            subAccrued = Number((subExactHours * subHourlyCost).toFixed(2));
+          } else {
+            subAccrued = Number((count * subLessonCost).toFixed(2));
+          }
         }
       }
 
@@ -615,12 +982,12 @@ export function calculateStudentFinancialProfile(
       let hasExplicitPayments = false;
       studentPayments.forEach(p => {
         if (p.subjectAllocations && p.subjectAllocations.length > 0) {
-          const alloc = p.subjectAllocations.find(a => (a.subjectId && a.subjectId === subj.id) || a.subjectName === subj.subject);
+          const alloc = p.subjectAllocations.find(a => (a.subjectId && a.subjectId === subj.id) || (a.subjectName && subj.subject && a.subjectName.trim().toLowerCase() === subj.subject.trim().toLowerCase()));
           if (alloc) {
             subPaid += alloc.amount;
             hasExplicitPayments = true;
           }
-        } else if (p.subject === subj.subject) {
+        } else if (p.subject && subj.subject && p.subject.trim().toLowerCase() === subj.subject.trim().toLowerCase()) {
           subPaid += p.amount;
           hasExplicitPayments = true;
         }
@@ -660,22 +1027,41 @@ export function calculateStudentFinancialProfile(
     });
 
     attendedLessonsCost = subjectBreakdown.reduce((sum, item) => sum + item.accruedCost, 0);
+    
+    // Ensure top-level attended count and total hours accurately reflect all subjects
+    const totalSubjectAttended = subjectBreakdown.reduce((sum, item) => sum + item.attendedCount, 0);
+    const totalSubjectHours = Number(subjectBreakdown.reduce((sum, item) => sum + item.totalTaughtHours, 0).toFixed(2));
+    attendedLessonsCount = totalSubjectAttended;
+    totalTaughtHours = totalSubjectHours;
   } else {
     // Single subject
     if (billingType === "monthly") {
       // Monthly Flat Subscription
       attendedLessonsCost = Number((billedMonthsCount * monthlyCost).toFixed(2));
     } else if (billingType === "monthly_fixed_lessons") {
-      // Monthly Fixed Lesson Package
+      // Monthly Fixed Lesson Package: Accrued cost is earned as lessons are attended
       const pkgLessons = student.lessonsPerMonth || 8;
-      const pkgCost = student.monthlyCost !== undefined ? student.monthlyCost : (rateType === "per_hour" ? pkgLessons * hourlyCost : pkgLessons * lessonCost);
-      attendedLessonsCost = Number((billedMonthsCount * pkgCost).toFixed(2));
+      const effRate = student.monthlyCost !== undefined ? (student.monthlyCost / pkgLessons) : (rateType === "per_hour" ? Number(((hourlyCost * defaultDurationMinutes) / 60).toFixed(2)) : lessonCost);
+      attendedLessonsCost = Number((attendedLessonsCount * effRate).toFixed(2));
     } else {
       // Per Lesson billing or calendar elapsed lessons
-      if (rateType === "per_hour") {
-        attendedLessonsCost = Number((totalTaughtHours * hourlyCost).toFixed(2));
+      const hasCustomBilled = uniqueSessions.some(s => s.billedCost !== undefined && s.billedCost !== null);
+      if (hasCustomBilled) {
+        let sumRecords = 0;
+        uniqueSessions.forEach(s => {
+          if (s.billedCost !== undefined && s.billedCost !== null) {
+            sumRecords += Number(s.billedCost);
+          } else {
+            sumRecords += rateType === "per_hour" ? Number(((s.durationMinutes / 60) * hourlyCost).toFixed(2)) : lessonCost;
+          }
+        });
+        attendedLessonsCost = Number(sumRecords.toFixed(2));
       } else {
-        attendedLessonsCost = Number((attendedLessonsCount * lessonCost).toFixed(2));
+        if (rateType === "per_hour") {
+          attendedLessonsCost = Number((totalExactHours * hourlyCost).toFixed(2));
+        } else {
+          attendedLessonsCost = Number((attendedLessonsCount * lessonCost).toFixed(2));
+        }
       }
     }
   }
@@ -698,21 +1084,30 @@ export function calculateStudentFinancialProfile(
   let explanationAr = "";
   let explanationEn = "";
 
-  const rateTypeLabelAr = rateType === "per_hour" ? `${hourlyCost} ج.م/ساعة` : `${lessonCost} ج.م/حصة`;
-  const rateTypeLabelEn = rateType === "per_hour" ? `${hourlyCost} EGP/hr` : `${lessonCost} EGP/lesson`;
+  const totalMinsFormatted = Math.round(totalExactHours * 60);
+  const durationDescAr = totalMinsFormatted < 60
+    ? `${totalMinsFormatted} دقيقة`
+    : `${totalTaughtHours} ساعة (${totalMinsFormatted} دقيقة)`;
+
+  const rateTypeLabelAr = rateType === "per_hour"
+    ? `${hourlyCost} ج.م/ساعة (${lessonCost} ج.م/حصة)`
+    : `${lessonCost} ج.م/حصة`;
+  const rateTypeLabelEn = rateType === "per_hour"
+    ? `${hourlyCost} EGP/hr (${lessonCost} EGP/lesson)`
+    : `${lessonCost} EGP/lesson`;
 
   if (isMonthly) {
     if (totalPaidAmount === 0 && attendedLessonsCost === 0) {
       explanationAr = "نظام اشتراك شهري كامل (يحسب الشهر كاملاً سواء حضر أو غاب) - لا توجد حركة دفع حتى الآن.";
       explanationEn = "Full Monthly Subscription (flat fee regardless of attendance) - No payments recorded yet.";
     } else if (amountDue > 0) {
-      explanationAr = `نظام اشتراك شهري: ${billedMonthsCount} شهر × ${monthlyCost} ج.م = ${attendedLessonsCost} ج.م (يحسب الشهر كاملاً سواء حضر أو غاب). المسدد: ${totalPaidAmount} ج.م. المبلغ المطلوب سداده: ${amountDue} ج.م. (حضر فعلياً: ${attendedLessonsCount} حصص • ${totalTaughtHours} ساعة تدريسية)`;
+      explanationAr = `نظام اشتراك شهري: ${billedMonthsCount} شهر × ${monthlyCost} ج.م = ${attendedLessonsCost} ج.م (يحسب الشهر كاملاً سواء حضر أو غاب). المسدد: ${totalPaidAmount} ج.م. المبلغ المطلوب سداده: ${amountDue} ج.م. (حضر فعلياً: ${attendedLessonsCount} حصص • ${durationDescAr})`;
       explanationEn = `Monthly subscription: ${billedMonthsCount} mo × ${monthlyCost} EGP = ${attendedLessonsCost} EGP. Paid: ${totalPaidAmount} EGP. Due: ${amountDue} EGP. (Attended: ${attendedLessonsCount} lessons • ${totalTaughtHours} hours)`;
     } else if (creditRemaining > 0) {
-      explanationAr = `نظام اشتراك شهري: ${billedMonthsCount} شهر × ${monthlyCost} ج.م = ${attendedLessonsCost} ج.م (يحسب الشهر كاملاً). المسدد: ${totalPaidAmount} ج.م. الرصيد الفائض المتبقي له: +${creditRemaining} ج.م. (حضر فعلياً: ${attendedLessonsCount} حصص • ${totalTaughtHours} ساعة)`;
+      explanationAr = `نظام اشتراك شهري: ${billedMonthsCount} شهر × ${monthlyCost} ج.م = ${attendedLessonsCost} ج.م (يحسب الشهر كاملاً). المسدد: ${totalPaidAmount} ج.م. الرصيد الفائض المتبقي له: +${creditRemaining} ج.م. (حضر فعلياً: ${attendedLessonsCount} حصص • ${durationDescAr})`;
       explanationEn = `Monthly subscription: ${billedMonthsCount} mo × ${monthlyCost} EGP = ${attendedLessonsCost} EGP. Paid: ${totalPaidAmount} EGP. Credit: +${creditRemaining} EGP. (Attended: ${attendedLessonsCount} lessons • ${totalTaughtHours} hours)`;
     } else {
-      explanationAr = `نظام اشتراك شهري: ${billedMonthsCount} شهر × ${monthlyCost} ج.م = ${attendedLessonsCost} ج.م (يحسب الشهر كاملاً). المسدد: ${totalPaidAmount} ج.م. الحساب مسدد بالكامل ومضبوط. (نفذ: ${attendedLessonsCount} حصص • ${totalTaughtHours} ساعة)`;
+      explanationAr = `نظام اشتراك شهري: ${billedMonthsCount} شهر × ${monthlyCost} ج.م = ${attendedLessonsCost} ج.م (يحسب الشهر كاملاً). المسدد: ${totalPaidAmount} ج.م. الحساب مسدد بالكامل ومضبوط. (نفذ: ${attendedLessonsCount} حصص • ${durationDescAr})`;
       explanationEn = `Monthly subscription: ${billedMonthsCount} mo × ${monthlyCost} EGP = ${attendedLessonsCost} EGP. Paid: ${totalPaidAmount} EGP. Fully settled. (Completed: ${attendedLessonsCount} lessons • ${totalTaughtHours} hours)`;
     }
   } else {
@@ -721,13 +1116,13 @@ export function calculateStudentFinancialProfile(
       explanationAr = `نظام المحاسبة ${rateType === "per_hour" ? "بالساعة" : "بالحصة المنفذة"} (${rateTypeLabelAr}) - لم تسجل أي حصص حضور أو دفعات مالية للطالب حتى الآن.`;
       explanationEn = `Billing (${rateTypeLabelEn}) - No lessons or payments recorded yet.`;
     } else if (amountDue > 0) {
-      explanationAr = `نفذ ${attendedLessonsCount} حصص (${totalTaughtHours} ساعة تدريسية) بقيمة إجمالية ${attendedLessonsCost} ج.م (${rateTypeLabelAr})، والمسدد ${totalPaidAmount} ج.م. المبلغ المستحق: ${amountDue} ج.م.`;
+      explanationAr = `نفذ ${attendedLessonsCount} حصص (${durationDescAr}) بقيمة إجمالية ${attendedLessonsCost} ج.م (${rateTypeLabelAr})، والمسدد ${totalPaidAmount} ج.م. المبلغ المستحق: ${amountDue} ج.م.`;
       explanationEn = `Attended ${attendedLessonsCount} lessons (${totalTaughtHours} hrs) totalling ${attendedLessonsCost} EGP (${rateTypeLabelEn}), paid ${totalPaidAmount} EGP. Due amount: ${amountDue} EGP.`;
     } else if (creditRemaining > 0) {
-      explanationAr = `نفذ ${attendedLessonsCount} حصص (${totalTaughtHours} ساعة تدريسية) بقيمة إجمالية ${attendedLessonsCost} ج.م (${rateTypeLabelAr})، والمسدد ${totalPaidAmount} ج.م. الرصيد المتبقي له: +${creditRemaining} ج.م.`;
+      explanationAr = `نفذ ${attendedLessonsCount} حصص (${durationDescAr}) بقيمة إجمالية ${attendedLessonsCost} ج.م (${rateTypeLabelAr})، والمسدد ${totalPaidAmount} ج.م. الرصيد المتبقي له: +${creditRemaining} ج.م.`;
       explanationEn = `Attended ${attendedLessonsCount} lessons (${totalTaughtHours} hrs) totalling ${attendedLessonsCost} EGP, paid ${totalPaidAmount} EGP. Remaining credit: +${creditRemaining} EGP.`;
     } else {
-      explanationAr = `نفذ ${attendedLessonsCount} حصص (${totalTaughtHours} ساعة تدريسية) بقيمة إجمالية ${attendedLessonsCost} ج.م (${rateTypeLabelAr})، والمسدد ${totalPaidAmount} ج.م. الحساب متوازن ومسدد بالكامل.`;
+      explanationAr = `نفذ ${attendedLessonsCount} حصص (${durationDescAr}) بقيمة إجمالية ${attendedLessonsCost} ج.م (${rateTypeLabelAr})، والمسدد ${totalPaidAmount} ج.م. الحساب متوازن ومسدد بالكامل.`;
       explanationEn = `Attended ${attendedLessonsCount} lessons (${totalTaughtHours} hrs) totalling ${attendedLessonsCost} EGP, paid ${totalPaidAmount} EGP. Fully settled.`;
     }
   }
@@ -832,7 +1227,21 @@ export function buildCentralTransactionsLog(
   attendanceRecords.forEach(ar => {
     if (ar.attendance === "present" || ar.deducted) {
       const student = studentMap.get(ar.studentId);
-      const cost = student?.lessonCost || 100;
+      let cost = 100;
+      if (ar.billedCost !== undefined && ar.billedCost !== null) {
+        cost = Number(ar.billedCost);
+      } else if (student) {
+        const matchedSubj = student.subjects?.find(
+          sp => ar.subject && sp.subject && normalizeArabicText(sp.subject) === normalizeArabicText(ar.subject)
+        ) || student.subjects?.[0];
+        const effRateType = matchedSubj?.rateType || student.rateType || "per_lesson";
+        const effLessonCost = matchedSubj?.lessonCost ?? student.lessonCost ?? 100;
+        const effHourlyCost = matchedSubj?.hourlyCost ?? student.hourlyCost ?? effLessonCost;
+        const effDur = ar.durationMinutes || matchedSubj?.defaultDurationMinutes || student.defaultDurationMinutes || 60;
+        cost = effRateType === "per_hour"
+          ? Number(((effDur / 60) * effHourlyCost).toFixed(2))
+          : effLessonCost;
+      }
       items.push({
         id: ar.id,
         type: "lesson_attendance",

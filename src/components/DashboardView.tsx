@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import {
   Sparkles,
   BookOpen,
@@ -18,11 +18,11 @@ import {
   Copy,
   Check
 } from "lucide-react";
-import { Student, Lesson, AppSettings, AttendanceRecord, Group, PrivateLesson } from "../types";
+import { Student, Lesson, AppSettings, AttendanceRecord, Group, PrivateLesson, PaymentTransaction, GeneratedReport } from "../types";
 import { sanitizeTeacherName } from "../lib/storage";
 import { calculateStudentFinancials } from "../lib/financeUtils";
 import { StudentLessonReminderModal, ReminderTargetInfo } from "./StudentLessonReminderModal";
-import { calculateLessonTimeInfo, buildWhatsAppUrl } from "../lib/timeUtils";
+import { calculateLessonTimeInfo, buildWhatsAppUrl, formatTimeRange, formatTime12h, normalizeDayName, getTodayNormalizedDay, parseTimeString } from "../lib/timeUtils";
 
 interface DashboardViewProps {
   settings: AppSettings;
@@ -31,6 +31,8 @@ interface DashboardViewProps {
   privateLessons?: PrivateLesson[];
   lessons: Lesson[];
   attendanceRecords?: AttendanceRecord[];
+  reports?: GeneratedReport[];
+  paymentTransactions?: PaymentTransaction[];
   onOpenLessonDetails: (lesson: Lesson) => void;
   onNavigateToTab: (tab: "groups" | "students" | "schedule" | "finance") => void;
   dismissedNotificationIds?: string[];
@@ -46,6 +48,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   privateLessons = [],
   lessons = [],
   attendanceRecords = [],
+  reports = [],
+  paymentTransactions = [],
   onOpenLessonDetails,
   onNavigateToTab,
   dismissedNotificationIds = [],
@@ -79,16 +83,118 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   const todayStr = new Date().toISOString().split("T")[0];
 
-  // Calculations
-  const todayLessons = lessons.filter(l => l.date === todayStr || true); // show today's lessons + active
+  // Helper to get attendance status for today
+  const getTodayAttendanceStatus = (studentId?: string, studentName?: string, subject?: string) => {
+    if (!studentId && !studentName) return null;
+    const rep = reports.find(r =>
+      (r.studentId === studentId || (studentName && r.studentName && r.studentName.trim().toLowerCase() === studentName.trim().toLowerCase())) &&
+      (r.date === todayStr || r.createdAt?.startsWith(todayStr)) &&
+      (!subject || !r.subject || r.subject.trim().toLowerCase() === subject.trim().toLowerCase())
+    );
+    if (rep) return rep.attendance === "absent" ? "absent" : "present";
+
+    const att = attendanceRecords.find(a =>
+      (a.studentId === studentId || (studentName && a.studentName && a.studentName.trim().toLowerCase() === studentName.trim().toLowerCase())) &&
+      (a.date === todayStr) &&
+      (!subject || !a.subject || a.subject.trim().toLowerCase() === subject.trim().toLowerCase())
+    );
+    if (att) return att.attendance === "absent" ? "absent" : "present";
+
+    // Fallback without subject restriction
+    const repFb = reports.find(r =>
+      (r.studentId === studentId || (studentName && r.studentName && r.studentName.trim().toLowerCase() === studentName.trim().toLowerCase())) &&
+      (r.date === todayStr || r.createdAt?.startsWith(todayStr))
+    );
+    if (repFb) return repFb.attendance === "absent" ? "absent" : "present";
+
+    const attFb = attendanceRecords.find(a =>
+      (a.studentId === studentId || (studentName && a.studentName && a.studentName.trim().toLowerCase() === studentName.trim().toLowerCase())) &&
+      (a.date === todayStr)
+    );
+    if (attFb) return attFb.attendance === "absent" ? "absent" : "present";
+
+    return null;
+  };
+
+  const todayNormalizedDayAr = getTodayNormalizedDay(true);
+  const todayNormalizedDayEn = getTodayNormalizedDay(false);
+
   const activeStudents = students.filter(s => s.status === "active");
-  const presentStudentsToday = students.filter(s => s.status === "active" && s.paymentStatus === "paid");
   const activeGroups = groups.filter(g => g.status === "active");
+
+  // Calculations: Today's lessons from explicit instances OR recurring schedules active on today's day
+  const todayLessons = useMemo(() => {
+    // 1. Explicit recorded/scheduled lessons for today
+    const explicitToday = lessons.filter(l => l.date === todayStr);
+
+    // 2. Scheduled active groups for today
+    const scheduledGroupLessons: Lesson[] = [];
+    activeGroups.forEach(g => {
+      const matchDay = (g.scheduleSlots && g.scheduleSlots.length > 0)
+        ? g.scheduleSlots.find(s => normalizeDayName(s.day, true) === todayNormalizedDayAr || normalizeDayName(s.day, false) === todayNormalizedDayEn)
+        : (g.days && g.days.some(d => normalizeDayName(d, true) === todayNormalizedDayAr || normalizeDayName(d, false) === todayNormalizedDayEn)
+            ? { day: todayNormalizedDayAr, time: g.time, durationMinutes: g.durationMinutes }
+            : null);
+
+      if (matchDay) {
+        const alreadyExists = explicitToday.some(el => el.groupId === g.id);
+        if (!alreadyExists) {
+          scheduledGroupLessons.push({
+            id: `sched_grp_${g.id}_${todayStr}`,
+            studyType: "group",
+            groupId: g.id,
+            groupName: g.name,
+            subject: g.subject,
+            date: todayStr,
+            time: matchDay.time || g.time || "16:00",
+            durationMinutes: matchDay.durationMinutes || g.durationMinutes || 60,
+            status: "upcoming",
+            createdAt: g.createdAt || new Date().toISOString()
+          });
+        }
+      }
+    });
+
+    // 3. Scheduled active private lessons for today
+    const scheduledPrivateLessons: Lesson[] = [];
+    privateLessons.filter(p => p.status === "active").forEach(p => {
+      const matchDay = (p.scheduleSlots && p.scheduleSlots.length > 0)
+        ? p.scheduleSlots.find(s => normalizeDayName(s.day, true) === todayNormalizedDayAr || normalizeDayName(s.day, false) === todayNormalizedDayEn)
+        : (p.days && p.days.some(d => normalizeDayName(d, true) === todayNormalizedDayAr || normalizeDayName(d, false) === todayNormalizedDayEn)
+            ? { day: todayNormalizedDayAr, time: p.time, durationMinutes: p.durationMinutes }
+            : null);
+
+      if (matchDay) {
+        const alreadyExists = explicitToday.some(el => el.studentId === p.studentId || el.id === p.id);
+        if (!alreadyExists) {
+          scheduledPrivateLessons.push({
+            id: `sched_prv_${p.id}_${todayStr}`,
+            studyType: "private",
+            studentId: p.studentId,
+            studentName: p.studentName,
+            subject: p.subject,
+            date: todayStr,
+            time: matchDay.time || p.time || "16:00",
+            durationMinutes: matchDay.durationMinutes || p.durationMinutes || 60,
+            status: "upcoming",
+            createdAt: p.createdAt || new Date().toISOString()
+          });
+        }
+      }
+    });
+
+    const combined = [...explicitToday, ...scheduledGroupLessons, ...scheduledPrivateLessons];
+    return combined.sort((a, b) => {
+      const tA = parseTimeString(a.time);
+      const tB = parseTimeString(b.time);
+      return (tA.hour24 * 60 + tA.minute) - (tB.hour24 * 60 + tB.minute);
+    });
+  }, [lessons, activeGroups, privateLessons, todayStr, todayNormalizedDayAr, todayNormalizedDayEn]);
   
   // Calculate real-time financials for each active student
   const studentFinancialSummaries = activeStudents.map(student => ({
     student,
-    summary: calculateStudentFinancials(student, attendanceRecords)
+    summary: calculateStudentFinancials(student, attendanceRecords, paymentTransactions)
   }));
 
   const allUnpaidStudents = studentFinancialSummaries.filter(
@@ -156,8 +262,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </div>
 
-      {/* Metric Stat Cards Grid - 6 High-Density Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-2.5">
+      {/* Metric Stat Cards Grid - 5 High-Density Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-2.5">
         {/* Today's Lessons */}
         <div className="bg-white border border-slate-200/80 rounded-xl p-2.5 sm:p-3 shadow-2xs hover:shadow-xs transition">
           <div className="flex items-center justify-between mb-1">
@@ -231,22 +337,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </p>
         </div>
 
-        {/* Students Present Today */}
-        <div className="bg-white border border-slate-200/80 rounded-xl p-2.5 sm:p-3 shadow-2xs hover:shadow-xs transition">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[10px] sm:text-xs font-bold text-slate-500 truncate">
-              {isArabic ? "الحاضرون اليوم" : "Present Today"}
-            </span>
-            <div className="w-6 h-6 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold shrink-0">
-              <UserCheck className="w-3 h-3" />
-            </div>
-          </div>
-          <div className="text-lg sm:text-xl font-black text-emerald-700">{presentStudentsToday.length}</div>
-          <p className="text-[9px] sm:text-[10px] text-emerald-600 font-semibold truncate">
-            {isArabic ? "تم تسجيل حضورهم" : "Recorded"}
-          </p>
-        </div>
-
         {/* Payment Alerts */}
         <div
           onClick={() => onNavigateToTab("finance")}
@@ -309,7 +399,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 if (!isGroup) {
                   matchedStudent = students.find(
                     st => st.id === lesson.studentId || st.fullName === lesson.studentName
-                  ) || {
+                  ) || ({
                     id: lesson.studentId || "priv-st",
                     fullName: lesson.studentName || "الطالب",
                     parentContact: "",
@@ -317,8 +407,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     studyType: "private",
                     status: "active",
                     paymentStatus: "unpaid",
-                    lessonCost: 0
-                  };
+                    lessonCost: 0,
+                    totalPaidAmount: 0,
+                    createdAt: new Date().toISOString()
+                  } as Student);
                 } else if (lesson.groupId) {
                   const grp = groups.find(g => g.id === lesson.groupId);
                   if (grp && grp.studentIds && grp.studentIds.length > 0) {
@@ -341,7 +433,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                           {isGroup ? "👥" : "👤"}
                         </div>
                         <div>
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
                             <h3 className="font-bold text-slate-900 text-xs sm:text-sm">
                               {isGroup ? lesson.groupName : lesson.studentName}
                             </h3>
@@ -352,9 +444,32 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                             >
                               {isGroup ? (isArabic ? "مجموعة" : "Group") : (isArabic ? "خاص" : "Private")}
                             </span>
+                            {(() => {
+                              const attStatus = getTodayAttendanceStatus(
+                                !isGroup ? (lesson.studentId || matchedStudent?.id) : undefined,
+                                !isGroup ? lesson.studentName : undefined,
+                                lesson.subject
+                              );
+                              if (attStatus === "absent") {
+                                return (
+                                  <span className="px-1.5 py-0.2 rounded text-[9.5px] font-black bg-rose-100 text-rose-800 border border-rose-300 flex items-center gap-1 shadow-2xs">
+                                    <span>🔴</span>
+                                    <span>{isArabic ? "غائب" : "Absent"}</span>
+                                  </span>
+                                );
+                              } else if (attStatus === "present") {
+                                return (
+                                  <span className="px-1.5 py-0.2 rounded text-[9.5px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1 shadow-2xs">
+                                    <span>🟢</span>
+                                    <span>{isArabic ? "حاضر" : "Present"}</span>
+                                  </span>
+                                );
+                              }
+                              return null;
+                            })()}
                           </div>
                           <p className="text-[10.5px] text-slate-500 font-medium mt-0.5">
-                            {lesson.subject} • {lesson.time} ({lesson.durationMinutes} {isArabic ? "دقيقة" : "mins"})
+                            {lesson.subject} • {formatTimeRange(lesson.time, lesson.durationMinutes, isArabic)}
                           </p>
                         </div>
                       </div>
